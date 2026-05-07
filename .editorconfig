@@ -42,8 +42,10 @@ dotnet_diagnostic.IL3051.severity = error
 dotnet_diagnostic.IL3052.severity = error
 dotnet_diagnostic.IL3053.severity = error
 
-# Code-style cleanup
-dotnet_diagnostic.IDE0005.severity = warning
+# Code-style cleanup. IDE0005 (unused usings) requires GenerateDocumentationFile=true
+# to run on build; demoted to suggestion so the editor still surfaces it without
+# blocking the build pipeline.
+dotnet_diagnostic.IDE0005.severity = suggestion
 dotnet_diagnostic.IDE0044.severity = warning
 dotnet_diagnostic.IDE0055.severity = warning
 

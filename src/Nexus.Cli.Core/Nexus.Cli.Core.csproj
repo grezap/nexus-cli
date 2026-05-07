@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Nexus.Cli.Core</RootNamespace>
+    <AssemblyName>Nexus.Cli.Core</AssemblyName>
+    <Description>Domain types + interfaces for nexus-cli. BCL-only; AOT-safe.</Description>
+  </PropertyGroup>
+
+</Project>

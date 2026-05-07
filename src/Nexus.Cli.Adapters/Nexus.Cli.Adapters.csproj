@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Nexus.Cli.Adapters</RootNamespace>
+    <AssemblyName>Nexus.Cli.Adapters</AssemblyName>
+    <Description>HTTPS clients (Vault, Consul, Nomad, Portainer) + source-gen JSON contexts. AOT-safe.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Nexus.Cli.Core\Nexus.Cli.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- System.Net.Http.Json ships in .NET 10 BCL; no PackageReference needed. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+</Project>

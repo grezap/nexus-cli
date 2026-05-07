@@ -23,10 +23,6 @@
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.0" />
   </ItemGroup>
 
-  <ItemGroup Label="HTTP + JSON (AOT-safe via source generators)">
-    <PackageVersion Include="System.Net.Http.Json" Version="10.0.0" />
-  </ItemGroup>
-
   <ItemGroup Label="Test stack">
     <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
     <PackageVersion Include="xunit" Version="2.9.2" />
