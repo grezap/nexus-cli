@@ -87,7 +87,7 @@ jobs:
           "asset=dist/$name.${{ matrix.archive_ext }}" >> $env:GITHUB_OUTPUT
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.rid }}
           path: ${{ steps.pkg.outputs.asset }}

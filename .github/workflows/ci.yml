@@ -74,7 +74,7 @@ jobs:
 
       - name: Upload artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nexus-cli-${{ matrix.rid }}-${{ github.sha }}
           path: artifacts/${{ matrix.rid }}/*
