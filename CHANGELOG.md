@@ -6,6 +6,32 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-05-07
+
+### Fixed
+
+- **TLS chain validation** — the HTTP factory was loading every cert from the
+  CA bundle into `X509ChainPolicy.CustomTrustStore`, which mistakenly treats
+  intermediates as roots. The `nexus-cluster` cert chain is
+  `leaf → NexusPlatform Intermediate CA → NexusPlatform Root CA`, and the
+  bundle ships both. Live cluster-status against v0.1.1 returned
+  `net_http_ssl_connection_failed` because chain build refused the
+  intermediate-as-root. Fix: split the bundle on `Subject == Issuer`; roots
+  go to `CustomTrustStore`, intermediates to `ExtraStore` (per memory note
+  `feedback_smoke_gate_probe_robustness.md`).
+
+## [0.1.1] — 2026-05-07
+
+### Fixed
+
+- **`cluster-status`** — read Consul + Nomad bootstrap tokens from the
+  canonical `management_token` field on KV `nexus/swarm/{consul,nomad}-bootstrap-token`
+  (was incorrectly reading `value`). Live-cluster runs against the v0.1.0
+  binary failed with `Vault KV at nexus/swarm/consul-bootstrap-token has no
+  field 'value'`. The `management_token` field name matches the master
+  plan's pre-flight pattern (`vault kv get -field=management_token …`) and
+  the Phase 0.E.2.3 / 0.E.3.2 bootstrap persistence shape.
+
 ## [0.1.0] — 2026-05-07
 
 First public release of `grezap/nexus-cli` — the operator surface for the
@@ -43,5 +69,7 @@ NexusPlatform 66-VM lab (Phase 0.F slice 1 of the master plan).
 - `docs/verification/0.1.0-cluster-status.md` — live-cluster smoke output
   pasted by the operator after the v0.1.0 tag built.
 
-[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/grezap/nexus-cli/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/grezap/nexus-cli/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/grezap/nexus-cli/releases/tag/v0.1.0

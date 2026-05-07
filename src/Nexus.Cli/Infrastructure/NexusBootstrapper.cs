@@ -50,12 +50,15 @@ public sealed class NexusBootstrapper : IDisposable
         _httpFactory = new NexusHttpClientFactory(ctx.Value!.CaBundlePath);
         _vault = new VaultClient(ctx.Value, _httpFactory);
 
-        var consulToken = await _vault.ReadKvFieldAsync("nexus", ConsulMgmtTokenPath, "value", cancellationToken)
+        // Consul + Nomad bootstrap tokens are persisted under the `management_token`
+        // field (per Phase 0.E.2.3 / 0.E.3.2 close-out canon — same field name the
+        // master plan's pre-flight uses: `vault kv get -field=management_token ...`).
+        var consulToken = await _vault.ReadKvFieldAsync("nexus", ConsulMgmtTokenPath, "management_token", cancellationToken)
             .ConfigureAwait(false);
         if (consulToken.IsFail)
             throw new InvalidOperationException(consulToken.Error);
 
-        var nomadToken = await _vault.ReadKvFieldAsync("nexus", NomadMgmtTokenPath, "value", cancellationToken)
+        var nomadToken = await _vault.ReadKvFieldAsync("nexus", NomadMgmtTokenPath, "management_token", cancellationToken)
             .ConfigureAwait(false);
         if (nomadToken.IsFail)
             throw new InvalidOperationException(nomadToken.Error);

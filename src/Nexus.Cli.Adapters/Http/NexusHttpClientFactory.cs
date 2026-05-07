@@ -12,7 +12,8 @@ namespace Nexus.Cli.Adapters.Http;
 /// </summary>
 public sealed class NexusHttpClientFactory : IDisposable
 {
-    private readonly X509Certificate2Collection _trustRoots;
+    private readonly X509Certificate2Collection _roots = new();
+    private readonly X509Certificate2Collection _intermediates = new();
     private readonly TimeSpan _timeout;
     private readonly List<HttpClient> _clients = new();
 
@@ -22,8 +23,23 @@ public sealed class NexusHttpClientFactory : IDisposable
         if (!File.Exists(caBundlePath))
             throw new FileNotFoundException("CA bundle not found.", caBundlePath);
 
-        _trustRoots = new X509Certificate2Collection();
-        _trustRoots.ImportFromPemFile(caBundlePath);
+        // Load every cert from the PEM and split by self-signed vs intermediate.
+        // Custom trust mode requires only roots in CustomTrustStore;
+        // intermediates must go to ExtraStore for the chain builder to use.
+        var bundle = new X509Certificate2Collection();
+        bundle.ImportFromPemFile(caBundlePath);
+        foreach (var cert in bundle)
+        {
+            if (string.Equals(cert.Subject, cert.Issuer, StringComparison.Ordinal))
+                _roots.Add(cert);
+            else
+                _intermediates.Add(cert);
+        }
+
+        if (_roots.Count == 0)
+            throw new InvalidOperationException(
+                $"CA bundle '{caBundlePath}' contained no self-signed roots; cannot anchor TLS validation.");
+
         _timeout = timeout ?? TimeSpan.FromSeconds(10);
     }
 
@@ -66,9 +82,10 @@ public sealed class NexusHttpClientFactory : IDisposable
                 VerificationFlags = X509VerificationFlags.NoFlag
             }
         };
-        policyChain.ChainPolicy.CustomTrustStore.AddRange(_trustRoots);
+        policyChain.ChainPolicy.CustomTrustStore.AddRange(_roots);
+        policyChain.ChainPolicy.ExtraStore.AddRange(_intermediates);
 
-        // Stage any intermediates from the inbound chain so partial bundles still validate.
+        // Also stage any intermediates from the inbound chain so partial bundles still validate.
         if (chain is not null)
         {
             foreach (var element in chain.ChainElements)
@@ -84,6 +101,7 @@ public sealed class NexusHttpClientFactory : IDisposable
     {
         foreach (var c in _clients) c.Dispose();
         _clients.Clear();
-        foreach (var cert in _trustRoots) cert.Dispose();
+        foreach (var cert in _roots) cert.Dispose();
+        foreach (var cert in _intermediates) cert.Dispose();
     }
 }
