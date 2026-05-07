@@ -1,0 +1,40 @@
+# dotnet build outputs
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+
+# AOT publish + diagnostics
+publish/
+artifacts/
+*.mstat
+*.dgml
+*.codegen.cs
+*.ilc.rsp
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# Test runner
+TestResults/
+*.trx
+coverage/
+*.coverage
+*.coveragexml
+
+# benchmarks
+BenchmarkDotNet.Artifacts/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# secrets — never commit
+.env
+*.local.json
+secrets/
+*.pfx
+*.snk

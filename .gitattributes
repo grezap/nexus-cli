@@ -1,0 +1,23 @@
+* text=auto eol=lf
+
+*.ps1   text eol=crlf
+*.psm1  text eol=crlf
+*.psd1  text eol=crlf
+*.cmd   text eol=crlf
+*.bat   text eol=crlf
+
+*.cs       text eol=lf diff=csharp
+*.csproj   text eol=lf
+*.props    text eol=lf
+*.targets  text eol=lf
+*.sln      text eol=crlf
+
+*.png  binary
+*.jpg  binary
+*.gif  binary
+*.ico  binary
+*.zip  binary
+*.tar  binary
+*.gz   binary
+*.dll  binary
+*.exe  binary

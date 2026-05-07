@@ -1,0 +1,53 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{ps1,psm1,psd1,cmd,bat}]
+end_of_line = crlf
+
+[*.{md,yml,yaml,json}]
+indent_size = 2
+
+[*.{cs,csproj,props,targets,sln}]
+indent_size = 4
+
+# C# formatting
+[*.cs]
+csharp_new_line_before_open_brace = all
+csharp_indent_case_contents = true
+csharp_indent_switch_labels = true
+csharp_space_around_binary_operators = before_and_after
+csharp_using_directive_placement = outside_namespace:warning
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = false:silent
+dotnet_sort_system_directives_first = true
+
+# Trim / AOT analyzer warnings → errors. Exit gate is a 25 MB AOT binary;
+# every IL2026/IL3050/IL3053 lets reflection sneak in and bloat the output.
+dotnet_diagnostic.IL2026.severity = error
+dotnet_diagnostic.IL2046.severity = error
+dotnet_diagnostic.IL2050.severity = error
+dotnet_diagnostic.IL2070.severity = error
+dotnet_diagnostic.IL2072.severity = error
+dotnet_diagnostic.IL2075.severity = error
+dotnet_diagnostic.IL2104.severity = error
+dotnet_diagnostic.IL3050.severity = error
+dotnet_diagnostic.IL3051.severity = error
+dotnet_diagnostic.IL3052.severity = error
+dotnet_diagnostic.IL3053.severity = error
+
+# Code-style cleanup
+dotnet_diagnostic.IDE0005.severity = warning
+dotnet_diagnostic.IDE0044.severity = warning
+dotnet_diagnostic.IDE0055.severity = warning
+
+# tests can use reflection-heavier asserts
+[tests/**/*.cs]
+dotnet_diagnostic.IL2026.severity = none
+dotnet_diagnostic.IL3050.severity = none
