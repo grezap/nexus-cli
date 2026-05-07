@@ -13,6 +13,17 @@ updates:
       spectre:
         patterns:
           - "Spectre.*"
+    ignore:
+      # FluentAssertions 8.x changed to the Xceed Software Inc. commercial
+      # license (paid for commercial use). Stay on the 6.x MIT line.
+      # Re-evaluate deliberately when migrating off FluentAssertions entirely.
+      - dependency-name: "FluentAssertions"
+        update-types: ["version-update:semver-major"]
+      # Spectre.Console.Cli 0.55+ changed AsyncCommand<T>.ExecuteAsync to take
+      # a CancellationToken (breaking signature change across all 6 commands).
+      # Major bumps land via deliberate v0.2 prep, not weekly auto-PRs.
+      - dependency-name: "Spectre.Console*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: github-actions
     directory: /
