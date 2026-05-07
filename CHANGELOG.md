@@ -10,20 +10,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **TLS chain validation** — the HTTP factory was loading every cert from the
-  CA bundle into `X509ChainPolicy.CustomTrustStore`, which mistakenly treats
-  intermediates as roots. The `nexus-cluster` cert chain is
-  `leaf → NexusPlatform Intermediate CA → NexusPlatform Root CA`, and the
-  bundle ships both. Live cluster-status against v0.1.1 returned
-  `net_http_ssl_connection_failed` because chain build refused the
-  intermediate-as-root. Fix: split the bundle on `Subject == Issuer`; roots
-  go to `CustomTrustStore`, intermediates to `ExtraStore` (per memory note
-  `feedback_smoke_gate_probe_robustness.md`).
-
-## [0.1.1] — 2026-05-07
-
-### Fixed
-
 - **`cluster-status`** — read Consul + Nomad bootstrap tokens from the
   canonical `management_token` field on KV `nexus/swarm/{consul,nomad}-bootstrap-token`
   (was incorrectly reading `value`). Live-cluster runs against the v0.1.0
@@ -31,6 +17,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   field 'value'`. The `management_token` field name matches the master
   plan's pre-flight pattern (`vault kv get -field=management_token …`) and
   the Phase 0.E.2.3 / 0.E.3.2 bootstrap persistence shape.
+- **TLS chain validation** — the HTTP factory was loading every cert from
+  the CA bundle into `X509ChainPolicy.CustomTrustStore`, which mistakenly
+  treats intermediates as roots. The cluster cert chain is
+  `leaf → NexusPlatform Intermediate CA → NexusPlatform Root CA`, and a
+  bundle that ships both was returning `PartialChain` because the chain
+  builder refused the intermediate-as-root. Fix: split the bundle on
+  `Subject == Issuer`; roots go to `CustomTrustStore`, intermediates to
+  `ExtraStore` (per memory note `feedback_smoke_gate_probe_robustness.md`).
+- After both fixes, `cluster-status` renders the live 0.E.4 cluster cleanly
+  (Consul 6/6 alive, Nomad 3 servers + 3 ready clients). Verification
+  evidence in `docs/verification/0.1.0-cluster-status.md`. Portainer:9443
+  remains unreachable from the build host — separate cluster-side issue.
+
+> Note: a transient `0.1.1` version bump was made for the Vault-KV-field
+> fix alone, but the TLS-chain bug surfaced before tagging, so both fixes
+> shipped together as `0.1.2`. No `v0.1.1` GitHub Release exists.
 
 ## [0.1.0] — 2026-05-07
 
@@ -70,6 +72,5 @@ NexusPlatform 66-VM lab (Phase 0.F slice 1 of the master plan).
   pasted by the operator after the v0.1.0 tag built.
 
 [Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.1.2...HEAD
-[0.1.2]: https://github.com/grezap/nexus-cli/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/grezap/nexus-cli/compare/v0.1.0...v0.1.1
+[0.1.2]: https://github.com/grezap/nexus-cli/compare/v0.1.0...v0.1.2
 [0.1.0]: https://github.com/grezap/nexus-cli/releases/tag/v0.1.0
