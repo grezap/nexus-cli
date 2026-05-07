@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-05-07
+
+### Fixed
+
+- **Spectre glyph rendering on Windows pwsh.** The default code page (cp1252)
+  emitted `?` for `●`, `─`, and other box-drawing/status characters Spectre
+  uses, so the `cluster-status` overall-health badge and table borders showed
+  up garbled on Windows even though they rendered fine on Linux. Fix: force
+  `Console.OutputEncoding = Encoding.UTF8` at process start. No-op on Linux
+  (already UTF-8). Verified locally: `── ● RED  Cluster status …` now renders
+  the bullet glyph cleanly.
+
 ## [0.1.2] — 2026-05-07
 
 ### Fixed
@@ -71,6 +83,7 @@ NexusPlatform 66-VM lab (Phase 0.F slice 1 of the master plan).
 - `docs/verification/0.1.0-cluster-status.md` — live-cluster smoke output
   pasted by the operator after the v0.1.0 tag built.
 
-[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/grezap/nexus-cli/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/grezap/nexus-cli/compare/v0.1.0...v0.1.2
 [0.1.0]: https://github.com/grezap/nexus-cli/releases/tag/v0.1.0

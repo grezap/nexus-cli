@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Nexus.Cli.Commands;
 using Nexus.Cli.Infrastructure;
@@ -14,6 +15,11 @@ internal static class Program
         Justification = "Spectre.Console.Cli command/setting types are reachable via DI registration.")]
     public static async Task<int> Main(string[] args)
     {
+        // Force UTF-8 on stdout/stderr so Spectre's box-drawing + status glyphs (●, ─, etc.)
+        // render correctly on Windows pwsh, which defaults to cp1252 + would emit '?' for
+        // anything outside that page. No-op on Linux where stdout is already UTF-8.
+        Console.OutputEncoding = Encoding.UTF8;
+
         // Keeps the trimmer from dropping Command/Settings type metadata.
         AotRoots.KeepAlive();
 
@@ -24,7 +30,7 @@ internal static class Program
         app.Configure(config =>
         {
             config.SetApplicationName("nexus");
-            config.SetApplicationVersion("0.1.2");
+            config.SetApplicationVersion("0.1.3");
 
             config.AddCommand<ClusterStatusCommand>("cluster-status")
                 .WithDescription("Health of Consul + Nomad + Portainer in the live lab cluster.")
