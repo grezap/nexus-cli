@@ -14,6 +14,9 @@ internal static class Program
         Justification = "Spectre.Console.Cli command/setting types are reachable via DI registration.")]
     public static async Task<int> Main(string[] args)
     {
+        // Keeps the trimmer from dropping Command/Settings type metadata.
+        AotRoots.KeepAlive();
+
         var services = new ServiceCollection();
         var registrar = new TypeRegistrar(services);
 

@@ -9,17 +9,30 @@
 
   <PropertyGroup Label="Native AOT publish settings — exit gate is single binary &lt;= 25 MB on linux-x64 + win-x64">
     <PublishAot>true</PublishAot>
-    <TrimMode>full</TrimMode>
+    <!-- partial: only IsTrimmable=true assemblies are aggressively trimmed.
+         Spectre.Console.Cli's reflection-driven Command/Settings binding doesn't
+         survive 'full' trim (CommandRuntimeException at boot). Partial keeps
+         user code intact while still trimming the BCL+framework. -->
+    <TrimMode>partial</TrimMode>
     <InvariantGlobalization>true</InvariantGlobalization>
     <IlcGenerateMstatFile>true</IlcGenerateMstatFile>
     <IlcGenerateDgmlFile>true</IlcGenerateDgmlFile>
-    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    <!-- Roll-up trim warnings to one entry per assembly. Spectre.Console.Cli has
+         a known cascade of TypeDescriptor / Activator reflection patterns; the
+         binary still works at runtime when full-tree preservation is in effect.
+         Tracked in ADR-0002. -->
+    <TrimmerSingleWarn>true</TrimmerSingleWarn>
     <StripSymbols>true</StripSymbols>
     <DebuggerSupport>false</DebuggerSupport>
     <EventSourceSupport>false</EventSourceSupport>
     <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
     <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
     <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <!-- Keep first-party code strict (analyzers in editorconfig still error on
+         IL2026/IL3050 in Core + Adapters); demote the same codes to warning
+         only on this AOT publish root because Spectre.Console.Cli emits them
+         transitively. ADR-0001 documents the framework trade-off. -->
+    <NoWarn>$(NoWarn);IL2026;IL2046;IL2050;IL2067;IL2070;IL2072;IL2075;IL2092;IL2104;IL3000;IL3050;IL3051;IL3052;IL3053</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

@@ -14,7 +14,10 @@
   </PropertyGroup>
 
   <PropertyGroup Label="Trim/AOT analyzers always on for libs; AOT publish flags live on src/Nexus.Cli only">
-    <IsTrimmable>true</IsTrimmable>
+    <!-- Note: IsTrimmable on user assemblies is intentionally false so partial-
+         trim leaves our own code intact. The trim analyzer still runs (catches
+         IL2026/IL3050 in our code at compile time) without aggressive trim at
+         publish time. -->
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
