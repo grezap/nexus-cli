@@ -49,7 +49,9 @@ dotnet_diagnostic.IDE0005.severity = suggestion
 dotnet_diagnostic.IDE0044.severity = warning
 dotnet_diagnostic.IDE0055.severity = warning
 
-# tests can use reflection-heavier asserts
+# tests can use reflection-heavier asserts and underscore-named methods (xUnit convention)
 [tests/**/*.cs]
 dotnet_diagnostic.IL2026.severity = none
 dotnet_diagnostic.IL3050.severity = none
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA1861.severity = none
