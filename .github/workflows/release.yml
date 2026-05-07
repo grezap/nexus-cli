@@ -1,0 +1,125 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to (re)release (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.rid }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-x64
+            os: ubuntu-24.04
+            archive_ext: tar.gz
+            exe: nexus
+          - rid: win-x64
+            os: windows-2022
+            archive_ext: zip
+            exe: nexus.exe
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = '${{ github.event.inputs.tag || github.ref_name }}'
+          $ver = $tag -replace '^v',''
+          "version=$ver" >> $env:GITHUB_OUTPUT
+          "tag=$tag"     >> $env:GITHUB_OUTPUT
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
+      - name: Test
+        run: dotnet test -c Release --no-build
+
+      - name: Publish (Native AOT)
+        shell: pwsh
+        run: |
+          dotnet publish src/Nexus.Cli/Nexus.Cli.csproj `
+            -c Release -r ${{ matrix.rid }} `
+            -o artifacts/${{ matrix.rid }}
+
+      - name: Size budget
+        shell: pwsh
+        run: pwsh -File scripts/cli.ps1 size-check -Rid ${{ matrix.rid }}
+
+      - name: Package archive
+        id: pkg
+        shell: pwsh
+        run: |
+          $rid     = '${{ matrix.rid }}'
+          $version = '${{ steps.ver.outputs.version }}'
+          $name    = "nexus-cli-$version-$rid"
+          $src     = "artifacts/$rid"
+          $files   = @("LICENSE", "README.md", "CHANGELOG.md")
+          foreach ($f in $files) { Copy-Item $f $src/ }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          if ('${{ matrix.archive_ext }}' -eq 'zip') {
+            Compress-Archive -Path "$src/*" -DestinationPath "dist/$name.zip"
+          } else {
+            tar -C $src -czf "dist/$name.tar.gz" .
+          }
+          "asset=dist/$name.${{ matrix.archive_ext }}" >> $env:GITHUB_OUTPUT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.rid }}
+          path: ${{ steps.pkg.outputs.asset }}
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Attach to GitHub Release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List
+        run: ls -la dist/
+
+      - name: Resolve tag
+        id: ver
+        run: echo "tag=${{ github.event.inputs.tag || github.ref_name }}" >> $GITHUB_OUTPUT
+
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: ${{ startsWith(steps.ver.outputs.tag, 'v0.') }}
