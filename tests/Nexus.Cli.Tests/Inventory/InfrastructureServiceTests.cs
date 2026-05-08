@@ -15,8 +15,42 @@ public class InfrastructureServiceTests
     [InlineData(true, true, false, true, VmRuntimeState.Running)]
     [InlineData(true, true, true, false, VmRuntimeState.Suspended)]
     [InlineData(true, true, false, false, VmRuntimeState.Stopped)]
-    public void ClassifyState_Truth_Table(bool vmrun, bool vmx, bool vmss, bool inRunning, VmRuntimeState expected)
-        => InfrastructureService.ClassifyState(vmrun, vmx, vmss, inRunning).Should().Be(expected);
+    public void ClassifyState_Truth_Table(bool vmrun, bool vmx, bool hasSuspendedSidecar, bool inRunning, VmRuntimeState expected)
+        => InfrastructureService.ClassifyState(vmrun, vmx, hasSuspendedSidecar, inRunning).Should().Be(expected);
+
+    [Fact]
+    public async Task SuspendAsync_Recognises_Session_Suffixed_Vmem_As_Already_Suspended()
+    {
+        // Real-world file shape on Workstation Pro 17.5+: vault-3-3c85c1f6.vmem
+        // (session UUID suffix); the un-suffixed vault-3.vmem rarely exists.
+        var dir = Path.Combine(Path.GetTempPath(), $"nexus-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var nodeDir = Path.Combine(dir, "vault-3"); Directory.CreateDirectory(nodeDir);
+            var vmx = Path.Combine(nodeDir, "vault-3.vmx"); File.WriteAllText(vmx, "");
+            File.WriteAllText(Path.Combine(nodeDir, "vault-3-3c85c1f6.vmem"), "");
+
+            var catalog = new FakeCatalog(new ClusterRecord("test", "p", "0.X", new[]
+            {
+                new NodeRecord("vault-3", "deb13", "1", "2", nodeDir, "n/a")
+            }));
+            var vmrun = new RecordingVmrun();
+            var svc = new InfrastructureService(catalog, vmrun);
+
+            var r = await svc.SuspendAsync("test", null, default);
+            r.IsOk.Should().BeTrue();
+            var ops = r.Value!;
+            ops.Should().ContainSingle();
+            ops[0].Success.Should().BeTrue();
+            ops[0].Message.Should().Be("already suspended");
+            vmrun.SuspendCalls.Should().BeEmpty("VM has session-suffixed .vmem; suspend is a no-op");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 
     [Fact]
     public async Task StatusAsync_Filters_To_Single_Node()

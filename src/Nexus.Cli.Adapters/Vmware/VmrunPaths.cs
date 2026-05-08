@@ -32,8 +32,35 @@ public static class VmrunPaths
     public static string GetVmxPath(string dir, string name)
         => Path.Combine(dir, name + ".vmx");
 
+    /// <summary>Canonical un-suffixed .vmss path. Older Workstation versions emit this.</summary>
     public static string GetVmssSidecar(string vmxPath)
         => Path.ChangeExtension(vmxPath, ".vmss");
+
+    /// <summary>Canonical un-suffixed .vmem path. Older Workstation versions emit this.</summary>
+    public static string GetVmemSidecar(string vmxPath)
+        => Path.ChangeExtension(vmxPath, ".vmem");
+
+    /// <summary>
+    /// True if the VM has on-disk evidence of preserved memory state
+    /// (suspended, not stopped). Workstation Pro 17.5+ session-suffixes the
+    /// memory paging file: e.g. <c>vault-3-3c85c1f6.vmem</c> rather than
+    /// <c>vault-3.vmem</c>. Directory-prefix search catches both shapes
+    /// plus the canonical un-suffixed .vmss/.vmem from older versions.
+    /// Combined with "not in vmrun list" (= not currently running), the
+    /// presence of ANY <c>&lt;basename&gt;*.vmem</c> or <c>&lt;basename&gt;*.vmss</c>
+    /// indicates a suspended VM.
+    /// </summary>
+    public static bool HasSuspendedStateSidecar(string vmxPath)
+    {
+        var dir = Path.GetDirectoryName(vmxPath);
+        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+            return false;
+        var baseName = Path.GetFileNameWithoutExtension(vmxPath);
+        if (string.IsNullOrEmpty(baseName))
+            return false;
+        return Directory.EnumerateFiles(dir, $"{baseName}*.vmem").Any()
+            || Directory.EnumerateFiles(dir, $"{baseName}*.vmss").Any();
+    }
 
     public static string UnavailableMessage()
         => OperatingSystem.IsWindows()

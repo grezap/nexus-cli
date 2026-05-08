@@ -155,12 +155,12 @@ public sealed class InfrastructureService : IInfrastructureService
         var state = ClassifyState(
             vmrunAvailable: running is not null,
             vmxExists: File.Exists(vmx),
-            vmssExists: File.Exists(VmrunPaths.GetVmssSidecar(vmx)),
+            hasSuspendedSidecar: VmrunPaths.HasSuspendedStateSidecar(vmx),
             inRunningSet: running is not null && running.Contains(vmx));
         return new VmStatus(clusterName, node, state, vmx);
     }
 
-    internal static VmRuntimeState ClassifyState(bool vmrunAvailable, bool vmxExists, bool vmssExists, bool inRunningSet)
+    internal static VmRuntimeState ClassifyState(bool vmrunAvailable, bool vmxExists, bool hasSuspendedSidecar, bool inRunningSet)
     {
         if (!vmrunAvailable)
             return VmRuntimeState.Unknown;
@@ -168,7 +168,7 @@ public sealed class InfrastructureService : IInfrastructureService
             return VmRuntimeState.Missing;
         if (inRunningSet)
             return VmRuntimeState.Running;
-        if (vmssExists)
+        if (hasSuspendedSidecar)
             return VmRuntimeState.Suspended;
         return VmRuntimeState.Stopped;
     }

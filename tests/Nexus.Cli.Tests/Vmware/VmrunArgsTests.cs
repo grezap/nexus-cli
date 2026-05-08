@@ -66,6 +66,55 @@ H:\VMS\foo.vmx");
             .Should().Be(@"H:\VMS\foo\bar.vmss");
 
     [Fact]
+    public void GetVmemSidecar_Replaces_Vmx_Extension()
+        => VmrunPaths.GetVmemSidecar(@"H:\VMS\foo\bar.vmx")
+            .Should().Be(@"H:\VMS\foo\bar.vmem");
+
+    [Fact]
+    public void HasSuspendedStateSidecar_Detects_Suffixed_And_Unsuffixed_Vmss_Or_Vmem()
+    {
+        // Each VM lives in its own subdir per the vmware_per_vm_folders canon,
+        // so the directory-prefix search is bounded.
+        var root = Path.Combine(Path.GetTempPath(), $"nexus-suspend-{Guid.NewGuid():N}");
+        try
+        {
+            // 1) bare .vmx, no sidecars: stopped
+            var d1 = Path.Combine(root, "stopped"); Directory.CreateDirectory(d1);
+            var vmx1 = Path.Combine(d1, "stopped.vmx"); File.WriteAllText(vmx1, "");
+            VmrunPaths.HasSuspendedStateSidecar(vmx1).Should().BeFalse();
+
+            // 2) un-suffixed .vmss next to .vmx (older Workstation)
+            var d2 = Path.Combine(root, "vmss-bare"); Directory.CreateDirectory(d2);
+            var vmx2 = Path.Combine(d2, "vmss-bare.vmx"); File.WriteAllText(vmx2, "");
+            File.WriteAllText(Path.Combine(d2, "vmss-bare.vmss"), "");
+            VmrunPaths.HasSuspendedStateSidecar(vmx2).Should().BeTrue();
+
+            // 3) un-suffixed .vmem (older Workstation)
+            var d3 = Path.Combine(root, "vmem-bare"); Directory.CreateDirectory(d3);
+            var vmx3 = Path.Combine(d3, "vmem-bare.vmx"); File.WriteAllText(vmx3, "");
+            File.WriteAllText(Path.Combine(d3, "vmem-bare.vmem"), "");
+            VmrunPaths.HasSuspendedStateSidecar(vmx3).Should().BeTrue();
+
+            // 4) session-suffixed .vmem (Workstation Pro 17.5+, the real-world case)
+            var d4 = Path.Combine(root, "session"); Directory.CreateDirectory(d4);
+            var vmx4 = Path.Combine(d4, "vault-3.vmx"); File.WriteAllText(vmx4, "");
+            File.WriteAllText(Path.Combine(d4, "vault-3-3c85c1f6.vmem"), "");
+            VmrunPaths.HasSuspendedStateSidecar(vmx4).Should().BeTrue();
+
+            // 5) session-suffixed .vmss
+            var d5 = Path.Combine(root, "session-vmss"); Directory.CreateDirectory(d5);
+            var vmx5 = Path.Combine(d5, "node.vmx"); File.WriteAllText(vmx5, "");
+            File.WriteAllText(Path.Combine(d5, "node-deadbeef.vmss"), "");
+            VmrunPaths.HasSuspendedStateSidecar(vmx5).Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void UnavailableMessage_Mentions_PathEnvVar_On_Windows()
     {
         if (OperatingSystem.IsWindows())
