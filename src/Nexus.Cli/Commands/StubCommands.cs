@@ -18,19 +18,6 @@ internal abstract class StubCommandBase<TSettings> : Command<TSettings>
     }
 }
 
-public sealed class InfrastructureSettings : CommandSettings
-{
-    [CommandArgument(0, "[verb]")]
-    [Description("Verb (suspend|resume|status|list)")]
-    public string? Verb { get; set; }
-}
-
-internal sealed class InfrastructureCommand : StubCommandBase<InfrastructureSettings>
-{
-    protected override string Name => "infrastructure";
-    protected override string PlannedVersion => "v0.2.0";
-}
-
 public sealed class FailoverTestSettings : CommandSettings
 {
     [CommandArgument(0, "[scenario]")]

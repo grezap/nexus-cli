@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Nexus.Cli.Commands;
+using Nexus.Cli.Commands.Infrastructure;
 using Nexus.Cli.Infrastructure;
 using Spectre.Console.Cli;
 
@@ -30,15 +31,25 @@ internal static class Program
         app.Configure(config =>
         {
             config.SetApplicationName("nexus");
-            config.SetApplicationVersion("0.1.3");
+            config.SetApplicationVersion("0.2.0");
 
             config.AddCommand<ClusterStatusCommand>("cluster-status")
                 .WithDescription("Health of Consul + Nomad + Portainer in the live lab cluster.")
                 .WithExample(["cluster-status"])
                 .WithExample(["cluster-status", "--json"]);
 
-            config.AddCommand<InfrastructureCommand>("infrastructure")
-                .WithDescription("(stub, v0.2) Suspend/resume/status of VM groups.");
+            config.AddBranch("infrastructure", infra =>
+            {
+                infra.SetDescription("Suspend/resume/status of VMware Workstation VM groups defined in vms.yaml.");
+                infra.AddCommand<InfrastructureListCommand>("list")
+                    .WithDescription("List every VM in vms.yaml decorated with live VMware state.")
+                    .WithExample(["infrastructure", "list"])
+                    .WithExample(["infrastructure", "list", "--json"]);
+                infra.AddCommand<InfrastructureStatusCommand>("status")
+                    .WithDescription("Show live state of one cluster (and optionally a single node).")
+                    .WithExample(["infrastructure", "status", "foundation"])
+                    .WithExample(["infrastructure", "status", "foundation", "--node", "vault-1"]);
+            });
 
             config.AddCommand<FailoverTestCommand>("failover-test")
                 .WithDescription("(stub, v0.3) Drive a manager loss + raft re-election; measure RTO.");
