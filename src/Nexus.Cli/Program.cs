@@ -49,6 +49,16 @@ internal static class Program
                     .WithDescription("Show live state of one cluster (and optionally a single node).")
                     .WithExample(["infrastructure", "status", "foundation"])
                     .WithExample(["infrastructure", "status", "foundation", "--node", "vault-1"]);
+                infra.AddCommand<InfrastructureSuspendCommand>("suspend")
+                    .WithAlias("suspend-cluster")
+                    .WithDescription("Suspend every (or one) running VM in a cluster. Aliased as 'suspend-cluster' per master plan §5.3.")
+                    .WithExample(["infrastructure", "suspend", "foundation"])
+                    .WithExample(["infrastructure", "suspend", "foundation", "--node", "vault-3", "--yes"])
+                    .WithExample(["infrastructure", "suspend-cluster", "foundation", "--yes"]);
+                infra.AddCommand<InfrastructureResumeCommand>("resume")
+                    .WithDescription("Resume every (or one) stopped/suspended VM in a cluster.")
+                    .WithExample(["infrastructure", "resume", "foundation"])
+                    .WithExample(["infrastructure", "resume", "foundation", "--node", "vault-3", "--yes"]);
             });
 
             config.AddCommand<FailoverTestCommand>("failover-test")

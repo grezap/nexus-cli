@@ -27,6 +27,10 @@ internal static class AotRoots
     [DynamicDependency(SettingsRoots, typeof(InfrastructureListSettings))]
     [DynamicDependency(CommandRoots, typeof(InfrastructureStatusCommand))]
     [DynamicDependency(SettingsRoots, typeof(InfrastructureStatusSettings))]
+    [DynamicDependency(CommandRoots, typeof(InfrastructureSuspendCommand))]
+    [DynamicDependency(SettingsRoots, typeof(InfrastructureSuspendSettings))]
+    [DynamicDependency(CommandRoots, typeof(InfrastructureResumeCommand))]
+    [DynamicDependency(SettingsRoots, typeof(InfrastructureResumeSettings))]
 
     [DynamicDependency(SettingsRoots, typeof(FailoverTestSettings))]
     [DynamicDependency(SettingsRoots, typeof(KafkaFailoverSettings))]

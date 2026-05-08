@@ -26,3 +26,22 @@ public sealed class InfrastructureStatusSettings : InfrastructureSettingsBase
     [Description("Restrict to a single node name within the cluster.")]
     public string? Node { get; set; }
 }
+
+public abstract class InfrastructureMutationSettingsBase : InfrastructureSettingsBase
+{
+    [CommandArgument(0, "<cluster>")]
+    [Description("Cluster name as listed in vms.yaml.")]
+    public string Cluster { get; set; } = "";
+
+    [CommandOption("-n|--node")]
+    [Description("Restrict to a single node within the cluster.")]
+    public string? Node { get; set; }
+
+    [CommandOption("-y|--yes")]
+    [Description("Skip the interactive confirmation prompt.")]
+    public bool Yes { get; set; }
+}
+
+public sealed class InfrastructureSuspendSettings : InfrastructureMutationSettingsBase;
+
+public sealed class InfrastructureResumeSettings : InfrastructureMutationSettingsBase;
