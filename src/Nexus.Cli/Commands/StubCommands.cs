@@ -10,10 +10,10 @@ internal abstract class StubCommandBase<TSettings> : Command<TSettings>
     protected abstract string Name { get; }
     protected abstract string PlannedVersion { get; }
 
-    public override int Execute(CommandContext context, TSettings settings)
+    protected override int Execute(CommandContext context, TSettings settings, CancellationToken cancellationToken)
     {
         AnsiConsole.MarkupLineInterpolated(
-            $"[yellow]{Name}[/] is not implemented in v0.1.0 — planned for [bold]{PlannedVersion}[/]. See the roadmap in README.md.");
+            $"[yellow]{Name}[/] is not yet implemented — planned for [bold]{PlannedVersion}[/]. See the roadmap in README.md.");
         return 0;
     }
 }

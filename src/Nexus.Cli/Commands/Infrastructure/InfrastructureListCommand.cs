@@ -6,13 +6,17 @@ namespace Nexus.Cli.Commands.Infrastructure;
 
 public sealed class InfrastructureListCommand : AsyncCommand<InfrastructureListSettings>
 {
-    public override async Task<int> ExecuteAsync(CommandContext context, InfrastructureListSettings settings)
+    protected override async Task<int> ExecuteAsync(
+        CommandContext context,
+        InfrastructureListSettings settings,
+        CancellationToken cancellationToken)
     {
         if (settings.NoColor)
             AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.NoColors;
 
         using var bootstrapper = new InfrastructureBootstrapper();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(30));
 
         var service = bootstrapper.BuildService();
         var rows = await service.ListAsync(cts.Token).ConfigureAwait(false);

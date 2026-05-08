@@ -11,13 +11,15 @@ internal static class InfrastructureMutate
     public static async Task<int> RunAsync(
         string verb,
         InfrastructureMutationSettingsBase settings,
-        Func<IInfrastructureService, CancellationToken, Task<Result<IReadOnlyList<OpResult>>>> action)
+        Func<IInfrastructureService, CancellationToken, Task<Result<IReadOnlyList<OpResult>>>> action,
+        CancellationToken cancellationToken)
     {
         if (settings.NoColor)
             AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.NoColors;
 
         using var bootstrapper = new InfrastructureBootstrapper();
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromMinutes(2));
         var service = bootstrapper.BuildService();
 
         var preview = await service.StatusAsync(settings.Cluster, settings.Node, cts.Token).ConfigureAwait(false);

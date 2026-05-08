@@ -25,7 +25,10 @@ public sealed class ClusterStatusSettings : CommandSettings
 
 public sealed class ClusterStatusCommand : AsyncCommand<ClusterStatusSettings>
 {
-    public override async Task<int> ExecuteAsync(CommandContext context, ClusterStatusSettings settings)
+    protected override async Task<int> ExecuteAsync(
+        CommandContext context,
+        ClusterStatusSettings settings,
+        CancellationToken cancellationToken)
     {
         if (settings.NoColor)
             AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.NoColors;
@@ -36,7 +39,8 @@ public sealed class ClusterStatusCommand : AsyncCommand<ClusterStatusSettings>
         ClusterStatusReport report;
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
             var service = await bootstrapper.BuildClusterStatusServiceAsync(cts.Token);
             report = await service.GetStatusAsync(cts.Token);
         }

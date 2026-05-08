@@ -6,8 +6,8 @@
   </PropertyGroup>
 
   <ItemGroup Label="CLI framework">
-    <PackageVersion Include="Spectre.Console.Cli" Version="0.50.0" />
-    <PackageVersion Include="Spectre.Console" Version="0.50.0" />
+    <PackageVersion Include="Spectre.Console.Cli" Version="0.55.0" />
+    <PackageVersion Include="Spectre.Console" Version="0.55.0" />
   </ItemGroup>
 
   <ItemGroup Label="Microsoft.Extensions hosting + DI + logging + config (net10)">
