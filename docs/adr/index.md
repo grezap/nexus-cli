@@ -10,3 +10,4 @@
 | [ADR-0003](ADR-0003-three-project-layout.md) | Accepted | 3-project layered solution enforced by NetArchTest |
 | [ADR-0004](ADR-0004-vault-token-from-env.md) | Accepted | Auth model: consume operator's `VAULT_TOKEN` from env; no embedded creds |
 | [ADR-0005](ADR-0005-dapper-on-aot.md) | Accepted | Dapper + FluentMigrator on AOT paths (future DB I/O) |
+| [ADR-0006](ADR-0006-handrolled-vms-yaml-reader.md) | Accepted | Hand-rolled vms.yaml flow-mapping reader (no YamlDotNet) |

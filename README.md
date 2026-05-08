@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.F%20v0.1.0%20alpha-yellow)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.F%20v0.2.0-yellow)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,7 +12,7 @@ The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB N
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.1.0 alpha):** `cluster-status` shipped as the first vertical slice — read-only HTTPS introspection of Consul, Nomad, and Portainer with mgmt tokens resolved on demand from Vault KV. The other four master-plan commands (`infrastructure`, `failover-test`, `kafka failover`, `demo run/record`) are stubs that print a "not yet implemented in v0.1" banner.
+> **Current state (v0.2.0):** Two of five master-plan verbs now ship — `cluster-status` (live HTTPS introspection of Consul + Nomad + Portainer; v0.1) and **`infrastructure {list, status, suspend, resume}`** (VMware Workstation control via vmrun.exe + a hand-rolled `vms.yaml` reader; v0.2). Verified end-to-end against the live 0.E.4 cluster including a destructive `suspend` → `resume` round-trip on `foundation/vault-3`. The remaining three verbs (`failover-test`, `kafka failover`, `demo run/record`) are stubs.
 
 ## What's in here
 
@@ -29,7 +29,10 @@ The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB N
 | Command | Status | Slice |
 |---|---|---|
 | `nexus cluster-status` | ✅ v0.1.0 | Live HTTPS to Consul + Nomad + Portainer; tabular health summary |
-| `nexus infrastructure` | 🟡 stub | Suspend / resume / status of Workstation Pro VM groups (planned v0.2) |
+| `nexus infrastructure list` | ✅ v0.2.0 | Whole-fleet table from `vms.yaml` decorated with live VMware state |
+| `nexus infrastructure status <cluster>` | ✅ v0.2.0 | Single-cluster (or single-node via `--node`) state view |
+| `nexus infrastructure suspend <cluster>` | ✅ v0.2.0 | `vmrun suspend` with confirm prompt + per-VM glyph; aliased as `suspend-cluster` |
+| `nexus infrastructure resume <cluster>` | ✅ v0.2.0 | `vmrun start <vmx> nogui` for every stopped/suspended VM in scope |
 | `nexus failover-test` | 🟡 stub | Drive a manager loss + raft re-election, measure RTO (planned v0.3) |
 | `nexus kafka failover` | 🟡 stub | East→West DR via MM2 (planned alongside Phase 0.H) |
 | `nexus demo run \| record` | 🟡 stub | Idempotent demo orchestrator + VHS/Playwright recorder (planned v0.4) |
@@ -50,6 +53,14 @@ vault login -method=ldap username=nexusadmin
 
 # 3) JSON for scripting
 .\nexus.exe cluster-status --json | ConvertFrom-Json
+
+# 4) Drive Workstation VMs via vms.yaml (v0.2)
+$env:NEXUS_VMS_YAML = "$HOME\src\nexus-platform-plan\docs\infra\vms.yaml"
+.\nexus.exe infrastructure list                           # whole fleet
+.\nexus.exe infrastructure status foundation              # one cluster
+.\nexus.exe infrastructure suspend foundation --yes       # vmrun suspend
+.\nexus.exe infrastructure suspend-cluster foundation --yes  # alias
+.\nexus.exe infrastructure resume  foundation --yes
 ```
 
 Expected output (live 0.E.4 cluster, 2026-05-07):
@@ -101,10 +112,12 @@ Verbs supported by `scripts/cli.ps1`: `build`, `publish`, `test`, `lint`, `clean
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `VAULT_TOKEN` | yes | Operator's Vault token (from `vault login`) |
-| `VAULT_ADDR`  | yes | e.g. `https://192.168.70.121:8200` |
-| `VAULT_CACERT` | yes (or `NEXUS_CA_BUNDLE`) | Path to PEM bundle of the lab root CA |
+| `VAULT_TOKEN` | `cluster-status` | Operator's Vault token (from `vault login`) |
+| `VAULT_ADDR`  | `cluster-status` | e.g. `https://192.168.70.121:8200` |
+| `VAULT_CACERT` | `cluster-status` (or `NEXUS_CA_BUNDLE`) | Path to PEM bundle of the lab root CA |
 | `NEXUS_CA_BUNDLE` | no | Override; same shape as `VAULT_CACERT` |
+| `NEXUS_VMS_YAML` | `infrastructure` (recommended) | Absolute path to `nexus-platform-plan/docs/infra/vms.yaml`. If unset, falls back to `../nexus-platform-plan/docs/infra/vms.yaml` from the cwd. |
+| `NEXUS_VMRUN_PATH` | no | Override `vmrun.exe` discovery. Defaults to the canonical Workstation Pro install paths on Windows. |
 
 The CLI **does not** call `vault login` for you — manage your token externally (per ADR-0004).
 
@@ -140,8 +153,9 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Five ADRs ship with v0.1.
 
 | Version | Scope |
 |---|---|
-| **v0.1.0** | `cluster-status` — Consul + Nomad + Portainer read-only; AOT pipeline; size budget; CI |
-| v0.2.0 | `infrastructure suspend/resume`; `winget` manifest; `.deb`; `--watch` flag |
+| v0.1.0 | `cluster-status` — Consul + Nomad + Portainer read-only; AOT pipeline; size budget; CI |
+| **v0.2.0** | `infrastructure {list, status, suspend, resume}` + `suspend-cluster` alias; vmrun.exe adapter; hand-rolled vms.yaml reader (ADR-0006) |
+| v0.2.x | Spectre.Console.Cli 0.55 bump (breaking-change adoption); `winget` manifest; `.deb`; `--watch` flag; refined suspended-vs-stopped state heuristic |
 | v0.3.0 | `failover-test`; SSH client + raft introspection |
 | v0.4.0 | `demo run/record` — VHS .tape orchestration + Playwright bridge |
 | v0.5.0 | `kafka failover` — pairs with Phase 0.H Kafka ecosystem |

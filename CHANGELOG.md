@@ -6,6 +6,87 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-08
+
+Phase 0.F slice 2: the `infrastructure` verb ships in full.
+
+### Added
+
+- **`nexus infrastructure list`** — render the entire fleet declared in
+  `nexus-platform-plan/docs/infra/vms.yaml` as a Spectre table decorated
+  with live VMware state (`running` / `suspended` / `stopped` / `missing`
+  / `unknown`). 81 VMs across 12 clusters in the canonical file; the live
+  build host returns a mix of running (the 0.E.4-deployed nodes) and
+  missing (planned-but-not-deployed clusters such as kafka-east, starrocks,
+  clickhouse).
+- **`nexus infrastructure status <cluster> [--node X]`** — single-cluster
+  view, optionally filtered to one node. Same state-decoration logic as
+  `list` but bigger column widths and full `.vmx` paths.
+- **`nexus infrastructure suspend <cluster> [--node X] [--yes]`** —
+  `vmrun.exe suspend` for every running VM in scope. Pre-flight: shows the
+  exact list of VMs about to be touched and asks for interactive
+  confirmation (default *no*); `--yes` skips the prompt for scripted /
+  CI use; non-interactive shells (stdin redirected) abort with exit 3
+  unless `--yes` is passed. Idempotent: VMs already stopped/suspended
+  return Ok with `already X` instead of failing.
+- **`nexus infrastructure suspend-cluster <cluster>`** — Spectre alias of
+  `suspend`. Mirrors master plan §5.3:245's literal panic-button wording.
+- **`nexus infrastructure resume <cluster> [--node X] [--yes]`** —
+  symmetric to `suspend`; `vmrun.exe start <vmx> nogui` for every
+  stopped/suspended VM in scope.
+- **`--json` on every infrastructure verb** — source-gen JSON via
+  `NexusJsonContext` (no reflection); shapes documented in
+  `Nexus.Cli.Adapters.Json` (`InfrastructureListJsonOutput`,
+  `InfrastructureStatusJsonOutput`, `InfrastructureOpsJsonOutput`).
+- **Hand-rolled `vms.yaml` flow-mapping reader** — `VmsYamlCatalog` in
+  `Nexus.Cli.Adapters.Inventory`. ~150 LOC, BCL-only, AOT-clean. Tolerates
+  the canon's two top-level `clusters:` roots (merged in file order) and
+  quoted strings containing commas. Path discovery: explicit ctor arg →
+  `NEXUS_VMS_YAML` env → sibling-repo fallback. Decision recorded in
+  ADR-0006.
+- **`vmrun.exe` adapter** — `VmrunProcessClient` in
+  `Nexus.Cli.Adapters.Vmware`; uses `ProcessStartInfo.ArgumentList` (no
+  shell escape ambiguity). `VmrunPaths` centralises path discovery
+  (`NEXUS_VMRUN_PATH` env override + canonical Workstation install paths)
+  and provides .vmx / .vmss helpers. On Linux + macOS, `Resolve()`
+  returns `null` and every call short-circuits with a clear
+  "vmrun.exe is Windows-only" message; nothing is spawned.
+- **`InfrastructureBootstrapper`** in `Nexus.Cli.Infrastructure` — the
+  no-Vault parallel of `NexusBootstrapper`. Wires `VmsYamlCatalog` +
+  `VmrunProcessClient` + `InfrastructureService` for the four leaf
+  commands. Reuses the existing `TypeRegistrar` + `AotRoots` plumbing.
+- **15 new unit tests** — YAML parser fixtures (8), vmrun argv +
+  parser (12), service truth-table + filtering (8), JSON contracts
+  (3 new). 51 unit tests total, up from 36.
+- **ADR-0006** — hand-rolled vms.yaml reader rationale.
+- **`docs/verification/0.2.0-infrastructure.md`** — acceptance evidence
+  including live suspend / resume round-trip on `foundation/vault-3`.
+
+### Changed
+
+- **Stub `infrastructure` command removed.** The four leaves replace it.
+- **`scripts/cli.ps1`** path discovery: works from any cwd via absolute
+  path; no functional change.
+- **Version** bumped 0.1.3 → 0.2.0.
+
+### Deferred to v0.2.x
+
+- **Spectre.Console.Cli 0.55 bump** (AsyncCommand<T>.ExecuteAsync gains a
+  CancellationToken parameter; touches all 6 commands). Kept on 0.50 for
+  v0.2.0 to keep the new-feature commit clean from breaking-change
+  adoption. Tracked separately.
+- **Suspended-vs-stopped state inference refinement.** Current heuristic
+  (`File.Exists(vmxPath.replace_extension(".vmss"))`) is best-effort;
+  VMware Workstation Pro 17.5+ does not always emit `.vmss` next to
+  `.vmx` after `suspend`, so the post-suspend status currently shows
+  `stopped`. Functional behaviour is correct (the VM does suspend, RAM
+  state is preserved, `resume` recovers running state); only the label
+  is approximate. Refinement deferred to v0.3.
+- **Linux runtime probing.** `list` works catalog-only on Linux (every
+  state renders `unknown`); `status`/`suspend`/`resume` exit 2 with the
+  Windows-only-build-host message. Deferred until a Linux operator
+  workstation exists in the fleet.
+
 ## [0.1.3] — 2026-05-07
 
 ### Fixed
@@ -83,7 +164,8 @@ NexusPlatform 66-VM lab (Phase 0.F slice 1 of the master plan).
 - `docs/verification/0.1.0-cluster-status.md` — live-cluster smoke output
   pasted by the operator after the v0.1.0 tag built.
 
-[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/grezap/nexus-cli/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/grezap/nexus-cli/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/grezap/nexus-cli/compare/v0.1.0...v0.1.2
 [0.1.0]: https://github.com/grezap/nexus-cli/releases/tag/v0.1.0
