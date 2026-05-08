@@ -77,7 +77,9 @@ internal static class InfrastructureRender
         foreach (var o in ops)
         {
             var glyph = o.Success ? "[green]✓[/]" : "[red]✗[/]";
-            AnsiConsole.MarkupLineInterpolated($"  {glyph} {o.NodeName,-22} {Markup.Escape(o.Message)}");
+            // MarkupLine (not MarkupLineInterpolated) so the pre-rendered glyph
+            // markup parses; user-controlled fields are still explicitly escaped.
+            AnsiConsole.MarkupLine($"  {glyph} {Markup.Escape(o.NodeName),-22} {Markup.Escape(o.Message)}");
         }
     }
 
