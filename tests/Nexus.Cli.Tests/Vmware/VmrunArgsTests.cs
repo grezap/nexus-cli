@@ -50,8 +50,15 @@ H:\VMS\foo.vmx");
 
     [Fact]
     public void GetVmxPath_Composes_Dir_And_Name()
-        => VmrunPaths.GetVmxPath(@"H:\VMS\NexusPlatform\01-foundation\vault-3", "vault-3")
-            .Should().Be(@"H:\VMS\NexusPlatform\01-foundation\vault-3\vault-3.vmx");
+    {
+        // Windows-style dir literal but cross-platform expectation: Path.Combine
+        // uses '/' on Linux (the CI runner) and '\\' on Windows. The production
+        // code is only ever called with this output passed back to vmrun.exe on
+        // Windows, but the assertion has to match Path.Combine's joiner on the
+        // test runner's OS.
+        const string dir = @"H:\VMS\NexusPlatform\01-foundation\vault-3";
+        VmrunPaths.GetVmxPath(dir, "vault-3").Should().Be(Path.Combine(dir, "vault-3.vmx"));
+    }
 
     [Fact]
     public void GetVmssSidecar_Replaces_Vmx_Extension()
