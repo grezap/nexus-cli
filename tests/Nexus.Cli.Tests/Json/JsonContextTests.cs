@@ -89,4 +89,62 @@ public class JsonContextTests
         var json = JsonSerializer.Serialize(dto, NexusJsonContext.Default.ClusterStatusJsonOutput);
         json.Should().Contain("\"green\"").And.Contain("\"alive\": 6");
     }
+
+    [Fact]
+    public void InfrastructureListJsonOutput_RoundTrips()
+    {
+        var dto = new InfrastructureListJsonOutput
+        {
+            CapturedAtUtc = "2026-05-08 12:00:00Z",
+            Vms =
+            {
+                new VmStatusJson
+                {
+                    Cluster = "foundation",
+                    Name = "vault-1",
+                    State = "running",
+                    Os = "deb13",
+                    Vmnet10 = "192.168.10.121",
+                    Vmnet11 = "192.168.70.121",
+                    Vmx = @"H:\VMS\NexusPlatform\01-foundation\vault-1\vault-1.vmx",
+                    Role = "Vault Raft node 1"
+                }
+            }
+        };
+        var json = JsonSerializer.Serialize(dto, NexusJsonContext.Default.InfrastructureListJsonOutput);
+        json.Should().Contain("\"vault-1\"").And.Contain("\"running\"");
+
+        var rt = JsonSerializer.Deserialize(json, NexusJsonContext.Default.InfrastructureListJsonOutput);
+        rt!.Vms.Single().Cluster.Should().Be("foundation");
+    }
+
+    [Fact]
+    public void InfrastructureStatusJsonOutput_Serializes_Without_Reflection()
+    {
+        var dto = new InfrastructureStatusJsonOutput
+        {
+            CapturedAtUtc = "2026-05-08 12:00:00Z",
+            Cluster = "foundation",
+            Node = "vault-1"
+        };
+        var json = JsonSerializer.Serialize(dto, NexusJsonContext.Default.InfrastructureStatusJsonOutput);
+        json.Should().Contain("\"foundation\"").And.Contain("\"vault-1\"");
+    }
+
+    [Fact]
+    public void InfrastructureOpsJsonOutput_Serializes_Without_Reflection()
+    {
+        var dto = new InfrastructureOpsJsonOutput
+        {
+            CapturedAtUtc = "2026-05-08 12:00:00Z",
+            Cluster = "foundation",
+            Verb = "suspend",
+            Ops =
+            {
+                new OpResultJson { Node = "vault-1", Success = true, Message = "suspended" }
+            }
+        };
+        var json = JsonSerializer.Serialize(dto, NexusJsonContext.Default.InfrastructureOpsJsonOutput);
+        json.Should().Contain("\"suspend\"").And.Contain("\"vault-1\"").And.Contain("\"success\": true");
+    }
 }

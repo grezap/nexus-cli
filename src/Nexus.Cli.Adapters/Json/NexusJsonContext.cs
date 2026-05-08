@@ -144,6 +144,49 @@ public sealed class PortainerSection
     public bool? Reachable { get; set; }
 }
 
+// === Infrastructure (v0.2) JSON output =====================================
+
+public sealed class VmStatusJson
+{
+    public string Cluster { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string State { get; set; } = "";
+    public string Os { get; set; } = "";
+    public string Vmnet10 { get; set; } = "";
+    public string Vmnet11 { get; set; } = "";
+    public string Vmx { get; set; } = "";
+    public string Role { get; set; } = "";
+}
+
+public sealed class OpResultJson
+{
+    public string Node { get; set; } = "";
+    public bool Success { get; set; }
+    public string Message { get; set; } = "";
+}
+
+public sealed class InfrastructureListJsonOutput
+{
+    public string CapturedAtUtc { get; set; } = "";
+    public List<VmStatusJson> Vms { get; set; } = new();
+}
+
+public sealed class InfrastructureStatusJsonOutput
+{
+    public string CapturedAtUtc { get; set; } = "";
+    public string Cluster { get; set; } = "";
+    public string? Node { get; set; }
+    public List<VmStatusJson> Vms { get; set; } = new();
+}
+
+public sealed class InfrastructureOpsJsonOutput
+{
+    public string CapturedAtUtc { get; set; } = "";
+    public string Cluster { get; set; } = "";
+    public string Verb { get; set; } = "";
+    public List<OpResultJson> Ops { get; set; } = new();
+}
+
 // === Source-gen context ====================================================
 
 [JsonSourceGenerationOptions(
@@ -162,4 +205,7 @@ public sealed class PortainerSection
 [JsonSerializable(typeof(PortainerAuthRequestDto))]
 [JsonSerializable(typeof(PortainerAuthResponseDto))]
 [JsonSerializable(typeof(ClusterStatusJsonOutput))]
+[JsonSerializable(typeof(InfrastructureListJsonOutput))]
+[JsonSerializable(typeof(InfrastructureStatusJsonOutput))]
+[JsonSerializable(typeof(InfrastructureOpsJsonOutput))]
 public partial class NexusJsonContext : JsonSerializerContext;
