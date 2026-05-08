@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.F%20v0.2.0-yellow)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.F%20v0.2.1-yellow)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,7 +12,7 @@ The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB N
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.2.0):** Two of five master-plan verbs now ship — `cluster-status` (live HTTPS introspection of Consul + Nomad + Portainer; v0.1) and **`infrastructure {list, status, suspend, resume}`** (VMware Workstation control via vmrun.exe + a hand-rolled `vms.yaml` reader; v0.2). Verified end-to-end against the live 0.E.4 cluster including a destructive `suspend` → `resume` round-trip on `foundation/vault-3`. The remaining three verbs (`failover-test`, `kafka failover`, `demo run/record`) are stubs.
+> **Current state (v0.2.1):** Two of five master-plan verbs ship — `cluster-status` (live HTTPS introspection of Consul + Nomad + Portainer; v0.1) and **`infrastructure {list, status, suspend, resume}`** (VMware Workstation control via vmrun.exe + a hand-rolled `vms.yaml` reader; v0.2.x). Verified end-to-end against the live cluster with a `suspend → status → resume` round-trip on `foundation/vault-3` showing the correct `suspended` mid-state. v0.2.1 cleared the carryover backlog (Spectre.Console.Cli 0.55 bump + Workstation Pro 17.5+ session-suffixed `.vmem` detection). The remaining three verbs (`failover-test`, `kafka failover`, `demo run/record`) are stubs.
 
 ## What's in here
 
@@ -154,8 +154,9 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Five ADRs ship with v0.1.
 | Version | Scope |
 |---|---|
 | v0.1.0 | `cluster-status` — Consul + Nomad + Portainer read-only; AOT pipeline; size budget; CI |
-| **v0.2.0** | `infrastructure {list, status, suspend, resume}` + `suspend-cluster` alias; vmrun.exe adapter; hand-rolled vms.yaml reader (ADR-0006) |
-| v0.2.x | Spectre.Console.Cli 0.55 bump (breaking-change adoption); `winget` manifest; `.deb`; `--watch` flag; refined suspended-vs-stopped state heuristic |
+| v0.2.0 | `infrastructure {list, status, suspend, resume}` + `suspend-cluster` alias; vmrun.exe adapter; hand-rolled vms.yaml reader (ADR-0006) |
+| **v0.2.1** | Spectre.Console.Cli 0.55 bump (breaking-change adoption: CT param + protected override); session-suffixed `.vmem` detection so post-suspend status correctly reports `suspended` on Workstation Pro 17.5+ |
+| v0.3+ | `winget` manifest; `.deb`; `--watch` flag; deferred to slice cycles |
 | v0.3.0 | `failover-test`; SSH client + raft introspection |
 | v0.4.0 | `demo run/record` — VHS .tape orchestration + Playwright bridge |
 | v0.5.0 | `kafka failover` — pairs with Phase 0.H Kafka ecosystem |

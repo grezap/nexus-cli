@@ -6,6 +6,64 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-05-08
+
+Phase 0.F v0.2.x carryover landed: both deferred items from the v0.2.0
+CHANGELOG are now resolved. No new commands; no new verbs; same operator
+surface as v0.2.0.
+
+### Changed
+
+- **Spectre.Console + Spectre.Console.Cli bumped 0.50 → 0.55.** Two
+  breaking signature changes propagated through every command:
+  - `Command<T>.Execute` and `AsyncCommand<T>.ExecuteAsync` now take a
+    framework-supplied `CancellationToken` as their last parameter.
+    Spectre wires the token to the host's Ctrl-C signal, so long-running
+    commands can be interrupted cleanly. Each command links the
+    framework token to its existing internal timeout via
+    `CancellationTokenSource.CreateLinkedTokenSource`.
+  - Both methods moved from `public override` to `protected override`.
+    Spectre invokes them through a public trampoline; user code no
+    longer exposes the args directly.
+- AOT publish footprint: win-x64 10.92 MB (was 10.12 MB; +0.80 MB
+  attributed to Spectre 0.55 internals), still well under the 25 MB
+  master plan exit gate.
+
+### Fixed
+
+- **Suspended-vs-stopped state inference is now correct on Workstation
+  Pro 17.5+.** v0.2.0's heuristic checked for `<vm-name>.vmss` /
+  `<vm-name>.vmem` next to the .vmx, but Workstation Pro 17.5+ session-
+  suffixes the memory paging file (e.g. `vault-3-3c85c1f6.vmem`).
+  The exact-name lookup never matched, so post-suspend status defaulted
+  to `stopped`. New implementation does a directory-prefix search
+  (`<basename>*.vmss` OR `<basename>*.vmem`) — catches both the older
+  un-suffixed shape and the 17.5+ session-suffixed shape. Each VM lives
+  in its own subdir per the `vmware_per_vm_folders` canon, so the search
+  is bounded.
+- Verified by a live `suspend → status → resume → status` round-trip on
+  `foundation/vault-3`: post-suspend status now reports `suspended`
+  (was `stopped` in v0.2.0). Vault Raft kept quorum on vault-1 + vault-2
+  during the suspend window.
+
+### Tests
+
+- 54 unit tests pass (51 + 3 new): `GetVmemSidecar`,
+  `HasSuspendedStateSidecar` (5-fixture truth table covering bare and
+  session-suffixed shapes for both .vmss and .vmem), and
+  `SuspendAsync_Recognises_Session_Suffixed_Vmem_As_Already_Suspended`
+  (uses the canonical `vault-3-3c85c1f6.vmem` shape from real-world
+  inspection of the build host).
+- The previous v0.2.0 cross-platform fix (`GetVmxPath` test using
+  `Path.Combine` on both sides instead of a Windows-literal expectation,
+  shipped as `c124faa` to recover the v0.2.0 release.yml run) carries
+  forward.
+
+### Deferred
+
+Phase 0.F v0.2.x backlog is now empty. Next slice = v0.3 = `failover-test`
+(SSH client + Nomad/Consul raft introspection + RTO measurement).
+
 ## [0.2.0] — 2026-05-08
 
 Phase 0.F slice 2: the `infrastructure` verb ships in full.
@@ -164,7 +222,8 @@ NexusPlatform 66-VM lab (Phase 0.F slice 1 of the master plan).
 - `docs/verification/0.1.0-cluster-status.md` — live-cluster smoke output
   pasted by the operator after the v0.1.0 tag built.
 
-[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/grezap/nexus-cli/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/grezap/nexus-cli/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/grezap/nexus-cli/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/grezap/nexus-cli/compare/v0.1.0...v0.1.2
