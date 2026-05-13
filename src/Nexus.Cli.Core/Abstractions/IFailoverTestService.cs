@@ -7,4 +7,8 @@ public interface IFailoverTestService
     Task<Result<FailoverTestReport>> RunConsulLeaderAsync(
         string? targetNode,
         CancellationToken cancellationToken);
+
+    Task<Result<FailoverTestReport>> RunNomadLeaderAsync(
+        string? targetNode,
+        CancellationToken cancellationToken);
 }

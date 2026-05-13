@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Nexus.Cli.Adapters.Consul;
 using Nexus.Cli.Adapters.Http;
+using Nexus.Cli.Adapters.Nomad;
 using Nexus.Cli.Core;
 using Nexus.Cli.Core.Abstractions;
 using Nexus.Cli.Core.Models;
@@ -33,6 +34,7 @@ public sealed class FailoverTestService : IFailoverTestService
     private readonly ISshClient _ssh;
     private readonly NexusHttpClientFactory _httpFactory;
     private readonly string _consulMgmtToken;
+    private readonly string _nomadMgmtToken;
     private readonly string _sshUsername;
     private readonly string _sshKeyPath;
 
@@ -47,6 +49,7 @@ public sealed class FailoverTestService : IFailoverTestService
         ISshClient ssh,
         NexusHttpClientFactory httpFactory,
         string consulMgmtToken,
+        string nomadMgmtToken,
         string sshUsername,
         string sshKeyPath)
     {
@@ -54,6 +57,7 @@ public sealed class FailoverTestService : IFailoverTestService
         _ssh = ssh;
         _httpFactory = httpFactory;
         _consulMgmtToken = consulMgmtToken;
+        _nomadMgmtToken = nomadMgmtToken;
         _sshUsername = sshUsername;
         _sshKeyPath = sshKeyPath;
     }
@@ -186,5 +190,129 @@ public sealed class FailoverTestService : IFailoverTestService
     {
         var ip = rpcAddr.Split(':')[0];
         return managers.FirstOrDefault(n => n.Vmnet10 == ip)?.Name;
+    }
+
+    // ===== Nomad failover (v0.3.1) =========================================
+
+    public async Task<Result<FailoverTestReport>> RunNomadLeaderAsync(
+        string? targetNode,
+        CancellationToken cancellationToken)
+    {
+        var startedAt = DateTimeOffset.UtcNow;
+        var sw = Stopwatch.StartNew();
+
+        var swarm = _catalog.GetCluster("swarm");
+        if (swarm.IsFail)
+            return Result.Fail<FailoverTestReport>(swarm.Error!);
+        var managers = swarm.Value!.Nodes.Where(n => n.Name.StartsWith("swarm-manager-", StringComparison.Ordinal)).ToList();
+        if (managers.Count < 2)
+            return Result.Fail<FailoverTestReport>("expected at least 2 swarm managers in vms.yaml; got " + managers.Count);
+
+        // 1. Discover Nomad leader.
+        var leaderAddr = await TryGetNomadLeaderAsync(managers, cancellationToken).ConfigureAwait(false);
+        if (leaderAddr.IsFail)
+            return Result.Fail<FailoverTestReport>(leaderAddr.Error!);
+        var leaderIp = leaderAddr.Value!.Split(':')[0];
+
+        // 2. Map leader IP to vms.yaml node.
+        var leaderNode = managers.FirstOrDefault(n => n.Vmnet10 == leaderIp);
+        if (leaderNode is null)
+            return Result.Fail<FailoverTestReport>(
+                $"current Nomad leader {leaderIp} not found in vms.yaml swarm.managers; refusing to act blind.");
+
+        if (!string.IsNullOrEmpty(targetNode) && !string.Equals(targetNode, leaderNode.Name, StringComparison.Ordinal))
+            return Result.Fail<FailoverTestReport>(
+                $"--node was '{targetNode}' but current Nomad leader is '{leaderNode.Name}'. Rerun without --node " +
+                "or wait for raft to elect that node leader.");
+
+        // 3. Polling endpoint = different manager.
+        var pollNode = managers.First(n => !string.Equals(n.Name, leaderNode.Name, StringComparison.Ordinal));
+        using var pollNomad = MakeNomad(pollNode.Vmnet11);
+
+        var preFlightCompleted = sw.Elapsed;
+
+        // 4. SSH stop nomad on the leader.
+        var sshTarget = new SshTarget(leaderNode.Vmnet11, 22, _sshUsername, _sshKeyPath);
+        var stop = await _ssh.ExecuteAsync(sshTarget, "sudo systemctl stop nomad", SshTimeout, cancellationToken)
+            .ConfigureAwait(false);
+        if (stop.IsFail)
+            return Result.Fail<FailoverTestReport>($"SSH stop failed: {stop.Error}");
+        if (stop.Value!.ExitCode != 0)
+            return Result.Fail<FailoverTestReport>(
+                $"`systemctl stop nomad` returned exit {stop.Value.ExitCode} on {leaderNode.Name}: {stop.Value.Stderr}");
+        var failureInjected = sw.Elapsed;
+
+        // 5. Poll non-leader until raft elects a new Nomad leader.
+        string? newLeaderAddr = null;
+        var pollDeadline = failureInjected.Add(ElectionDeadline);
+        while (sw.Elapsed < pollDeadline)
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+            await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
+            var poll = await pollNomad.GetHealthAsync(cancellationToken).ConfigureAwait(false);
+            if (poll.IsOk && !string.IsNullOrEmpty(poll.Value!.LeaderAddress)
+                && !string.Equals(poll.Value.LeaderAddress, leaderAddr.Value, StringComparison.Ordinal))
+            {
+                newLeaderAddr = poll.Value.LeaderAddress;
+                break;
+            }
+        }
+        var newLeaderObserved = sw.Elapsed;
+
+        // 6. Auto-recovery.
+        var start = await _ssh.ExecuteAsync(sshTarget, "sudo systemctl start nomad", SshTimeout, cancellationToken)
+            .ConfigureAwait(false);
+        var recoveryAttempted = sw.Elapsed;
+        var recovery = start.IsOk && start.Value!.ExitCode == 0
+            ? FailoverRecoveryStatus.Recovered
+            : FailoverRecoveryStatus.RecoveryFailed;
+        var recoveryHint = recovery == FailoverRecoveryStatus.Recovered
+            ? null
+            : $"ssh {_sshUsername}@{sshTarget.Host} sudo systemctl start nomad";
+
+        // 7. Wait for Nomad servers to reconverge (3 alive servers + a leader).
+        var expectedServers = managers.Count;
+        var healthyDeadline = sw.Elapsed.Add(RecoveryWaitDeadline);
+        while (sw.Elapsed < healthyDeadline)
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+            var h = await pollNomad.GetHealthAsync(cancellationToken).ConfigureAwait(false);
+            if (h.IsOk && h.Value!.Servers.Count == expectedServers && !string.IsNullOrEmpty(h.Value.LeaderAddress)) break;
+        }
+        var clusterHealthyAgain = sw.Elapsed;
+
+        var rto = newLeaderObserved - failureInjected;
+        var newLeaderName = newLeaderAddr is null ? null : MapToNodeName(newLeaderAddr, managers);
+
+        var timeline = new FailoverTimeline(
+            preFlightCompleted, failureInjected, newLeaderObserved, recoveryAttempted, clusterHealthyAgain);
+
+        return Result.Ok(new FailoverTestReport(
+            FailoverScenario.NomadLeader,
+            startedAt,
+            leaderNode.Name,
+            newLeaderName,
+            rto,
+            recovery,
+            recoveryHint,
+            timeline));
+    }
+
+    private NomadClient MakeNomad(string ip) =>
+        new(new NomadClient.Settings($"https://{ip}:4646", _nomadMgmtToken), _httpFactory);
+
+    private async Task<Result<string>> TryGetNomadLeaderAsync(
+        IReadOnlyList<NodeRecord> managers,
+        CancellationToken cancellationToken)
+    {
+        foreach (var m in managers)
+        {
+            using var c = MakeNomad(m.Vmnet11);
+            var h = await c.GetHealthAsync(cancellationToken).ConfigureAwait(false);
+            if (h.IsOk && !string.IsNullOrEmpty(h.Value!.LeaderAddress))
+                return Result.Ok(h.Value.LeaderAddress);
+        }
+        return Result.Fail<string>("no manager returned a current Nomad leader; cluster may already be failing.");
     }
 }

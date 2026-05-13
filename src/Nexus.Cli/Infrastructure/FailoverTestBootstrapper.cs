@@ -42,6 +42,14 @@ public sealed class FailoverTestBootstrapper : IDisposable
         if (consulMgmt.IsFail)
             throw new InvalidOperationException(consulMgmt.Error);
 
+        var nomadMgmt = await _vault.ReadKvFieldAsync(
+            "nexus",
+            NexusBootstrapper.NomadMgmtTokenPath,
+            "management_token",
+            cancellationToken).ConfigureAwait(false);
+        if (nomadMgmt.IsFail)
+            throw new InvalidOperationException(nomadMgmt.Error);
+
         var catalog = new VmsYamlCatalog();
         var ssh = new SshNetClient();
         var sshKey = SshKeyDiscovery.Resolve()
@@ -50,7 +58,14 @@ public sealed class FailoverTestBootstrapper : IDisposable
         if (string.IsNullOrWhiteSpace(sshUser))
             sshUser = DefaultSshUser;
 
-        return new FailoverTestService(catalog, ssh, _httpFactory, consulMgmt.Value!, sshUser, sshKey);
+        return new FailoverTestService(
+            catalog,
+            ssh,
+            _httpFactory,
+            consulMgmt.Value!,
+            nomadMgmt.Value!,
+            sshUser,
+            sshKey);
     }
 
     public void Dispose()
