@@ -6,6 +6,64 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-05-13
+
+Phase 0.F slice 3 continues: the second `failover-test` scenario ships.
+Also folds in a CI-runner null-tolerance fix that prevented v0.3.0's
+release.yml from creating a GitHub Release.
+
+### Added
+
+- **`nexus failover-test nomad-leader [--node NAME] [--yes] [--json]`** —
+  drives a planned failure of the current Nomad raft leader and measures
+  RTO. Same shape as v0.3.0's `consul-leader`: SSH-stop on the leader,
+  poll a different manager's `/v1/status/leader` (Nomad HTTPS:4646),
+  auto-restart, wait for 3 servers reconverged + leader re-elected.
+  Reuses `SshNetClient`, `VmsYamlCatalog`, `FailoverTestService`'s
+  timing infrastructure, and the `FailoverTestRender` human + JSON
+  output. ~70% code reuse as forecast.
+- `FailoverTestService.RunNomadLeaderAsync` — Nomad-specific
+  orchestration. Differences from `RunConsulLeaderAsync`:
+  - Probe port 4646 (HTTPS) vs 8501.
+  - Leader address parsed from `NomadHealth.LeaderAddress` (e.g.,
+    `192.168.10.111:4647`) vs `ConsulHealth.Leader`.
+  - `systemctl stop|start nomad` vs `consul`.
+  - Healthy check = `Servers.Count == 3 && LeaderAddress != null`
+    (vs Consul's gossip count of 6 alive).
+- **`FailoverTestBootstrapper`** now also resolves the Nomad mgmt token
+  from Vault KV (`nexus/swarm/nomad-bootstrap-token`, field
+  `management_token`) alongside the existing Consul mgmt token fetch.
+
+### Fixed
+
+- **`SshKeyDiscoveryTests.Resolve_Falls_Through_When_Env_Var_Points_At_Missing_File`**
+  guards the `NotStartWith(tempPath)` assertion behind a null check.
+  v0.3.0's `release.yml` failed on both linux-x64 and win-x64 runners
+  because CI runners have no `~/.ssh/id_*` files, so `Resolve()` returns
+  `null`, and FluentAssertions' `NotStartWith` errors on null. Same
+  shape of regression as v0.2.0's `GetVmxPath` cross-platform fix
+  (c124faa). The v0.3.0 tag stays on origin pointing at `ae5c4a9` with
+  no Release attached; v0.3.1 supersedes it with a working CI path.
+
+### Changed
+
+- AOT publish footprint: **win-x64 22.37 MB** (was 22.34 MB at v0.3.0;
+  +0.03 MB for the second command class). Headroom under the 25 MB
+  exit gate unchanged at ~2.63 MB.
+- Version bumped 0.3.0 → 0.3.1.
+
+### Deferred
+
+- **`nexus failover-test swarm-manager`** — v0.3.2. Bigger jump:
+  host-level outage via vmrun-suspend (reuses the v0.2 infrastructure
+  adapter); different recovery shape; first scenario where Vault HA's
+  auto-unseal might briefly degrade if a swarm-manager VM hosts a
+  Vault Agent path.
+- **Engine extraction.** Per rule-of-three, the next slice (swarm-manager)
+  is when extracting a shared `FailoverEngine.RunAsync(scenario,
+  serviceName, probePort, leaderFn, healthFn)` becomes worthwhile.
+  v0.3.1 keeps the two methods parallel-but-duplicated for now.
+
 ## [0.3.0] — 2026-05-13
 
 Phase 0.F slice 3: the `failover-test` verb ships its first scenario.
@@ -300,7 +358,8 @@ NexusPlatform 66-VM lab (Phase 0.F slice 1 of the master plan).
 - `docs/verification/0.1.0-cluster-status.md` — live-cluster smoke output
   pasted by the operator after the v0.1.0 tag built.
 
-[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/grezap/nexus-cli/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/grezap/nexus-cli/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/grezap/nexus-cli/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/grezap/nexus-cli/compare/v0.1.3...v0.2.0

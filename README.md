@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.F%20v0.3.0-yellow)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.F%20v0.3.1-yellow)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,7 +12,7 @@ The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB N
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.3.0):** Three of five master-plan verbs ship — `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), and **`failover-test consul-leader`** (v0.3.0; SSH-driven raft re-election + RTO measurement). Verified live: a planned Consul-leader stop measured **1.55s RTO** on the first run (swarm-manager-1 → swarm-manager-3; auto-recovered + cluster back to 6 alive). v0.3.x will add `nomad-leader` then `swarm-manager` scenarios. The remaining two verbs (`kafka failover`, `demo run/record`) are stubs.
+> **Current state (v0.3.1):** Three of five master-plan verbs ship — `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), and **`failover-test {consul-leader, nomad-leader}`** (v0.3.0 + v0.3.1; SSH-driven raft re-election + RTO measurement). Verified live: consul-leader 1.55s RTO (swarm-manager-1 → swarm-manager-3), nomad-leader 2.716s RTO (swarm-manager-1 → swarm-manager-3); both auto-recovered + clusters back to full membership. v0.3.2 will add the `swarm-manager` scenario (host-level outage via vmrun-suspend). The remaining two verbs (`kafka failover`, `demo run/record`) are stubs.
 
 ## What's in here
 
@@ -34,7 +34,7 @@ The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB N
 | `nexus infrastructure suspend <cluster>` | ✅ v0.2.0 | `vmrun suspend` with confirm prompt + per-VM glyph; aliased as `suspend-cluster` |
 | `nexus infrastructure resume <cluster>` | ✅ v0.2.0 | `vmrun start <vmx> nogui` for every stopped/suspended VM in scope |
 | `nexus failover-test consul-leader` | ✅ v0.3.0 | SSH the current Consul leader, stop, measure raft re-election RTO, auto-recover |
-| `nexus failover-test nomad-leader` | 🟡 stub | Same shape as `consul-leader`; planned v0.3.1 |
+| `nexus failover-test nomad-leader` | ✅ v0.3.1 | Same shape against the Nomad raft; verified 2.716s RTO |
 | `nexus failover-test swarm-manager` | 🟡 stub | Host-level outage via vmrun-suspend; planned v0.3.2 |
 | `nexus kafka failover` | 🟡 stub | East→West DR via MM2 (planned alongside Phase 0.H) |
 | `nexus demo run \| record` | 🟡 stub | Idempotent demo orchestrator + VHS/Playwright recorder (planned v0.4) |
@@ -160,8 +160,9 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Five ADRs ship with v0.1.
 | v0.1.0 | `cluster-status` — Consul + Nomad + Portainer read-only; AOT pipeline; size budget; CI |
 | v0.2.0 | `infrastructure {list, status, suspend, resume}` + `suspend-cluster` alias; vmrun.exe adapter; hand-rolled vms.yaml reader (ADR-0006) |
 | v0.2.1 | Spectre.Console.Cli 0.55 bump (breaking-change adoption: CT param + protected override); session-suffixed `.vmem` detection so post-suspend status correctly reports `suspended` on Workstation Pro 17.5+ |
-| **v0.3.0** | `failover-test consul-leader` — SSH.NET adapter (ADR-0007), raft polling, RTO measurement, auto-recovery; 1.55s RTO on the first live run |
-| v0.3.x | `failover-test {nomad-leader, swarm-manager}`; `--mode host` for vmrun-suspend host-level injection |
+| v0.3.0 | `failover-test consul-leader` — SSH.NET adapter (ADR-0007), raft polling, RTO measurement, auto-recovery; 1.55s RTO on the first live run |
+| **v0.3.1** | `failover-test nomad-leader` — same shape against Nomad raft; folds in CI-runner null-tolerance test fix; 2.716s RTO observed |
+| v0.3.2 | `failover-test swarm-manager` — host-level outage via vmrun-suspend; engine refactor (rule-of-three) |
 | v0.4+ | `winget` manifest; `.deb`; `--watch` flag; deferred to slice cycles |
 | v0.3.0 | `failover-test`; SSH client + raft introspection |
 | v0.4.0 | `demo run/record` — VHS .tape orchestration + Playwright bridge |
