@@ -13,6 +13,7 @@
   <ItemGroup>
     <!-- System.Net.Http.Json ships in .NET 10 BCL; no PackageReference needed. -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="SSH.NET" />
   </ItemGroup>
 
   <ItemGroup>
