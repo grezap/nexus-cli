@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Nexus.Cli.Commands;
+using Nexus.Cli.Commands.Demo;
 using Nexus.Cli.Commands.FailoverTest;
 using Nexus.Cli.Commands.Infrastructure;
 using Nexus.Cli.Infrastructure;
@@ -32,7 +33,7 @@ internal static class Program
         app.Configure(config =>
         {
             config.SetApplicationName("nexus");
-            config.SetApplicationVersion("0.3.2");
+            config.SetApplicationVersion("0.4.0");
 
             config.AddCommand<ClusterStatusCommand>("cluster-status")
                 .WithDescription("Health of Consul + Nomad + Portainer in the live lab cluster.")
@@ -91,11 +92,18 @@ internal static class Program
 
             config.AddBranch("demo", demo =>
             {
-                demo.SetDescription("(stub, v0.4) Demo orchestrator + recorder.");
+                demo.SetDescription("Demo orchestrator + recorder.");
+                demo.AddCommand<DemoListCommand>("list")
+                    .WithDescription("List demos available in the catalog.")
+                    .WithExample(["demo", "list"]);
                 demo.AddCommand<DemoRunCommand>("run")
-                    .WithDescription("(stub) Run a single demo by id.");
+                    .WithDescription("Run a demo by id; execute its steps sequentially.")
+                    .WithExample(["demo", "run", "DEMO-01-cluster-status"])
+                    .WithExample(["demo", "run", "DEMO-01-cluster-status", "--json"]);
                 demo.AddCommand<DemoRecordCommand>("record")
-                    .WithDescription("(stub) Record one demo or --all for CI.");
+                    .WithDescription("Generate a VHS .tape from the demo and render to GIF via vhs.")
+                    .WithExample(["demo", "record", "DEMO-01-cluster-status"])
+                    .WithExample(["demo", "record", "DEMO-01-cluster-status", "--output-dir", "./out"]);
             });
         });
 

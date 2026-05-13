@@ -31,32 +31,3 @@ internal sealed class KafkaFailoverCommand : StubCommandBase<KafkaFailoverSettin
     protected override string PlannedVersion => "v0.5.0 (paired with Phase 0.H)";
 }
 
-public sealed class DemoRunSettings : CommandSettings
-{
-    [CommandArgument(0, "<demo-id>")]
-    [Description("DEMO-NN-* identifier")]
-    public string? DemoId { get; set; }
-}
-
-internal sealed class DemoRunCommand : StubCommandBase<DemoRunSettings>
-{
-    protected override string Name => "demo run";
-    protected override string PlannedVersion => "v0.4.0";
-}
-
-public sealed class DemoRecordSettings : CommandSettings
-{
-    [CommandArgument(0, "[demo-id]")]
-    [Description("DEMO-NN-* identifier (omit for --all)")]
-    public string? DemoId { get; set; }
-
-    [CommandOption("--all")]
-    [Description("Record every demo defined in the parent project's docs/demos/.")]
-    public bool All { get; set; }
-}
-
-internal sealed class DemoRecordCommand : StubCommandBase<DemoRecordSettings>
-{
-    protected override string Name => "demo record";
-    protected override string PlannedVersion => "v0.4.0";
-}
