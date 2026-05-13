@@ -91,6 +91,40 @@ public class JsonContextTests
     }
 
     [Fact]
+    public void FailoverTestJsonOutput_RoundTrips()
+    {
+        var dto = new FailoverTestJsonOutput
+        {
+            Scenario = "consul-leader",
+            StartedAtUtc = "2026-05-08 09:30:00Z",
+            OriginalLeader = "swarm-manager-2",
+            NewLeader = "swarm-manager-1",
+            RtoSeconds = 7.42,
+            Recovery = "recovered",
+            RecoveryHint = null,
+            Timeline = new FailoverTimelineJson
+            {
+                PreFlightCompletedSec = 1.1,
+                FailureInjectedSec = 1.3,
+                NewLeaderObservedSec = 8.72,
+                RecoveryAttemptedSec = 8.9,
+                ClusterHealthyAgainSec = 14.5
+            }
+        };
+
+        var json = JsonSerializer.Serialize(dto, NexusJsonContext.Default.FailoverTestJsonOutput);
+        json.Should().Contain("\"consul-leader\"")
+            .And.Contain("\"swarm-manager-2\"")
+            .And.Contain("\"rtoSeconds\": 7.42");
+
+        var round = JsonSerializer.Deserialize(json, NexusJsonContext.Default.FailoverTestJsonOutput);
+        round.Should().NotBeNull();
+        round!.Recovery.Should().Be("recovered");
+        round.Timeline.Should().NotBeNull();
+        round.Timeline!.NewLeaderObservedSec.Should().Be(8.72);
+    }
+
+    [Fact]
     public void InfrastructureListJsonOutput_RoundTrips()
     {
         var dto = new InfrastructureListJsonOutput

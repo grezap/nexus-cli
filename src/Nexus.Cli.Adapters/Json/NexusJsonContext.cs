@@ -187,6 +187,29 @@ public sealed class InfrastructureOpsJsonOutput
     public List<OpResultJson> Ops { get; set; } = new();
 }
 
+// === FailoverTestReport JSON output (v0.3) ==================================
+
+public sealed class FailoverTimelineJson
+{
+    public double PreFlightCompletedSec { get; set; }
+    public double FailureInjectedSec { get; set; }
+    public double NewLeaderObservedSec { get; set; }
+    public double RecoveryAttemptedSec { get; set; }
+    public double ClusterHealthyAgainSec { get; set; }
+}
+
+public sealed class FailoverTestJsonOutput
+{
+    public string Scenario { get; set; } = "";
+    public string StartedAtUtc { get; set; } = "";
+    public string OriginalLeader { get; set; } = "";
+    public string? NewLeader { get; set; }
+    public double RtoSeconds { get; set; }
+    public string Recovery { get; set; } = "";
+    public string? RecoveryHint { get; set; }
+    public FailoverTimelineJson? Timeline { get; set; }
+}
+
 // === Source-gen context ====================================================
 
 [JsonSourceGenerationOptions(
@@ -208,4 +231,5 @@ public sealed class InfrastructureOpsJsonOutput
 [JsonSerializable(typeof(InfrastructureListJsonOutput))]
 [JsonSerializable(typeof(InfrastructureStatusJsonOutput))]
 [JsonSerializable(typeof(InfrastructureOpsJsonOutput))]
+[JsonSerializable(typeof(FailoverTestJsonOutput))]
 public partial class NexusJsonContext : JsonSerializerContext;
