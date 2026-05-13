@@ -210,6 +210,54 @@ public sealed class FailoverTestJsonOutput
     public FailoverTimelineJson? Timeline { get; set; }
 }
 
+// === Demo (v0.4) ===========================================================
+
+public sealed class DemoStepJson
+{
+    public string? Command { get; set; }
+    public double WaitAfterSeconds { get; set; }
+}
+
+public sealed class DemoSpecJson
+{
+    public string? Id { get; set; }
+    public string? Title { get; set; }
+    public string? Description { get; set; }
+    public List<DemoStepJson>? Steps { get; set; }
+}
+
+public sealed class DemoStepResultJson
+{
+    public int StepIndex { get; set; }
+    public string Command { get; set; } = "";
+    public int ExitCode { get; set; }
+    public string StdoutTail { get; set; } = "";
+    public string StderrTail { get; set; } = "";
+    public double DurationSec { get; set; }
+}
+
+public sealed class DemoRunReportJson
+{
+    public string DemoId { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string StartedAtUtc { get; set; } = "";
+    public string Status { get; set; } = "";
+    public double TotalDurationSec { get; set; }
+    public List<DemoStepResultJson> Steps { get; set; } = new();
+}
+
+public sealed class DemoRecordReportJson
+{
+    public string DemoId { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string StartedAtUtc { get; set; } = "";
+    public string TapeFilePath { get; set; } = "";
+    public string? OutputFilePath { get; set; }
+    public bool VhsAvailable { get; set; }
+    public string? VhsUnavailableMessage { get; set; }
+    public double DurationSec { get; set; }
+}
+
 // === Source-gen context ====================================================
 
 [JsonSourceGenerationOptions(
@@ -232,4 +280,7 @@ public sealed class FailoverTestJsonOutput
 [JsonSerializable(typeof(InfrastructureStatusJsonOutput))]
 [JsonSerializable(typeof(InfrastructureOpsJsonOutput))]
 [JsonSerializable(typeof(FailoverTestJsonOutput))]
+[JsonSerializable(typeof(DemoSpecJson))]
+[JsonSerializable(typeof(DemoRunReportJson))]
+[JsonSerializable(typeof(DemoRecordReportJson))]
 public partial class NexusJsonContext : JsonSerializerContext;
