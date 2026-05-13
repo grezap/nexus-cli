@@ -6,6 +6,84 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-13
+
+Phase 0.F slice 3: the `failover-test` verb ships its first scenario.
+
+### Added
+
+- **`nexus failover-test consul-leader [--node NAME] [--yes] [--json]`** —
+  drives a planned failure of the current Consul raft leader and measures
+  RTO (recovery time objective). Workflow:
+  1. Read the Consul mgmt token from Vault KV
+     (`nexus/swarm/consul-bootstrap-token`).
+  2. Identify the current leader via `/v1/status/leader` (probes each
+     swarm-manager-N until one responds).
+  3. Map the leader's RPC address (192.168.10.X:8300) back to a
+     `vms.yaml` node. Refuses to act if the leader's IP isn't in canon —
+     never SSHes blind.
+  4. Pick a different manager as the polling endpoint (otherwise the
+     500 ms-interval poll queries the very agent we're about to stop).
+  5. SSH the leader → `sudo systemctl stop consul`. 20s timeout.
+  6. Poll the non-leader endpoint every 500 ms until `/v1/status/leader`
+     returns a different address; 60s election deadline.
+  7. SSH the leader → `sudo systemctl start consul` (auto-recovery). On
+     failure, the JSON output's `recoveryHint` carries the exact recovery
+     command for the operator.
+  8. Wait for the recovered agent to rejoin gossip (alive count back to
+     full); 45s deadline.
+  - Exit codes: `0` ok, `1` no new leader within deadline, `2`
+    recovery failed (operator must run `recoveryHint`).
+  - `--node NAME` asserts which node the operator expects to be leader
+    before injecting failure; aborts if mismatched.
+  - `--yes` skips the confirm prompt (mirrors the v0.2 infra confirm UX).
+  - `--json` emits `FailoverTestJsonOutput` (source-gen, no reflection).
+- **SSH adapter** — `Nexus.Cli.Adapters.Ssh.SshNetClient`, a thin
+  wrapper around SSH.NET 2025.1.0. Pure-managed library; declares
+  `IsAotCompatible=true`; trim profile clean under `partial` mode.
+  Stateless: each `ExecuteAsync` opens a fresh connection, runs one
+  command, disconnects. `SshKeyDiscovery` resolves the operator's
+  private key (NEXUS_SSH_KEY env → `~/.ssh/id_ed25519` →
+  `~/.ssh/id_rsa`). Rationale in **ADR-0007**.
+- **Failover service** — `FailoverTestService` in
+  `Nexus.Cli.Adapters.Cluster`. ~150-LOC orchestrator with a single
+  monotonic Stopwatch driving the 5-phase `FailoverTimeline` (preflight
+  → failure → newLeader → recovery → healthy).
+- **ADR-0007** records the SSH.NET decision over ssh.exe shell-out
+  (which would reintroduce every MEMORY SSH pain point) or native
+  libssh (cross-RID native DLL distribution cost).
+- **3 new unit tests** — `SshKeyDiscovery` (env-var honoured, falls
+  through on missing path, UnavailableMessage mentions both env and
+  canonical paths) + 1 JSON round-trip for `FailoverTestJsonOutput`.
+  58/58 unit tests total (was 54; +4).
+- **NEXUS_SSH_USER env var** (default `nexusadmin`) lets the operator
+  override the lab username if needed.
+
+### Changed
+
+- AOT publish footprint: **win-x64 22.34 MB** (was 10.92 MB at v0.2.1;
+  +11.4 MB attributed to SSH.NET 2025.1.0 internals reachable now that
+  we actually call it — at v0.2 it trimmed to ~0 because only the type
+  was referenced). Still under the 25 MB master plan exit gate but
+  headroom dropped from 14 MB to 2.66 MB. Tracked in the verification
+  doc; the v0.4 demo and v0.5 kafka slices need to fit in that 2.66 MB
+  or the exit gate needs revisiting.
+- Version bumped 0.2.1 → 0.3.0.
+
+### Deferred
+
+- **`nexus failover-test nomad-leader`** — v0.3.1. Same SSH/raft/timing
+  infrastructure as consul-leader; only the leader-discovery API + the
+  systemd unit name change. ~70% code reuse.
+- **`nexus failover-test swarm-manager`** — v0.3.2. Bigger jump:
+  vmrun-suspend the host (host-level outage vs service-level), longer
+  recovery, different state observability.
+- **`--mode host` flag** for host-level failure injection (vmrun
+  suspend instead of systemctl stop). Tracked for v0.3.x.
+- **Tunables as CLI flags** (election deadline, recovery wait, poll
+  interval). Currently private constants. Move to `--election-timeout`
+  etc. if real-world use demands it.
+
 ## [0.2.1] — 2026-05-08
 
 Phase 0.F v0.2.x carryover landed: both deferred items from the v0.2.0
@@ -222,7 +300,8 @@ NexusPlatform 66-VM lab (Phase 0.F slice 1 of the master plan).
 - `docs/verification/0.1.0-cluster-status.md` — live-cluster smoke output
   pasted by the operator after the v0.1.0 tag built.
 
-[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/grezap/nexus-cli/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/grezap/nexus-cli/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/grezap/nexus-cli/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/grezap/nexus-cli/compare/v0.1.2...v0.1.3
