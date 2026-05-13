@@ -6,6 +6,75 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-05-14
+
+Phase 0.F slice 4: the `demo` verb ships in full. **4 of 5 master-plan
+verbs are now live** (`cluster-status`, `infrastructure`, `failover-test`,
+`demo`); the last (`kafka failover` v0.5) remains stubbed pending
+Phase 0.H Kafka ecosystem build-out.
+
+### Added
+
+- **`nexus demo list [--json]`** — enumerates demos from the catalog
+  (default discovery: `NEXUS_DEMOS_PATH` env, then `./docs/demos/`,
+  then `../docs/demos/`). Shows id + title + step count as a Spectre
+  table, or JSON array via source-gen.
+- **`nexus demo run <demo-id> [--json]`** — orchestrates a demo
+  spec's steps sequentially. Each step is a shell command line
+  executed through `cmd.exe /c` (Windows) or `/bin/sh -c` (Linux),
+  so redirects + pipes + env-var expansion work naturally. Captures
+  the last 12 lines each of stdout + stderr per step (avoids
+  bloating the report). Per-step timeout 5 minutes; top-level
+  CTS 15 minutes. Exit codes: `0` ok, `1` step failed,
+  `2` load/spec error, `3` aborted (timeout or Ctrl-C).
+- **`nexus demo record <demo-id> [--output-dir DIR] [--json]`** —
+  generates a VHS `.tape` script (Type+Enter+Sleep per step) and
+  invokes the `vhs` binary to render a GIF. If `vhs` isn't on PATH,
+  the `.tape` file still lands on disk and the report includes
+  `VhsAvailable=false` with the install hint
+  (`winget install charmbracelet.vhs` / `brew install vhs`).
+- **`Nexus.Cli.Adapters.Demos.JsonDemoCatalog`** — reads
+  `<dir>/<id>.json` files via source-gen JSON (`NexusJsonContext.
+  DemoSpecJson`). ~80 LOC, BCL-only, AOT-clean.
+- **`Nexus.Cli.Adapters.Demos.DemoRunner`** — sequences steps;
+  generates the VHS `.tape` for record mode. ~150 LOC.
+- **`Nexus.Cli.Adapters.Vhs.VhsProcessClient`** + **`VhsPaths`** —
+  shells out to vhs binary, with `NEXUS_VHS_PATH` env override and
+  install-hint message on absence.
+- **`DemoBootstrapper`** — no Vault dependency; pure local-shell +
+  vhs subprocess orchestration. Methods static (no shared instance
+  state per CA1822).
+- **Sample demos** in `docs/demos/`:
+  - `DEMO-01-cluster-status.json` — runs `nexus cluster-status`.
+  - `DEMO-02-infrastructure.json` — runs `nexus infrastructure list`
+    then `... status foundation`.
+- **`docs/demos/README.md`** — demo spec format documentation +
+  discovery rules + VHS install instructions.
+
+### Changed
+
+- AOT publish footprint: **win-x64 22.65 MB** (was 22.39 MB at v0.3.2;
+  +0.26 MB for demo orchestration + VHS adapter + JSON contracts).
+  Headroom under the 25 MB master plan exit gate now ~2.35 MB.
+- Version bumped 0.3.2 → 0.4.0 (last bump before v1.0; v0.5 closes
+  the verb list).
+
+### Deferred
+
+- **Playwright bridge for web-UI demos** (operator surface E30
+  envisioned both terminal + web). Defer to v0.4.x; Playwright as
+  a managed library is AOT-hostile and would likely push the binary
+  over the 25 MB exit gate. Alternative for web UI: shell out to
+  `playwright` CLI binary similar to the vhs pattern.
+- **`--all` recursion** (`nexus demo record --all`) — render every
+  demo in the catalog. Stub from v0.1 retired; this lands in v0.4.x
+  once we have enough demos to justify it.
+- **CI-friendly demos** that don't require Vault auth (so the
+  release.yml could produce a demo GIF as a release asset). Probably
+  the right shape is a separate `--mode dry-run` flag that doesn't
+  actually execute the shell commands, just types them in the VHS
+  recording. v0.4.x candidate.
+
 ## [0.3.2] — 2026-05-14
 
 Phase 0.F slice 3 complete: the third and final `failover-test` scenario
@@ -430,7 +499,8 @@ NexusPlatform 66-VM lab (Phase 0.F slice 1 of the master plan).
 - `docs/verification/0.1.0-cluster-status.md` — live-cluster smoke output
   pasted by the operator after the v0.1.0 tag built.
 
-[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/grezap/nexus-cli/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/grezap/nexus-cli/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/grezap/nexus-cli/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/grezap/nexus-cli/compare/v0.2.1...v0.3.0

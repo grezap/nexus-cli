@@ -1,0 +1,11 @@
+{
+  "id": "DEMO-01-cluster-status",
+  "title": "Live cluster health snapshot",
+  "description": "Runs `nexus cluster-status` against the live lab. Showcases the v0.1 vertical slice: HTTPS introspection of Consul + Nomad + Portainer with mgmt tokens resolved on demand from Vault KV.",
+  "steps": [
+    {
+      "command": "nexus cluster-status",
+      "waitAfterSeconds": 3
+    }
+  ]
+}

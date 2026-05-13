@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.F%20v0.3.2-yellow)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.F%20v0.4.0-yellow)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,7 +12,7 @@ The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB N
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.3.2):** Three of five master-plan verbs ship; `failover-test` is **complete across all three scenarios** — `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), and `failover-test {consul-leader, nomad-leader, swarm-manager}` (v0.3.x). Verified live: consul-leader 1.55s RTO, nomad-leader 2.716s RTO, **swarm-manager 21.59s RTO** (the slower number is expected — host-level vmrun-suspend vs service-level systemctl stop). All three scenarios auto-recovered; clusters ended healthy. The remaining two verbs (`kafka failover`, `demo run/record`) are stubs.
+> **Current state (v0.4.0):** **Four of five master-plan verbs ship.** `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), `failover-test {consul-leader, nomad-leader, swarm-manager}` (v0.3.x), and **`demo {list, run, record}`** (v0.4.0; JSON-spec orchestrator + VHS `.tape` generator). Verified live across the prior 3 verbs (RTOs: consul 1.55s, nomad 2.716s, swarm-manager 21.59s — all auto-recovered). The only remaining stub is `kafka failover` (v0.5; pairs with Phase 0.H Kafka ecosystem when that lab tier is built).
 
 ## What's in here
 
@@ -36,8 +36,10 @@ The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB N
 | `nexus failover-test consul-leader` | ✅ v0.3.0 | SSH the current Consul leader, stop, measure raft re-election RTO, auto-recover |
 | `nexus failover-test nomad-leader` | ✅ v0.3.1 | Same shape against the Nomad raft; verified 2.716s RTO |
 | `nexus failover-test swarm-manager` | ✅ v0.3.2 | HOST-LEVEL outage via vmrun-suspend + SSH+docker discovery; verified 21.59s RTO |
-| `nexus kafka failover` | 🟡 stub | East→West DR via MM2 (planned alongside Phase 0.H) |
-| `nexus demo run \| record` | 🟡 stub | Idempotent demo orchestrator + VHS/Playwright recorder (planned v0.4) |
+| `nexus demo list` | ✅ v0.4.0 | Enumerate demos in the catalog (JSON files under `docs/demos/` or `NEXUS_DEMOS_PATH`) |
+| `nexus demo run <id>` | ✅ v0.4.0 | Sequence a demo's shell-command steps; capture exit + stdout/stderr tails |
+| `nexus demo record <id>` | ✅ v0.4.0 | Generate VHS `.tape` + render to GIF via the `vhs` binary (graceful fallback if vhs isn't installed) |
+| `nexus kafka failover` | 🟡 stub | East→West DR via MM2 (planned alongside Phase 0.H Kafka ecosystem) |
 
 Run `nexus --help` for the live verb list against the binary you have installed.
 
@@ -122,6 +124,8 @@ Verbs supported by `scripts/cli.ps1`: `build`, `publish`, `test`, `lint`, `clean
 | `NEXUS_VMRUN_PATH` | no | Override `vmrun.exe` discovery. Defaults to the canonical Workstation Pro install paths on Windows. |
 | `NEXUS_SSH_KEY` | `failover-test` (recommended) | Absolute path to the operator's SSH private key for the lab. Default discovery: `~/.ssh/id_ed25519` then `~/.ssh/id_rsa` — set explicitly if your lab key has a different filename. |
 | `NEXUS_SSH_USER` | no | SSH username (default `nexusadmin`). |
+| `NEXUS_DEMOS_PATH` | `demo` (optional) | Directory of demo `<id>.json` files. Default discovery: `./docs/demos/` then `../docs/demos/`. |
+| `NEXUS_VHS_PATH` | `demo record` (optional) | Absolute path to the `vhs` binary. Default discovery: PATH walk for `vhs`/`vhs.exe`. |
 
 The CLI **does not** call `vault login` for you — manage your token externally (per ADR-0004).
 
@@ -162,7 +166,8 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Five ADRs ship with v0.1.
 | v0.2.1 | Spectre.Console.Cli 0.55 bump (breaking-change adoption: CT param + protected override); session-suffixed `.vmem` detection so post-suspend status correctly reports `suspended` on Workstation Pro 17.5+ |
 | v0.3.0 | `failover-test consul-leader` — SSH.NET adapter (ADR-0007), raft polling, RTO measurement, auto-recovery; 1.55s RTO on the first live run |
 | v0.3.1 | `failover-test nomad-leader` — same shape against Nomad raft; folds in CI-runner null-tolerance test fix; 2.716s RTO observed |
-| **v0.3.2** | `failover-test swarm-manager` — host-level outage via vmrun-suspend + SSH+`docker node ls` discovery; 21.59s RTO observed |
+| v0.3.2 | `failover-test swarm-manager` — host-level outage via vmrun-suspend + SSH+`docker node ls` discovery; 21.59s RTO observed |
+| **v0.4.0** | `demo {list, run, record}` — JSON spec orchestrator + VHS `.tape` recorder; 2 sample demos shipped |
 | v0.4+ | `winget` manifest; `.deb`; `--watch` flag; deferred to slice cycles |
 | v0.3.0 | `failover-test`; SSH client + raft introspection |
 | v0.4.0 | `demo run/record` — VHS .tape orchestration + Playwright bridge |
