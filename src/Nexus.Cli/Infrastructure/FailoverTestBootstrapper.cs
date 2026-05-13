@@ -3,6 +3,7 @@ using Nexus.Cli.Adapters.Http;
 using Nexus.Cli.Adapters.Inventory;
 using Nexus.Cli.Adapters.Ssh;
 using Nexus.Cli.Adapters.Vault;
+using Nexus.Cli.Adapters.Vmware;
 using Nexus.Cli.Core.Abstractions;
 
 namespace Nexus.Cli.Infrastructure;
@@ -52,6 +53,7 @@ public sealed class FailoverTestBootstrapper : IDisposable
 
         var catalog = new VmsYamlCatalog();
         var ssh = new SshNetClient();
+        var vmrun = new VmrunProcessClient();
         var sshKey = SshKeyDiscovery.Resolve()
             ?? throw new InvalidOperationException(SshKeyDiscovery.UnavailableMessage());
         var sshUser = Environment.GetEnvironmentVariable(SshUserEnvVar);
@@ -61,6 +63,7 @@ public sealed class FailoverTestBootstrapper : IDisposable
         return new FailoverTestService(
             catalog,
             ssh,
+            vmrun,
             _httpFactory,
             consulMgmt.Value!,
             nomadMgmt.Value!,

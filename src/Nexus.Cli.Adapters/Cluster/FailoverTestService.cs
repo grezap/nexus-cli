@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Nexus.Cli.Adapters.Consul;
 using Nexus.Cli.Adapters.Http;
 using Nexus.Cli.Adapters.Nomad;
+using Nexus.Cli.Adapters.Vmware;
 using Nexus.Cli.Core;
 using Nexus.Cli.Core.Abstractions;
 using Nexus.Cli.Core.Models;
@@ -32,21 +33,25 @@ public sealed class FailoverTestService : IFailoverTestService
 {
     private readonly IVmsCatalog _catalog;
     private readonly ISshClient _ssh;
+    private readonly IVmrunClient _vmrun;
     private readonly NexusHttpClientFactory _httpFactory;
     private readonly string _consulMgmtToken;
     private readonly string _nomadMgmtToken;
     private readonly string _sshUsername;
     private readonly string _sshKeyPath;
 
-    // Tunables. Kept conservative for v0.3.0; --options to override are a v0.3.x task.
+    // Tunables. Kept conservative for v0.3.x; --options to override are a future task.
     private static readonly TimeSpan SshTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan ElectionDeadline = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RecoveryWaitDeadline = TimeSpan.FromSeconds(45);
+    // VM boot after vmrun-suspend / vmrun-resume needs longer than a service restart.
+    private static readonly TimeSpan VmRecoveryWaitDeadline = TimeSpan.FromMinutes(3);
 
     public FailoverTestService(
         IVmsCatalog catalog,
         ISshClient ssh,
+        IVmrunClient vmrun,
         NexusHttpClientFactory httpFactory,
         string consulMgmtToken,
         string nomadMgmtToken,
@@ -55,6 +60,7 @@ public sealed class FailoverTestService : IFailoverTestService
     {
         _catalog = catalog;
         _ssh = ssh;
+        _vmrun = vmrun;
         _httpFactory = httpFactory;
         _consulMgmtToken = consulMgmtToken;
         _nomadMgmtToken = nomadMgmtToken;
@@ -314,5 +320,181 @@ public sealed class FailoverTestService : IFailoverTestService
                 return Result.Ok(h.Value.LeaderAddress);
         }
         return Result.Fail<string>("no manager returned a current Nomad leader; cluster may already be failing.");
+    }
+
+    // ===== Swarm manager failover (v0.3.2) =================================
+    //
+    // Structurally different from consul/nomad: failure injection is HOST-LEVEL
+    // (vmrun suspend) instead of service-level (systemctl stop), and leader
+    // discovery uses SSH+docker (Docker Swarm raft has no public HTTP API like
+    // Consul/Nomad). Recovery uses vmrun start nogui. Healthy-wait window is
+    // longer because VM cold-boot takes ~30-60s (vs ~1-5s for a service restart).
+
+    public async Task<Result<FailoverTestReport>> RunSwarmManagerAsync(
+        string? targetNode,
+        CancellationToken cancellationToken)
+    {
+        var startedAt = DateTimeOffset.UtcNow;
+        var sw = Stopwatch.StartNew();
+
+        if (!_vmrun.IsAvailable)
+            return Result.Fail<FailoverTestReport>(
+                "swarm-manager scenario requires vmrun.exe (host-level failure injection). " +
+                "Run on the Windows build host where VMware Workstation Pro is installed.");
+
+        var swarm = _catalog.GetCluster("swarm");
+        if (swarm.IsFail)
+            return Result.Fail<FailoverTestReport>(swarm.Error!);
+        var managers = swarm.Value!.Nodes
+            .Where(n => n.Name.StartsWith("swarm-manager-", StringComparison.Ordinal))
+            .ToList();
+        if (managers.Count < 2)
+            return Result.Fail<FailoverTestReport>("expected at least 2 swarm managers in vms.yaml; got " + managers.Count);
+
+        // 1. Discover Swarm raft leader via SSH + docker node ls.
+        var leaderProbe = await TryGetSwarmLeaderAsync(managers, cancellationToken).ConfigureAwait(false);
+        if (leaderProbe.IsFail)
+            return Result.Fail<FailoverTestReport>(leaderProbe.Error!);
+        var leaderName = leaderProbe.Value!;
+        var leaderNode = managers.FirstOrDefault(n => n.Name == leaderName);
+        if (leaderNode is null)
+            return Result.Fail<FailoverTestReport>(
+                $"current Swarm leader '{leaderName}' not found in vms.yaml swarm.managers; refusing to act blind.");
+
+        if (!string.IsNullOrEmpty(targetNode) && !string.Equals(targetNode, leaderName, StringComparison.Ordinal))
+            return Result.Fail<FailoverTestReport>(
+                $"--node was '{targetNode}' but current Swarm leader is '{leaderName}'. Rerun without --node " +
+                "or wait for raft to elect that node leader.");
+
+        // 2. Polling endpoint = a different (still-running) manager.
+        var pollNode = managers.First(n => !string.Equals(n.Name, leaderName, StringComparison.Ordinal));
+        var pollTarget = new SshTarget(pollNode.Vmnet11, 22, _sshUsername, _sshKeyPath);
+
+        var preFlightCompleted = sw.Elapsed;
+
+        // 3. Inject failure: vmrun suspend the leader's VM (HOST-LEVEL outage).
+        var vmxPath = VmrunPaths.GetVmxPath(leaderNode.Dir, leaderNode.Name);
+        var suspendResult = await _vmrun.SuspendAsync(vmxPath, cancellationToken).ConfigureAwait(false);
+        if (suspendResult.IsFail)
+            return Result.Fail<FailoverTestReport>($"vmrun suspend failed: {suspendResult.Error}");
+        var failureInjected = sw.Elapsed;
+
+        // 4. Poll non-leader (SSH+docker) until a new leader emerges.
+        string? newLeaderName = null;
+        var pollDeadline = failureInjected.Add(ElectionDeadline);
+        while (sw.Elapsed < pollDeadline)
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+            await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
+            var poll = await GetSwarmLeaderFromAsync(pollTarget, cancellationToken).ConfigureAwait(false);
+            if (poll.IsOk && !string.IsNullOrEmpty(poll.Value)
+                && !string.Equals(poll.Value, leaderName, StringComparison.Ordinal))
+            {
+                newLeaderName = poll.Value;
+                break;
+            }
+        }
+        var newLeaderObserved = sw.Elapsed;
+
+        // 5. Auto-recovery: vmrun start nogui to resume the suspended VM.
+        var resumeResult = await _vmrun.ResumeAsync(vmxPath, cancellationToken).ConfigureAwait(false);
+        var recoveryAttempted = sw.Elapsed;
+        var recovery = resumeResult.IsOk && resumeResult.Value
+            ? FailoverRecoveryStatus.Recovered
+            : FailoverRecoveryStatus.RecoveryFailed;
+        var recoveryHint = recovery == FailoverRecoveryStatus.Recovered
+            ? null
+            : $"vmrun -T ws start \"{vmxPath}\" nogui";
+
+        // 6. Wait for all 3 managers Ready (VM boot + docker re-join).
+        //    Uses the longer VmRecoveryWaitDeadline because cold VM boot
+        //    plus Docker engine startup + swarm rejoin is materially slower
+        //    than a systemctl restart.
+        var healthyDeadline = sw.Elapsed.Add(VmRecoveryWaitDeadline);
+        while (sw.Elapsed < healthyDeadline)
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+            var statuses = await GetSwarmManagerStatusesAsync(pollTarget, managers, cancellationToken).ConfigureAwait(false);
+            if (statuses.IsOk && statuses.Value!.Count == managers.Count
+                && statuses.Value.All(s => string.Equals(s, "Ready", StringComparison.Ordinal)))
+                break;
+        }
+        var clusterHealthyAgain = sw.Elapsed;
+
+        var rto = newLeaderObserved - failureInjected;
+        var timeline = new FailoverTimeline(
+            preFlightCompleted, failureInjected, newLeaderObserved, recoveryAttempted, clusterHealthyAgain);
+
+        return Result.Ok(new FailoverTestReport(
+            FailoverScenario.SwarmManager,
+            startedAt,
+            leaderName,
+            newLeaderName,
+            rto,
+            recovery,
+            recoveryHint,
+            timeline));
+    }
+
+    private async Task<Result<string>> TryGetSwarmLeaderAsync(
+        IReadOnlyList<NodeRecord> managers,
+        CancellationToken cancellationToken)
+    {
+        foreach (var m in managers)
+        {
+            var target = new SshTarget(m.Vmnet11, 22, _sshUsername, _sshKeyPath);
+            var probe = await GetSwarmLeaderFromAsync(target, cancellationToken).ConfigureAwait(false);
+            if (probe.IsOk && !string.IsNullOrEmpty(probe.Value))
+                return probe;
+        }
+        return Result.Fail<string>("no manager returned a current Swarm raft leader; cluster may already be failing.");
+    }
+
+    private async Task<Result<string>> GetSwarmLeaderFromAsync(
+        SshTarget target,
+        CancellationToken cancellationToken)
+    {
+        const string cmd = "docker node ls --format '{{.Hostname}}|{{.Status}}|{{.ManagerStatus}}'";
+        var r = await _ssh.ExecuteAsync(target, cmd, SshTimeout, cancellationToken).ConfigureAwait(false);
+        if (r.IsFail)
+            return Result.Fail<string>(r.Error!);
+        if (r.Value!.ExitCode != 0)
+            return Result.Fail<string>($"docker node ls returned exit {r.Value.ExitCode}: {r.Value.Stderr}");
+        foreach (var rawLine in r.Value.Stdout.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r').Trim();
+            if (line.Length == 0) continue;
+            var parts = line.Split('|');
+            if (parts.Length < 3) continue;
+            if (string.Equals(parts[2].Trim(), "Leader", StringComparison.Ordinal))
+                return Result.Ok(parts[0].Trim());
+        }
+        return Result.Ok(string.Empty); // no leader yet (election in progress)
+    }
+
+    private async Task<Result<IReadOnlyList<string>>> GetSwarmManagerStatusesAsync(
+        SshTarget pollTarget,
+        List<NodeRecord> managers,
+        CancellationToken cancellationToken)
+    {
+        const string cmd = "docker node ls --format '{{.Hostname}}|{{.Status}}|{{.ManagerStatus}}'";
+        var r = await _ssh.ExecuteAsync(pollTarget, cmd, SshTimeout, cancellationToken).ConfigureAwait(false);
+        if (r.IsFail)
+            return Result.Fail<IReadOnlyList<string>>(r.Error!);
+        if (r.Value!.ExitCode != 0)
+            return Result.Fail<IReadOnlyList<string>>($"docker node ls returned exit {r.Value.ExitCode}: {r.Value.Stderr}");
+        var managerNames = managers.Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
+        var statuses = new List<string>(managers.Count);
+        foreach (var rawLine in r.Value.Stdout.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r').Trim();
+            if (line.Length == 0) continue;
+            var parts = line.Split('|');
+            if (parts.Length < 3) continue;
+            if (managerNames.Contains(parts[0].Trim()))
+                statuses.Add(parts[1].Trim());
+        }
+        return Result.Ok<IReadOnlyList<string>>(statuses);
     }
 }

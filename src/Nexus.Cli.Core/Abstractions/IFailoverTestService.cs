@@ -11,4 +11,8 @@ public interface IFailoverTestService
     Task<Result<FailoverTestReport>> RunNomadLeaderAsync(
         string? targetNode,
         CancellationToken cancellationToken);
+
+    Task<Result<FailoverTestReport>> RunSwarmManagerAsync(
+        string? targetNode,
+        CancellationToken cancellationToken);
 }
