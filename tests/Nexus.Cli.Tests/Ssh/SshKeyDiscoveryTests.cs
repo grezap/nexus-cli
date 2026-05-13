@@ -34,11 +34,14 @@ public class SshKeyDiscoveryTests
                 SshKeyDiscovery.KeyEnvVar,
                 Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}"));
             // Returns either ~/.ssh/id_ed25519, ~/.ssh/id_rsa, or null
-            // depending on operator's machine. Must not throw and must not
-            // return the bogus env-var path.
+            // depending on operator's machine. CI runners have no SSH keys
+            // configured so they return null; the operator's build host
+            // returns the real path. Either way must not be the bogus tmp
+            // path the env var pointed at.
             var resolved = SshKeyDiscovery.Resolve();
             (resolved is null || File.Exists(resolved)).Should().BeTrue();
-            resolved.Should().NotStartWith(Path.GetTempPath());
+            if (resolved is not null)
+                resolved.Should().NotStartWith(Path.GetTempPath());
         }
         finally
         {
