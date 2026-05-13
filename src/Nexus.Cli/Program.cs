@@ -32,7 +32,7 @@ internal static class Program
         app.Configure(config =>
         {
             config.SetApplicationName("nexus");
-            config.SetApplicationVersion("0.3.1");
+            config.SetApplicationVersion("0.3.2");
 
             config.AddCommand<ClusterStatusCommand>("cluster-status")
                 .WithDescription("Health of Consul + Nomad + Portainer in the live lab cluster.")
@@ -75,6 +75,11 @@ internal static class Program
                     .WithExample(["failover-test", "nomad-leader"])
                     .WithExample(["failover-test", "nomad-leader", "--json"])
                     .WithExample(["failover-test", "nomad-leader", "--yes"]);
+                failover.AddCommand<FailoverTestSwarmManagerCommand>("swarm-manager")
+                    .WithDescription("Vmrun-suspend the current Docker Swarm raft leader VM (HOST-LEVEL outage); measure RTO; vmrun-resume to recover.")
+                    .WithExample(["failover-test", "swarm-manager"])
+                    .WithExample(["failover-test", "swarm-manager", "--json"])
+                    .WithExample(["failover-test", "swarm-manager", "--yes"]);
             });
 
             config.AddBranch("kafka", kafka =>

@@ -37,6 +37,8 @@ internal static class AotRoots
     [DynamicDependency(SettingsRoots, typeof(FailoverTestConsulLeaderSettings))]
     [DynamicDependency(CommandRoots, typeof(FailoverTestNomadLeaderCommand))]
     [DynamicDependency(SettingsRoots, typeof(FailoverTestNomadLeaderSettings))]
+    [DynamicDependency(CommandRoots, typeof(FailoverTestSwarmManagerCommand))]
+    [DynamicDependency(SettingsRoots, typeof(FailoverTestSwarmManagerSettings))]
 
     [DynamicDependency(SettingsRoots, typeof(KafkaFailoverSettings))]
     [DynamicDependency(SettingsRoots, typeof(DemoRunSettings))]

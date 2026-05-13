@@ -31,3 +31,10 @@ public sealed class FailoverTestNomadLeaderSettings : FailoverTestSettingsBase
     [Description("Only proceed if the current Nomad leader is NAME; abort otherwise. Use to assert which node you expect to be the leader before injecting failure.")]
     public string? Node { get; set; }
 }
+
+public sealed class FailoverTestSwarmManagerSettings : FailoverTestSettingsBase
+{
+    [CommandOption("--node <NAME>")]
+    [Description("Only proceed if the current Docker Swarm raft leader is NAME; abort otherwise. Use to assert which manager you expect to be the leader before vmrun-suspending its VM.")]
+    public string? Node { get; set; }
+}
