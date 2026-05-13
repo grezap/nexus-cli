@@ -18,19 +18,6 @@ internal abstract class StubCommandBase<TSettings> : Command<TSettings>
     }
 }
 
-public sealed class FailoverTestSettings : CommandSettings
-{
-    [CommandArgument(0, "[scenario]")]
-    [Description("Scenario name (consul-leader|nomad-leader|swarm-manager)")]
-    public string? Scenario { get; set; }
-}
-
-internal sealed class FailoverTestCommand : StubCommandBase<FailoverTestSettings>
-{
-    protected override string Name => "failover-test";
-    protected override string PlannedVersion => "v0.3.0";
-}
-
 public sealed class KafkaFailoverSettings : CommandSettings
 {
     [CommandOption("--cluster")]

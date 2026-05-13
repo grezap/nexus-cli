@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using Nexus.Cli.Commands;
+using Nexus.Cli.Commands.FailoverTest;
 using Nexus.Cli.Commands.Infrastructure;
 
 namespace Nexus.Cli.Infrastructure;
@@ -32,7 +33,9 @@ internal static class AotRoots
     [DynamicDependency(CommandRoots, typeof(InfrastructureResumeCommand))]
     [DynamicDependency(SettingsRoots, typeof(InfrastructureResumeSettings))]
 
-    [DynamicDependency(SettingsRoots, typeof(FailoverTestSettings))]
+    [DynamicDependency(CommandRoots, typeof(FailoverTestConsulLeaderCommand))]
+    [DynamicDependency(SettingsRoots, typeof(FailoverTestConsulLeaderSettings))]
+
     [DynamicDependency(SettingsRoots, typeof(KafkaFailoverSettings))]
     [DynamicDependency(SettingsRoots, typeof(DemoRunSettings))]
     [DynamicDependency(SettingsRoots, typeof(DemoRecordSettings))]

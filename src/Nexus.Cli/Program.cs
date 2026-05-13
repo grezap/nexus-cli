@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Nexus.Cli.Commands;
+using Nexus.Cli.Commands.FailoverTest;
 using Nexus.Cli.Commands.Infrastructure;
 using Nexus.Cli.Infrastructure;
 using Spectre.Console.Cli;
@@ -31,7 +32,7 @@ internal static class Program
         app.Configure(config =>
         {
             config.SetApplicationName("nexus");
-            config.SetApplicationVersion("0.2.1");
+            config.SetApplicationVersion("0.3.0");
 
             config.AddCommand<ClusterStatusCommand>("cluster-status")
                 .WithDescription("Health of Consul + Nomad + Portainer in the live lab cluster.")
@@ -61,8 +62,15 @@ internal static class Program
                     .WithExample(["infrastructure", "resume", "foundation", "--node", "vault-3", "--yes"]);
             });
 
-            config.AddCommand<FailoverTestCommand>("failover-test")
-                .WithDescription("(stub, v0.3) Drive a manager loss + raft re-election; measure RTO.");
+            config.AddBranch("failover-test", failover =>
+            {
+                failover.SetDescription("Drive a planned failure of a control-plane leader and measure RTO.");
+                failover.AddCommand<FailoverTestConsulLeaderCommand>("consul-leader")
+                    .WithDescription("Stop the current Consul leader; measure new-leader election RTO; auto-recover.")
+                    .WithExample(["failover-test", "consul-leader"])
+                    .WithExample(["failover-test", "consul-leader", "--json"])
+                    .WithExample(["failover-test", "consul-leader", "--yes"]);
+            });
 
             config.AddBranch("kafka", kafka =>
             {
