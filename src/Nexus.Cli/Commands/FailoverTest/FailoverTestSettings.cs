@@ -24,3 +24,10 @@ public sealed class FailoverTestConsulLeaderSettings : FailoverTestSettingsBase
     [Description("Only proceed if the current Consul leader is NAME; abort otherwise. Use to assert which node you expect to be the leader before injecting failure.")]
     public string? Node { get; set; }
 }
+
+public sealed class FailoverTestNomadLeaderSettings : FailoverTestSettingsBase
+{
+    [CommandOption("--node <NAME>")]
+    [Description("Only proceed if the current Nomad leader is NAME; abort otherwise. Use to assert which node you expect to be the leader before injecting failure.")]
+    public string? Node { get; set; }
+}

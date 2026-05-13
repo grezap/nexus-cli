@@ -32,7 +32,7 @@ internal static class Program
         app.Configure(config =>
         {
             config.SetApplicationName("nexus");
-            config.SetApplicationVersion("0.3.0");
+            config.SetApplicationVersion("0.3.1");
 
             config.AddCommand<ClusterStatusCommand>("cluster-status")
                 .WithDescription("Health of Consul + Nomad + Portainer in the live lab cluster.")
@@ -70,6 +70,11 @@ internal static class Program
                     .WithExample(["failover-test", "consul-leader"])
                     .WithExample(["failover-test", "consul-leader", "--json"])
                     .WithExample(["failover-test", "consul-leader", "--yes"]);
+                failover.AddCommand<FailoverTestNomadLeaderCommand>("nomad-leader")
+                    .WithDescription("Stop the current Nomad leader; measure new-leader election RTO; auto-recover.")
+                    .WithExample(["failover-test", "nomad-leader"])
+                    .WithExample(["failover-test", "nomad-leader", "--json"])
+                    .WithExample(["failover-test", "nomad-leader", "--yes"]);
             });
 
             config.AddBranch("kafka", kafka =>
