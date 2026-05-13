@@ -6,6 +6,78 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-05-14
+
+Phase 0.F slice 3 complete: the third and final `failover-test` scenario
+ships. **All five master-plan verbs from `failover-test` are now live**
+(consul-leader + nomad-leader + swarm-manager); the remaining 2 of 5
+top-level verbs (`kafka failover` v0.5, `demo run/record` v0.4) stay
+stubbed.
+
+### Added
+
+- **`nexus failover-test swarm-manager [--node NAME] [--yes] [--json]`** —
+  drives a HOST-LEVEL planned failure of the current Docker Swarm raft
+  leader and measures RTO. Structurally different from consul-leader
+  and nomad-leader:
+  - **Failure injection:** `vmrun.exe suspend` the leader's VM (reuses
+    `VmrunProcessClient` from the v0.2 infrastructure adapter).
+    Service-level scenarios used `sudo systemctl stop`.
+  - **Leader discovery:** SSH + `docker node ls --format` (Docker
+    Swarm raft has no public HTTP API like Consul/Nomad). Parses for
+    `ManagerStatus=Leader`.
+  - **Recovery:** `vmrun.exe start <vmx> nogui` to resume the
+    suspended VM.
+  - **Healthy check:** all 3 swarm-managers show `Status=Ready` in
+    `docker node ls`. Uses `VmRecoveryWaitDeadline=3 min` (longer than
+    service-level's 45s) for VM boot + Docker engine startup +
+    Swarm rejoin.
+  - **Linux build host:** `IVmrunClient.IsAvailable` returns false on
+    Linux, so the scenario fails fast with a clear "Windows-only build
+    host" message — same posture as the v0.2 infrastructure verb's
+    suspend/resume.
+- `FailoverTestService.RunSwarmManagerAsync` + private helpers
+  `TryGetSwarmLeaderAsync` (probe each manager until one returns a
+  Leader line), `GetSwarmLeaderFromAsync` (probe a specific node),
+  `GetSwarmManagerStatusesAsync` (poll all managers' status for the
+  healthy-wait check).
+- `FailoverTestService` constructor now takes `IVmrunClient` alongside
+  `ISshClient`; consul-leader + nomad-leader callers unaffected (they
+  never touch vmrun).
+- `FailoverTestBootstrapper` instantiates `VmrunProcessClient` and
+  plumbs it through.
+
+### Changed
+
+- AOT publish footprint: **win-x64 22.39 MB** (was 22.37 MB at v0.3.1;
+  +0.02 MB for the third command class). 2.61 MB headroom under the
+  25 MB master plan exit gate.
+- Version bumped 0.3.1 → 0.3.2.
+
+### Engineering note
+
+Although swarm-manager is the third scenario, **no shared engine was
+extracted**. The two HTTP-based scenarios (consul-leader, nomad-leader)
+overlap ~90% but the host-level scenario's primitives diverge:
+- vmrun for failure injection (vs SSH+systemctl)
+- SSH+docker for leader discovery (vs HTTP probe)
+- Three independent raft clusters affected by the failure (vs one)
+
+A unified `FailoverEngine` covering all three would need too many
+"if scenario is X" branches. Better as 3 parallel methods sharing
+the report shape (`FailoverTestReport`, `FailoverTimeline`) and
+rendering layer (`FailoverTestRender`). Revisit if a 4th scenario
+lands.
+
+### Deferred
+
+- `--election-timeout`, `--recovery-timeout` etc. as CLI flags
+  (currently private constants). Track for v0.3.x if real-world use
+  demands tuning.
+- `~/.ssh/config` `IdentityFile` honouring in `SshKeyDiscovery`
+  (operator currently must set `NEXUS_SSH_KEY` explicitly when the
+  lab key isn't named `id_ed25519` or `id_rsa`).
+
 ## [0.3.1] — 2026-05-13
 
 Phase 0.F slice 3 continues: the second `failover-test` scenario ships.
@@ -358,7 +430,8 @@ NexusPlatform 66-VM lab (Phase 0.F slice 1 of the master plan).
 - `docs/verification/0.1.0-cluster-status.md` — live-cluster smoke output
   pasted by the operator after the v0.1.0 tag built.
 
-[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/grezap/nexus-cli/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/grezap/nexus-cli/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/grezap/nexus-cli/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/grezap/nexus-cli/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/grezap/nexus-cli/compare/v0.2.0...v0.2.1
