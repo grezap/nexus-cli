@@ -12,7 +12,7 @@ The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB N
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.4.0):** **Four of five master-plan verbs ship.** `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), `failover-test {consul-leader, nomad-leader, swarm-manager}` (v0.3.x), and **`demo {list, run, record}`** (v0.4.0; JSON-spec orchestrator + VHS `.tape` generator). Verified live across the prior 3 verbs (RTOs: consul 1.55s, nomad 2.716s, swarm-manager 21.59s — all auto-recovered). The only remaining stub is `kafka failover` (v0.5; pairs with Phase 0.H Kafka ecosystem when that lab tier is built).
+> **Current state (v0.4.0):** **Four of five master-plan verbs ship.** `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), `failover-test {consul-leader, nomad-leader, swarm-manager}` (v0.3.x), and **`demo {list, run, record}`** (v0.4.0; JSON-spec orchestrator + VHS `.tape` generator). Verified live across the prior 3 verbs (RTOs: consul 1.55s, nomad 2.716s, swarm-manager 21.59s — all auto-recovered). The only remaining stub is `kafka failover` (v0.5) — **newly unblocked**: the Kafka tier ([`grezap/nexus-infra-kafka`](https://github.com/grezap/nexus-infra-kafka)) is live as of 2026-05-15 (Phase 0.H closed, `v0.1.0`), so v0.5 implementation is queued and no longer waiting on infra.
 
 ## What's in here
 
@@ -39,7 +39,7 @@ The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB N
 | `nexus demo list` | ✅ v0.4.0 | Enumerate demos in the catalog (JSON files under `docs/demos/` or `NEXUS_DEMOS_PATH`) |
 | `nexus demo run <id>` | ✅ v0.4.0 | Sequence a demo's shell-command steps; capture exit + stdout/stderr tails |
 | `nexus demo record <id>` | ✅ v0.4.0 | Generate VHS `.tape` + render to GIF via the `vhs` binary (graceful fallback if vhs isn't installed) |
-| `nexus kafka failover` | 🟡 stub | East→West DR via MM2 (planned alongside Phase 0.H Kafka ecosystem) |
+| `nexus kafka failover` | 🟡 stub (v0.5; **infra unblocked 2026-05-15**) | East→West DR via MM2 — the Kafka tier (Phase 0.H) is live, ready for the v0.5 implementation |
 
 Run `nexus --help` for the live verb list against the binary you have installed.
 
@@ -171,7 +171,7 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Five ADRs ship with v0.1.
 | v0.4+ | `winget` manifest; `.deb`; `--watch` flag; deferred to slice cycles |
 | v0.3.0 | `failover-test`; SSH client + raft introspection |
 | v0.4.0 | `demo run/record` — VHS .tape orchestration + Playwright bridge |
-| v0.5.0 | `kafka failover` — pairs with Phase 0.H Kafka ecosystem |
+| v0.5.0 | `kafka failover` — Phase 0.H Kafka ecosystem is live (`nexus-infra-kafka` `v0.1.0`, 2026-05-15); next CLI release picks this up |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing
