@@ -1,0 +1,21 @@
+{
+  "id": "DEMO-08-demo-list",
+  "title": "Demo: list every catalog entry",
+  "description": "Self-referential: lists every demo in the catalog. Confirms the JsonDemoCatalog reader sees the on-disk specs. Read-only; no infra required.",
+  "prerequisites": {
+    "vmsAlive": [],
+    "envVars": []
+  },
+  "steps": [
+    {
+      "command": "nexus demo list",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["DEMO-"],
+      "observe": [
+        { "where": "stdout", "what": "table of demos with id · title · step count" }
+      ]
+    }
+  ],
+  "whatProves": "JsonDemoCatalog discovers + lists every <id>.json spec under docs/demos/, NEXUS_DEMOS_PATH, or the cwd-relative path."
+}

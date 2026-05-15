@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-06-kafka-failover-east-to-west",
+  "title": "Kafka failover: East → West",
+  "description": "Demo-grade Kafka DR: suspends the 3 East brokers (host-level outage), proves the West cluster keeps serving with an RF=3 produce/consume round-trip on a fresh probe topic, measures RTO, then resumes East.",
+  "prerequisites": {
+    "vmsAlive": ["kafka-east-1", "kafka-east-2", "kafka-east-3", "kafka-west-1", "kafka-west-2", "kafka-west-3", "mm2-1", "mm2-2"],
+    "envVars": ["NEXUS_SSH_KEY", "NEXUS_VMRUN_PATH"]
+  },
+  "steps": [
+    {
+      "command": "nexus kafka failover east-to-west --yes",
+      "waitAfterSeconds": 10,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["east-to-west", "RTO"],
+      "observe": [
+        { "where": "stdout", "what": "direction · suspended brokers · target-served boolean · probe token · RTO seconds · recovery state · timeline (pre-flight → failure-injected → target-healthy → recovery-attempted → source-healthy-again)" },
+        { "where": "kafka-west-1 broker logs", "what": "no errors; the probe topic is created + RF=3-replicated + the test record produces+consumes through" }
+      ]
+    }
+  ],
+  "whatProves": "When the East primary cluster is gone (3 brokers suspended), West keeps serving full RF=3 traffic — the Phase 0.H exit-gate posture (observed RTO ~13.20s in v0.5.0, under the 60s master-plan budget). MM2 has been mirroring throughout."
+}

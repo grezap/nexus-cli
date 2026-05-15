@@ -2,10 +2,22 @@
   "id": "DEMO-01-cluster-status",
   "title": "Live cluster health snapshot",
   "description": "Runs `nexus cluster-status` against the live lab. Showcases the v0.1 vertical slice: HTTPS introspection of Consul + Nomad + Portainer with mgmt tokens resolved on demand from Vault KV.",
+  "prerequisites": {
+    "vmsAlive": ["vault-1", "vault-2", "vault-3", "swarm-manager-1", "swarm-manager-2", "swarm-manager-3"],
+    "envVars": ["VAULT_ADDR", "VAULT_CACERT", "VAULT_TOKEN"]
+  },
   "steps": [
     {
       "command": "nexus cluster-status",
-      "waitAfterSeconds": 3
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["Consul", "Nomad", "Portainer"],
+      "observe": [
+        { "where": "stdout", "what": "three sections (Consul · Nomad · Portainer) rendered with an overall health summary at the top" },
+        { "where": "Consul UI https://consul.nexus.lab:8501", "what": "Members panel matches the CLI's Consul member list" },
+        { "where": "Nomad UI https://nomad.nexus.lab:4646", "what": "leader address matches the CLI's NomadSection.LeaderAddress" }
+      ]
     }
-  ]
+  ],
+  "whatProves": "Three independent operator surfaces (Consul + Nomad + Portainer) are reachable, healthy, and authenticated via Vault-KV-resolved mgmt tokens — the orchestration tier is operationally observable from one binary."
 }

@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-05-failover-test-swarm-manager",
+  "title": "Failover-test: Docker Swarm manager (host-level outage)",
+  "description": "Drives a Docker Swarm manager-loss scenario by SUSPENDING the current Swarm-leader VM at the host level (vmrun suspend) — not a graceful service stop, a real outage. Measures the heartbeat-detection-bound RTO, then resumes the VM.",
+  "prerequisites": {
+    "vmsAlive": ["vault-1", "vault-2", "vault-3", "swarm-manager-1", "swarm-manager-2", "swarm-manager-3", "swarm-worker-1", "swarm-worker-2", "swarm-worker-3"],
+    "envVars": ["NEXUS_SSH_KEY", "NEXUS_VMRUN_PATH", "VAULT_ADDR", "VAULT_CACERT", "VAULT_TOKEN"]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test swarm-manager",
+      "waitAfterSeconds": 10,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["swarm-manager", "RTO"],
+      "observe": [
+        { "where": "stdout", "what": "scenario tag · original leader · new leader · RTO seconds (longer than Consul/Nomad — heartbeat-detection-bound) · recovery state" },
+        { "where": "Portainer UI https://portainer.nexus.lab:9443", "what": "Cluster view briefly shows the suspended manager as `Down`, then `Ready` after vmrun resume" }
+      ]
+    }
+  ],
+  "whatProves": "Docker Swarm's manager raft tolerates a hard host-level outage of the leader VM; the CLI captures the heartbeat-detection RTO (observed ~21.59s in 0.3.2) — meaningfully slower than service-level kills, which is the realistic DR characteristic to know."
+}

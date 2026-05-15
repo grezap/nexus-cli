@@ -47,8 +47,40 @@ public sealed class DemoRunner : IDemoRunner
             var stepSw = Stopwatch.StartNew();
             var (exit, outTail, errTail) = await ExecShellAsync(step.Command, cancellationToken).ConfigureAwait(false);
             stepSw.Stop();
-            stepResults.Add(new DemoStepResult(i, step.Command, exit, outTail, errTail, stepSw.Elapsed));
-            if (exit != 0)
+
+            // ADR-0009: if expectations are set, they drive step success/failure
+            // (not just the raw exit code). When no expectations are set, behaviour
+            // matches v0.4.0 -- exit==0 means step OK.
+            bool? expectationMet = null;
+            string? expectationFailureReason = null;
+            var hasExpectations = step.ExpectedExitCode.HasValue
+                || (step.ExpectedOutputContains is { Count: > 0 });
+            if (hasExpectations)
+            {
+                var failures = new List<string>();
+                if (step.ExpectedExitCode.HasValue && exit != step.ExpectedExitCode.Value)
+                    failures.Add($"expected exit code {step.ExpectedExitCode.Value}, got {exit}");
+                if (step.ExpectedOutputContains is { Count: > 0 })
+                {
+                    var combined = outTail + "\n" + errTail;
+                    foreach (var token in step.ExpectedOutputContains)
+                    {
+                        if (!combined.Contains(token, StringComparison.Ordinal))
+                            failures.Add($"expected output to contain '{token}'");
+                    }
+                }
+                expectationMet = failures.Count == 0;
+                if (!expectationMet.Value)
+                    expectationFailureReason = string.Join("; ", failures);
+            }
+
+            stepResults.Add(new DemoStepResult(
+                i, step.Command, exit, outTail, errTail, stepSw.Elapsed,
+                ExpectationMet: expectationMet,
+                ExpectationFailureReason: expectationFailureReason));
+
+            var stepOk = hasExpectations ? expectationMet == true : exit == 0;
+            if (!stepOk)
             {
                 status = DemoStatus.StepFailed;
                 break;

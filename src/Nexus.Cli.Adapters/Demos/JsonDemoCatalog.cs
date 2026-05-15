@@ -50,13 +50,31 @@ public sealed class JsonDemoCatalog : IDemoCatalog
                 if (string.IsNullOrEmpty(dto.Id))
                     continue;
                 var steps = (dto.Steps ?? new List<DemoStepJson>())
-                    .Select(s => new DemoStep(s.Command ?? string.Empty, s.WaitAfterSeconds))
+                    .Select(s => new DemoStep(
+                        s.Command ?? string.Empty,
+                        s.WaitAfterSeconds,
+                        ExpectedExitCode: s.ExpectedExitCode,
+                        ExpectedOutputContains: s.ExpectedOutputContains is { Count: > 0 }
+                            ? (IReadOnlyList<string>)s.ExpectedOutputContains.ToList()
+                            : null,
+                        Observations: s.Observe is { Count: > 0 }
+                            ? (IReadOnlyList<DemoObservation>)s.Observe
+                                .Select(o => new DemoObservation(o.Where ?? string.Empty, o.What ?? string.Empty))
+                                .ToList()
+                            : null))
                     .ToList();
+                var prerequisites = dto.Prerequisites is null
+                    ? null
+                    : new DemoPrerequisites(
+                        (IReadOnlyList<string>)(dto.Prerequisites.VmsAlive ?? new List<string>()),
+                        (IReadOnlyList<string>)(dto.Prerequisites.EnvVars ?? new List<string>()));
                 result[dto.Id] = new DemoSpec(
                     dto.Id,
                     dto.Title ?? dto.Id,
                     dto.Description ?? string.Empty,
-                    steps);
+                    steps,
+                    Prerequisites: prerequisites,
+                    WhatProves: dto.WhatProves);
             }
             _cache = result;
             return Result.Ok(_cache);

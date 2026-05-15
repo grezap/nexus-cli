@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-03-failover-test-consul-leader",
+  "title": "Failover-test: Consul leader",
+  "description": "Drives a Consul Raft leader-loss scenario against the live orchestration tier. SSHs into the current leader, stops `consul.service`, measures the time until a new leader emerges, then auto-recovers.",
+  "prerequisites": {
+    "vmsAlive": ["vault-1", "vault-2", "vault-3", "swarm-manager-1", "swarm-manager-2", "swarm-manager-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_CACERT", "VAULT_TOKEN"]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test consul-leader",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["consul-leader", "RTO"],
+      "observe": [
+        { "where": "stdout", "what": "scenario tag · original leader · new leader · RTO seconds · recovery state · timeline (pre-flight → failure-injected → new-leader-observed → recovery-attempted → cluster-healthy-again)" },
+        { "where": "Consul UI https://consul.nexus.lab:8501", "what": "Servers panel briefly shows the killed node as `failed`, then `alive` again after recovery" }
+      ]
+    }
+  ],
+  "whatProves": "Consul's Raft re-elects a new leader within the lab's RTO budget after a hard service stop on the current leader (observed ~1.55s in 0.3.0). The CLI emits a structured timeline that lets an operator compare iterations."
+}

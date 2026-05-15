@@ -6,6 +6,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — Phase 0.G.0 pre-flight canon (2026-05-15)
+
+- **[ADR-0009](docs/adr/ADR-0009-cluster-adapter-spi-and-extended-demo-spec.md)** — *Phase 0.G v0.6: `IClusterAdapter` SPI for the data-tier verb expansion; System B JSON demo spec extended* — formalises the cluster-adapter framework (one adapter per cluster, SSH-shell-out per ADR-0008, no managed DB drivers linked), the 13 verb groups per cluster (`cluster-status` · `failover-test` · **`scale-out`** add/remove · **`scale-up`** · `backup` take/restore · `health` · `topology --watch` · `cert-rotate` · `chaos` · `acl` · `demo`), and the extended System B JSON spec shape (5 new optional fields: `prerequisites`, per-step `expectedExitCode`, `expectedOutputContains`, `observe[]`, `whatProves`). Implementation-side mirror of [`nexus-platform-plan` ADR-0024](https://github.com/grezap/nexus-platform-plan/blob/main/docs/adr/ADR-0024-aot-gate-amendment-and-cluster-adapter-framework.md). AOT exit gate raised to **≤30 MB** for v0.6.0 → v0.7.0; the v0.5.0 historical ≤25 MB gate (22.75 MB observed) stays sealed.
+- **Code (0.G.0d):** `Nexus.Cli.Core.Models.Demo` extended with optional fields on `DemoSpec` / `DemoStep` / `DemoStepResult`; new `DemoObservation` + `DemoPrerequisites` records. `Nexus.Cli.Adapters.Json.NexusJsonContext` extended with the new DTOs. `JsonDemoCatalog.Load()` maps the new optional JSON fields onto the extended model (backwards compatible — existing specs parse unchanged). `DemoRunner.RunAsync()` enforces `expectedExitCode` + `expectedOutputContains` per step; specs without expectations behave exactly as in v0.4.0. New tests in `tests/Nexus.Cli.Tests/Demos/`.
+
 ## [0.5.0] — 2026-05-15
 
 Phase 0.F finished: the **fifth and last master-plan verb** ships, closing

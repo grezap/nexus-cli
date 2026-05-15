@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-09-demo-record",
+  "title": "Demo: record a demo's tape",
+  "description": "Self-referential: invokes `nexus demo record` against DEMO-01-cluster-status, producing a VHS `.tape` file (and a GIF if `vhs` is on PATH). Confirms the record pipeline is wired correctly with the AOT-built binary.",
+  "prerequisites": {
+    "vmsAlive": [],
+    "envVars": []
+  },
+  "steps": [
+    {
+      "command": "nexus demo record DEMO-01-cluster-status --output-dir ./out",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["DEMO-01-cluster-status", "tape"],
+      "observe": [
+        { "where": "stdout", "what": "tape file path · output GIF path (if vhs available) or vhs install hint (if not)" },
+        { "where": "./out/", "what": "`.tape` file present; `.gif` present iff vhs is on PATH" }
+      ]
+    }
+  ],
+  "whatProves": "DemoRunner generates VHS `.tape` scripts correctly + the vhs-availability fallback message is operator-actionable when vhs is missing."
+}

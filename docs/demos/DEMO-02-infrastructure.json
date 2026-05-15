@@ -2,14 +2,29 @@
   "id": "DEMO-02-infrastructure",
   "title": "VM fleet inventory + per-cluster status",
   "description": "Shows the canonical vms.yaml fleet decorated with live VMware Workstation state, then drills into a single cluster (foundation). Read-only; safe to record + share.",
+  "prerequisites": {
+    "vmsAlive": [],
+    "envVars": ["NEXUS_VMRUN_PATH"]
+  },
   "steps": [
     {
       "command": "nexus infrastructure list",
-      "waitAfterSeconds": 4
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["foundation", "swarm", "kafka"],
+      "observe": [
+        { "where": "stdout", "what": "table of every VM in vms.yaml with its live VMware state (running / stopped / suspended)" }
+      ]
     },
     {
       "command": "nexus infrastructure status foundation",
-      "waitAfterSeconds": 4
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["foundation", "vault-"],
+      "observe": [
+        { "where": "stdout", "what": "foundation cluster's VMs detailed: dc-nexus, nexus-jumpbox, vault-1/2/3, vault-transit — with live state per VM" }
+      ]
     }
-  ]
+  ],
+  "whatProves": "vms.yaml is the canonical fleet inventory and the CLI reads it correctly + decorates with live VMware state — every VM the lab is supposed to have, plus its current power state, is one command away."
 }

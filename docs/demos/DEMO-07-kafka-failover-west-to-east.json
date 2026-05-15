@@ -1,0 +1,23 @@
+{
+  "id": "DEMO-07-kafka-failover-west-to-east",
+  "title": "Kafka failover: West → East",
+  "description": "Reverse direction of DEMO-06: suspends the 3 West brokers, proves East keeps serving. The more demo-worthy direction — the whole ecosystem tier (Schema Registry, REST Proxy, Connect, ksqlDB) is `kafka-east`-pinned, so they all keep serving uninterrupted while West is down.",
+  "prerequisites": {
+    "vmsAlive": ["kafka-east-1", "kafka-east-2", "kafka-east-3", "kafka-west-1", "kafka-west-2", "kafka-west-3", "mm2-1", "mm2-2", "schema-registry-1", "kafka-rest-1"],
+    "envVars": ["NEXUS_SSH_KEY", "NEXUS_VMRUN_PATH"]
+  },
+  "steps": [
+    {
+      "command": "nexus kafka failover west-to-east --yes",
+      "waitAfterSeconds": 10,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["west-to-east", "RTO"],
+      "observe": [
+        { "where": "stdout", "what": "direction · suspended brokers · target-served boolean · probe token · RTO seconds · recovery state" },
+        { "where": "Schema Registry HTTPS:8081 on schema-registry-1", "what": "stays reachable + responsive throughout (kafka-east client; unaffected by West outage)" },
+        { "where": "Confluent REST Proxy on kafka-rest-1", "what": "stays reachable + the same produce/consume round-trip continues to work" }
+      ]
+    }
+  ],
+  "whatProves": "Phase 0.H's bidirectional DR holds in both directions; the ecosystem tier (SR · REST · Connect · ksqlDB) is unaffected by a West outage (observed RTO ~13.57s in v0.5.0)."
+}

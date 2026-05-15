@@ -2,13 +2,26 @@ namespace Nexus.Cli.Core.Models;
 
 public sealed record DemoStep(
     string Command,
-    double WaitAfterSeconds);
+    double WaitAfterSeconds,
+    int? ExpectedExitCode = null,
+    IReadOnlyList<string>? ExpectedOutputContains = null,
+    IReadOnlyList<DemoObservation>? Observations = null);
+
+public sealed record DemoObservation(
+    string Where,
+    string What);
+
+public sealed record DemoPrerequisites(
+    IReadOnlyList<string> VmsAlive,
+    IReadOnlyList<string> EnvVars);
 
 public sealed record DemoSpec(
     string Id,
     string Title,
     string Description,
-    IReadOnlyList<DemoStep> Steps);
+    IReadOnlyList<DemoStep> Steps,
+    DemoPrerequisites? Prerequisites = null,
+    string? WhatProves = null);
 
 public sealed record DemoStepResult(
     int StepIndex,
@@ -16,7 +29,9 @@ public sealed record DemoStepResult(
     int ExitCode,
     string StdoutTail,
     string StderrTail,
-    TimeSpan Duration);
+    TimeSpan Duration,
+    bool? ExpectationMet = null,
+    string? ExpectationFailureReason = null);
 
 public enum DemoStatus
 {

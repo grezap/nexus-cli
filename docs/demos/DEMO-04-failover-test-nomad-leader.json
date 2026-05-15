@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-04-failover-test-nomad-leader",
+  "title": "Failover-test: Nomad leader",
+  "description": "Same shape as DEMO-03 but against Nomad's Raft cluster (port 4646, systemctl nomad). SSHs into the current Nomad leader, stops `nomad.service`, measures Raft re-election RTO, auto-recovers.",
+  "prerequisites": {
+    "vmsAlive": ["vault-1", "vault-2", "vault-3", "swarm-manager-1", "swarm-manager-2", "swarm-manager-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_CACERT", "VAULT_TOKEN"]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test nomad-leader",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["nomad-leader", "RTO"],
+      "observe": [
+        { "where": "stdout", "what": "scenario tag · original leader · new leader · RTO seconds · recovery state · timeline" },
+        { "where": "Nomad UI https://nomad.nexus.lab:4646", "what": "Servers tab briefly shows the killed node leaving and rejoining the raft" }
+      ]
+    }
+  ],
+  "whatProves": "Nomad's Raft re-elects under load; the CLI's failover-test family scales from Consul to Nomad with the same RTO-timeline shape (observed ~2.716s in 0.3.1)."
+}

@@ -237,11 +237,30 @@ public sealed class KafkaFailoverJsonOutput
 }
 
 // === Demo (v0.4) ===========================================================
+// Extended in v0.6 (ADR-0009) with 5 optional fields on the spec/step DTOs.
+// All additions are nullable -- DefaultIgnoreCondition.WhenWritingNull on the
+// source-gen context means absent fields don't appear in emitted JSON, so the
+// existing DEMO-01 / DEMO-02 specs deserialize + reserialize unchanged.
+
+public sealed class DemoObservationJson
+{
+    public string? Where { get; set; }
+    public string? What { get; set; }
+}
+
+public sealed class DemoPrerequisitesJson
+{
+    public List<string>? VmsAlive { get; set; }
+    public List<string>? EnvVars { get; set; }
+}
 
 public sealed class DemoStepJson
 {
     public string? Command { get; set; }
     public double WaitAfterSeconds { get; set; }
+    public int? ExpectedExitCode { get; set; }
+    public List<string>? ExpectedOutputContains { get; set; }
+    public List<DemoObservationJson>? Observe { get; set; }
 }
 
 public sealed class DemoSpecJson
@@ -250,6 +269,8 @@ public sealed class DemoSpecJson
     public string? Title { get; set; }
     public string? Description { get; set; }
     public List<DemoStepJson>? Steps { get; set; }
+    public DemoPrerequisitesJson? Prerequisites { get; set; }
+    public string? WhatProves { get; set; }
 }
 
 public sealed class DemoStepResultJson
@@ -260,6 +281,8 @@ public sealed class DemoStepResultJson
     public string StdoutTail { get; set; } = "";
     public string StderrTail { get; set; } = "";
     public double DurationSec { get; set; }
+    public bool? ExpectationMet { get; set; }
+    public string? ExpectationFailureReason { get; set; }
 }
 
 public sealed class DemoRunReportJson
