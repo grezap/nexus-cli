@@ -6,6 +6,111 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-05-15
+
+Phase 0.F finished: the **fifth and last master-plan verb** ships, closing
+the v0.x roadmap. **All 5 of 5 verbs now live.** Newly unblocked by Phase
+0.H (`nexus-infra-kafka` `v0.1.0`, 2026-05-15).
+
+### Added
+
+- **`nexus kafka failover east-to-west [--yes] [--json] [--no-color]`** and
+  **`nexus kafka failover west-to-east [...]`** — drive a region-loss Kafka
+  DR failover between the East + West KRaft clusters and measure RTO. Both
+  directions verified live against the running tier:
+  - **east → west: RTO 13.20 s** (52.04 s end-to-end, including
+    vmrun-suspend × 3 brokers + target produce/consume round-trip +
+    vmrun-resume + KRaft quorum reform on the source).
+  - **west → east: RTO 13.57 s** (53.67 s end-to-end). The more
+    demo-worthy direction — the whole ecosystem tier (Schema Registry,
+    REST Proxy, Connect, ksqlDB) is `kafka-east`-pinned, so they all keep
+    serving uninterrupted while `kafka-west` is down.
+  - Workflow per [ADR-0008](docs/adr/ADR-0008-kafka-failover-demo-grade-via-ssh.md):
+    pre-flight (target healthy?) → vmrun-suspend × 3 source brokers
+    (sequential, 2 s inter-suspend gap to dodge the `0.H.6`
+    VMware-under-load flake) → produce/consume round-trip on a fresh
+    RF=3 probe topic on the target (3 s poll, 90 s deadline) → vmrun
+    start nogui × 3 to recover → wait for source KRaft quorum
+    re-form (4 min deadline).
+  - **Master-plan gate (line 258 — "Kafka DR east→west < 60 s via
+    `nexus-cli kafka failover`"): MET**, with ~46 s headroom against the
+    60 s budget.
+  - Exit codes: `0` failover OK + recovery clean, `1` target did NOT
+    serve under source-loss (DR posture broken), `2` service-side error
+    (pre-flight failed, vmrun suspend failed, recovery failed), `3`
+    operator aborted at the interactive prompt.
+- **`KafkaFailoverService`** in `Nexus.Cli.Adapters.Cluster` — ~250-LOC
+  orchestrator with a single monotonic `Stopwatch` driving the 5-phase
+  `KafkaFailoverTimeline` (preFlight → failureInjected → targetHealthy →
+  recoveryAttempted → sourceHealthyAgain).
+- **`KafkaFailoverBootstrapper`** — DI wiring, lighter than
+  `FailoverTestBootstrapper` (no Vault tokens consumed; the kafka CLI
+  tools on each broker authenticate to their own KRaft cluster via the
+  broker's on-disk PEM keystore, rendered by Vault Agent at the OS
+  layer).
+- **ADR-0008** records the design: demo-grade scope (vs
+  production-grade per-consumer-group offset translation, deferred to
+  v0.5.1); SSH + on-broker `kafka-*` CLI shell-out (vs adding the
+  `Confluent.Kafka` NuGet, which would blow the 25 MB AOT exit gate and
+  introduce `librdkafka` AOT risk); subcommand shape mirroring the
+  established `failover-test` family.
+- **`docs/verification/0.5.0-kafka-failover.md`** — full live evidence
+  for both directions, the CLI surface, the exit-code semantics, the
+  `--json` shape, and the "what got fixed during the run" recovery
+  playbook.
+
+### Fixed
+
+- **`SshKeyDiscovery` preferred the operator's personal `~/.ssh/id_ed25519`
+  over the lab-canonical `~/.ssh/nexus_gateway_ed25519`.** The system
+  `ssh.exe` resolves the right key via `~/.ssh/config`'s `Host
+  192.168.70.*` stanza (→ `IdentityFile ~/.ssh/nexus_gateway_ed25519`);
+  SSH.NET (used by the CLI) does not parse `ssh_config`, so it was
+  falling back on the first `id_ed25519` it found — the operator's
+  personal/GitHub key, NOT authorized on any lab VM. Surface symptom:
+  every SSH-using verb's pre-flight failed with `Permission denied
+  (publickey)`. **Fix:** `SshKeyDiscovery.DefaultRelativePaths` now
+  prefers `nexus_gateway_ed25519` first, then `id_ed25519`, then
+  `id_rsa`. The unavailable-message names the lab-canonical path
+  explicitly. Surfaced by the v0.5.0 kafka failover smoke test; the
+  same bug latently affected every SSH-using verb on any build host
+  where the operator's personal key differs from the lab key.
+- **Pre-flight health probe matched the wrong field name.**
+  `kafka-metadata-quorum.sh ... describe --status` on Apache Kafka 3.8
+  emits `LeaderId:`; the v0.5.0 initial code grepped for
+  `CurrentLeader:` (an older KRaft-draft field name). Surface symptom:
+  "pre-flight: target cluster is not healthy" against a perfectly
+  healthy cluster. Fix: the probe now regex-matches `LeaderId:\s+(\d+)`
+  and verifies the parsed integer is positive.
+
+### Changed
+
+- AOT publish footprint: **win-x64 22.75 MB** (was 22.65 MB at v0.4.0;
+  +0.10 MB for the v0.5.0 verb — entirely new C# code, no new NuGets).
+  **2.25 MB headroom** vs the 25 MB master-plan exit gate. The
+  "managed-vs-native-CLI decision" the memory pre-flagged is resolved in
+  favour of native; the v0.x roadmap closes without needing to add
+  `Confluent.Kafka` or drop AOT.
+- Version bumped 0.4.0 → 0.5.0.
+- `Program.cs`: replaced the stub `kafka.AddCommand<KafkaFailoverCommand>`
+  registration with the new `failover east-to-west` / `failover
+  west-to-east` branch.
+- `AotRoots.cs`: removed the stub `KafkaFailoverSettings` root; added
+  the two new command + settings type pairs.
+
+### Deferred to v0.5.x
+
+- **Real per-consumer-group offset translation** via MM2's
+  `<src>.checkpoints.internal` topic. Building it now would ship
+  under-exercised — no real consumer app exists yet to translate
+  offsets FOR. The first real consumer is `streamcore` (Phase 12);
+  building this alongside that lets us test against actual consumer
+  behaviour. See ADR-0008 § "Fork 1 — what should the verb DO?" for the
+  full reasoning.
+- **A `--reverse` reconcile mode** for "east came back up, replay
+  west's drift back into east" (per DEMO-08 § 4). Same reason — needs
+  a real consumer to be meaningful.
+
 ## [0.4.0] — 2026-05-14
 
 Phase 0.F slice 4: the `demo` verb ships in full. **4 of 5 master-plan

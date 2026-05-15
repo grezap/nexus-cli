@@ -5,6 +5,7 @@ using Nexus.Cli.Commands;
 using Nexus.Cli.Commands.Demo;
 using Nexus.Cli.Commands.FailoverTest;
 using Nexus.Cli.Commands.Infrastructure;
+using Nexus.Cli.Commands.KafkaFailover;
 using Nexus.Cli.Infrastructure;
 using Spectre.Console.Cli;
 
@@ -33,7 +34,7 @@ internal static class Program
         app.Configure(config =>
         {
             config.SetApplicationName("nexus");
-            config.SetApplicationVersion("0.4.0");
+            config.SetApplicationVersion("0.5.0");
 
             config.AddCommand<ClusterStatusCommand>("cluster-status")
                 .WithDescription("Health of Consul + Nomad + Portainer in the live lab cluster.")
@@ -85,9 +86,21 @@ internal static class Program
 
             config.AddBranch("kafka", kafka =>
             {
-                kafka.SetDescription("(stub, v0.5) Kafka DR helpers.");
-                kafka.AddCommand<KafkaFailoverCommand>("failover")
-                    .WithDescription("(stub) East→West DR via MM2.");
+                kafka.SetDescription("Kafka DR helpers (Phase 0.H Kafka ecosystem must be live).");
+                kafka.AddBranch("failover", failover =>
+                {
+                    failover.SetDescription("Drive a region-loss DR failover between the East + West KRaft clusters and measure RTO. See ADR-0008 for the v0.5.0 demo-grade scope.");
+                    failover.AddCommand<KafkaFailoverEastToWestCommand>("east-to-west")
+                        .WithDescription("Vmrun-suspend the 3 kafka-east brokers (HOST-LEVEL region-loss simulation); verify kafka-west keeps serving via an RF=3 produce/consume round-trip; measure RTO; vmrun-resume to recover.")
+                        .WithExample(["kafka", "failover", "east-to-west"])
+                        .WithExample(["kafka", "failover", "east-to-west", "--json"])
+                        .WithExample(["kafka", "failover", "east-to-west", "--yes"]);
+                    failover.AddCommand<KafkaFailoverWestToEastCommand>("west-to-east")
+                        .WithDescription("Vmrun-suspend the 3 kafka-west brokers (HOST-LEVEL region-loss simulation); verify kafka-east keeps serving via an RF=3 produce/consume round-trip; measure RTO; vmrun-resume to recover.")
+                        .WithExample(["kafka", "failover", "west-to-east"])
+                        .WithExample(["kafka", "failover", "west-to-east", "--json"])
+                        .WithExample(["kafka", "failover", "west-to-east", "--yes"]);
+                });
             });
 
             config.AddBranch("demo", demo =>

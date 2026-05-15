@@ -3,6 +3,7 @@ using Nexus.Cli.Commands;
 using Nexus.Cli.Commands.Demo;
 using Nexus.Cli.Commands.FailoverTest;
 using Nexus.Cli.Commands.Infrastructure;
+using Nexus.Cli.Commands.KafkaFailover;
 
 namespace Nexus.Cli.Infrastructure;
 
@@ -48,6 +49,9 @@ internal static class AotRoots
     [DynamicDependency(CommandRoots, typeof(DemoRecordCommand))]
     [DynamicDependency(SettingsRoots, typeof(DemoRecordSettings))]
 
-    [DynamicDependency(SettingsRoots, typeof(KafkaFailoverSettings))]
+    [DynamicDependency(CommandRoots, typeof(KafkaFailoverEastToWestCommand))]
+    [DynamicDependency(SettingsRoots, typeof(KafkaFailoverEastToWestSettings))]
+    [DynamicDependency(CommandRoots, typeof(KafkaFailoverWestToEastCommand))]
+    [DynamicDependency(SettingsRoots, typeof(KafkaFailoverWestToEastSettings))]
     public static void KeepAlive() { }
 }

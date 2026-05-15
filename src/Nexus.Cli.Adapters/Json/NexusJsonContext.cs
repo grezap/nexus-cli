@@ -210,6 +210,32 @@ public sealed class FailoverTestJsonOutput
     public FailoverTimelineJson? Timeline { get; set; }
 }
 
+// === KafkaFailoverReport JSON output (v0.5) ================================
+
+public sealed class KafkaFailoverTimelineJson
+{
+    public double PreFlightCompletedSec { get; set; }
+    public double FailureInjectedSec { get; set; }
+    public double TargetHealthySec { get; set; }
+    public double RecoveryAttemptedSec { get; set; }
+    public double SourceHealthyAgainSec { get; set; }
+}
+
+public sealed class KafkaFailoverJsonOutput
+{
+    public string Direction { get; set; } = "";
+    public string StartedAtUtc { get; set; } = "";
+    public string SourceCluster { get; set; } = "";
+    public string TargetCluster { get; set; } = "";
+    public List<string> SuspendedBrokers { get; set; } = new();
+    public bool TargetServedAfterFailure { get; set; }
+    public string? TargetProbeToken { get; set; }
+    public double RtoSeconds { get; set; }
+    public string Recovery { get; set; } = "";
+    public string? RecoveryHint { get; set; }
+    public KafkaFailoverTimelineJson? Timeline { get; set; }
+}
+
 // === Demo (v0.4) ===========================================================
 
 public sealed class DemoStepJson
@@ -280,6 +306,7 @@ public sealed class DemoRecordReportJson
 [JsonSerializable(typeof(InfrastructureStatusJsonOutput))]
 [JsonSerializable(typeof(InfrastructureOpsJsonOutput))]
 [JsonSerializable(typeof(FailoverTestJsonOutput))]
+[JsonSerializable(typeof(KafkaFailoverJsonOutput))]
 [JsonSerializable(typeof(DemoSpecJson))]
 [JsonSerializable(typeof(DemoRunReportJson))]
 [JsonSerializable(typeof(DemoRecordReportJson))]

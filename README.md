@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.F%20v0.4.0-yellow)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.F%20v0.5.0%20%E2%9C%85%205%2F5%20verbs-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,7 +12,7 @@ The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB N
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.4.0):** **Four of five master-plan verbs ship.** `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), `failover-test {consul-leader, nomad-leader, swarm-manager}` (v0.3.x), and **`demo {list, run, record}`** (v0.4.0; JSON-spec orchestrator + VHS `.tape` generator). Verified live across the prior 3 verbs (RTOs: consul 1.55s, nomad 2.716s, swarm-manager 21.59s — all auto-recovered). The only remaining stub is `kafka failover` (v0.5) — **newly unblocked**: the Kafka tier ([`grezap/nexus-infra-kafka`](https://github.com/grezap/nexus-infra-kafka)) is live as of 2026-05-15 (Phase 0.H closed, `v0.1.0`), so v0.5 implementation is queued and no longer waiting on infra.
+> **Current state (v0.5.0):** **All 5 of 5 master-plan verbs ship — Phase 0.F closed.** `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), `failover-test {consul-leader, nomad-leader, swarm-manager}` (v0.3.x), `demo {list, run, record}` (v0.4.0), and **`kafka failover {east-to-west, west-to-east}`** (v0.5.0; ADR-0008 — region-loss DR via vmrun-suspend × 3 source brokers + produce/consume round-trip on the target + vmrun-resume). Verified live: consul 1.55s · nomad 2.716s · swarm-manager 21.59s · kafka east→west 13.20s · kafka west→east 13.57s — all RTOs auto-recovered, all under their master-plan budgets.
 
 ## What's in here
 
@@ -39,7 +39,8 @@ The operator surface for the **NexusPlatform 66-VM lab** — a single ≤25 MB N
 | `nexus demo list` | ✅ v0.4.0 | Enumerate demos in the catalog (JSON files under `docs/demos/` or `NEXUS_DEMOS_PATH`) |
 | `nexus demo run <id>` | ✅ v0.4.0 | Sequence a demo's shell-command steps; capture exit + stdout/stderr tails |
 | `nexus demo record <id>` | ✅ v0.4.0 | Generate VHS `.tape` + render to GIF via the `vhs` binary (graceful fallback if vhs isn't installed) |
-| `nexus kafka failover` | 🟡 stub (v0.5; **infra unblocked 2026-05-15**) | East→West DR via MM2 — the Kafka tier (Phase 0.H) is live, ready for the v0.5 implementation |
+| `nexus kafka failover east-to-west` | ✅ v0.5.0 | Vmrun-suspend the 3 kafka-east brokers, prove kafka-west keeps serving via RF=3 produce/consume round-trip, vmrun-resume; live RTO **13.20 s** (60 s gate) |
+| `nexus kafka failover west-to-east` | ✅ v0.5.0 | Symmetric: vmrun-suspend the 3 kafka-west brokers; live RTO **13.57 s**. The more demo-worthy direction (ecosystem stays up) |
 
 Run `nexus --help` for the live verb list against the binary you have installed.
 
@@ -155,7 +156,7 @@ Nexus.Cli.Adapters may depend on Nexus.Cli.Core.
 Nothing depends on Nexus.Cli.
 ```
 
-ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Five ADRs ship with v0.1.0 covering framework choice, AOT cadence, layout, auth model, and the Dapper-on-AOT mandate for future DB I/O.
+ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Eight ADRs cover framework choice (0001), AOT cadence (0002), layout (0003), auth model (0004), Dapper-on-AOT (0005), hand-rolled vms.yaml reader (0006), SSH.NET over ssh.exe (0007), and the v0.5 kafka-failover demo-grade-via-SSH design (0008).
 
 ## Roadmap
 
@@ -171,7 +172,7 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Five ADRs ship with v0.1.
 | v0.4+ | `winget` manifest; `.deb`; `--watch` flag; deferred to slice cycles |
 | v0.3.0 | `failover-test`; SSH client + raft introspection |
 | v0.4.0 | `demo run/record` — VHS .tape orchestration + Playwright bridge |
-| v0.5.0 | `kafka failover` — Phase 0.H Kafka ecosystem is live (`nexus-infra-kafka` `v0.1.0`, 2026-05-15); next CLI release picks this up |
+| v0.5.0 | `kafka failover {east-to-west, west-to-east}` — ADR-0008; live RTOs 13.20 s + 13.57 s (60 s gate); **shipped 2026-05-15**, closes the v0.x roadmap with 5/5 master-plan verbs live |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing

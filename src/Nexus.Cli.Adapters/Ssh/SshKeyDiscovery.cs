@@ -4,6 +4,17 @@ namespace Nexus.Cli.Adapters.Ssh;
 /// Resolves the operator's SSH private key path without touching the key contents.
 /// Lookup order: <c>NEXUS_SSH_KEY</c> env var, then the canonical OpenSSH paths
 /// under the user's home directory.
+/// <para>
+/// <c>nexus_gateway_ed25519</c> is preferred: it is the lab-canonical key name
+/// referenced by <c>~/.ssh/config</c>'s <c>Host 192.168.70.*</c> stanza on the
+/// build host. The fleet's <c>authorized_keys</c> files trust it under the
+/// comment <c>nexusadmin@nexus-gateway</c>. A user's personal/GitHub
+/// <c>id_ed25519</c> is NOT authorized on the lab VMs even when present, so
+/// preferring it (as v0.4.x did) silently breaks every SSH-using verb against
+/// the kafka + later tiers. Falls back to <c>id_ed25519</c> / <c>id_rsa</c>
+/// for environments where the user has aliased their lab key to one of those
+/// canonical names.
+/// </para>
 /// </summary>
 public static class SshKeyDiscovery
 {
@@ -11,8 +22,9 @@ public static class SshKeyDiscovery
 
     private static readonly string[] DefaultRelativePaths =
     {
+        Path.Combine(".ssh", "nexus_gateway_ed25519"),
         Path.Combine(".ssh", "id_ed25519"),
-        Path.Combine(".ssh", "id_rsa")
+        Path.Combine(".ssh", "id_rsa"),
     };
 
     public static string? Resolve()
@@ -36,5 +48,6 @@ public static class SshKeyDiscovery
 
     public static string UnavailableMessage()
         => $"no SSH private key found. Set {KeyEnvVar} to an absolute path, or place a key at " +
-           $"{Path.Combine("~", ".ssh", "id_ed25519")} or {Path.Combine("~", ".ssh", "id_rsa")}.";
+           $"{Path.Combine("~", ".ssh", "nexus_gateway_ed25519")} (preferred — the lab-canonical name), " +
+           $"{Path.Combine("~", ".ssh", "id_ed25519")}, or {Path.Combine("~", ".ssh", "id_rsa")}.";
 }

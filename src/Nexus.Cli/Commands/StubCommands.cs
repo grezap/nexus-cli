@@ -1,4 +1,8 @@
-using System.ComponentModel;
+// All v0.x master-plan verbs are now implemented; this file is intentionally
+// empty. Kept in source so the project still has an anchor for any future
+// stub-command pattern; the StubCommandBase helper above is preserved for
+// reuse if a new master-plan verb is sketched ahead of implementation.
+
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -17,17 +21,3 @@ internal abstract class StubCommandBase<TSettings> : Command<TSettings>
         return 0;
     }
 }
-
-public sealed class KafkaFailoverSettings : CommandSettings
-{
-    [CommandOption("--cluster")]
-    [Description("Source cluster (east|west)")]
-    public string? Cluster { get; set; }
-}
-
-internal sealed class KafkaFailoverCommand : StubCommandBase<KafkaFailoverSettings>
-{
-    protected override string Name => "kafka failover";
-    protected override string PlannedVersion => "v0.5.0 (paired with Phase 0.H)";
-}
-
