@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Nexus.Cli.Commands;
+using Nexus.Cli.Commands.Cluster;
 using Nexus.Cli.Commands.Demo;
 using Nexus.Cli.Commands.FailoverTest;
 using Nexus.Cli.Commands.Infrastructure;
@@ -34,7 +35,7 @@ internal static class Program
         app.Configure(config =>
         {
             config.SetApplicationName("nexus");
-            config.SetApplicationVersion("0.5.0");
+            config.SetApplicationVersion("0.6.0-dev");
 
             config.AddCommand<ClusterStatusCommand>("cluster-status")
                 .WithDescription("Health of Consul + Nomad + Portainer in the live lab cluster.")
@@ -82,6 +83,67 @@ internal static class Program
                     .WithExample(["failover-test", "swarm-manager"])
                     .WithExample(["failover-test", "swarm-manager", "--json"])
                     .WithExample(["failover-test", "swarm-manager", "--yes"]);
+                failover.AddCommand<ClusterFailoverTestCommand>("cluster")
+                    .WithDescription("v0.6 generic per-data-cluster failover (Redis | Mongo | Percona | Patroni | ClickHouse | StarRocks | SQL FCI/AG | Kafka). Dispatches via the IClusterAdapter SPI.")
+                    .WithExample(["failover-test", "cluster", "redis"])
+                    .WithExample(["failover-test", "cluster", "kafka", "--direction", "east-to-west"])
+                    .WithExample(["failover-test", "cluster", "patroni", "--node", "pg-replica-1"]);
+            });
+
+            // ── v0.6 cluster verbs (ADR-0009 IClusterAdapter SPI) ─────────────
+            config.AddCommand<ClusterStatusForClusterCommand>("status")
+                .WithDescription("v0.6: per-data-cluster status (members, roles, health). For the infra-tier overview, use `cluster-status`.")
+                .WithExample(["status", "redis"])
+                .WithExample(["status", "patroni", "--json"]);
+            config.AddCommand<ClusterHealthCommand>("health")
+                .WithDescription("v0.6: per-data-cluster healthcheck (replication lag, disk usage, memory pressure -- per-cluster probe set).")
+                .WithExample(["health", "redis"])
+                .WithExample(["health", "clickhouse", "--json"]);
+            config.AddCommand<ClusterTopologyCommand>("topology")
+                .WithDescription("v0.6: per-data-cluster topology (nodes + shards + replication state). --watch redraws every 2s.")
+                .WithExample(["topology", "redis"])
+                .WithExample(["topology", "redis", "--watch"]);
+            config.AddCommand<ClusterCertRotateCommand>("cert-rotate")
+                .WithDescription("v0.6: trigger Vault Agent cert re-render + service reload across every node in the cluster.")
+                .WithExample(["cert-rotate", "redis"])
+                .WithExample(["cert-rotate", "redis", "--yes"]);
+            config.AddCommand<ClusterAclCommand>("acl")
+                .WithDescription("v0.6: per-data-cluster ACL inspection / mutation (list | describe | grant | revoke).")
+                .WithExample(["acl", "redis", "list"])
+                .WithExample(["acl", "redis", "describe", "--user", "ingest"]);
+            config.AddCommand<ClusterChaosCommand>("chaos")
+                .WithDescription("v0.6: inject a chaos scenario (network-partition | slow-disk | cpu-starve | memory-pressure | packet-loss).")
+                .WithExample(["chaos", "redis", "network-partition"])
+                .WithExample(["chaos", "redis", "slow-disk", "--duration", "60"]);
+            config.AddCommand<ClusterScaleUpCommand>("scale-up")
+                .WithDescription("v0.6: vertical VM resize (CPU/RAM/disk). Cluster-aware -- refuses primaries unless --force-primary.")
+                .WithExample(["scale-up", "redis-2", "--ram", "4096"])
+                .WithExample(["scale-up", "ch-shard1-rep1", "--cpu", "8", "--ram", "16384"]);
+
+            config.AddBranch("scale-out", scaleOut =>
+            {
+                scaleOut.SetDescription("v0.6: horizontal cluster-membership change (add or remove a node).");
+                scaleOut.AddCommand<ClusterScaleOutAddCommand>("add")
+                    .WithDescription("Clone a new VM, install the cluster's role packages, and join it to the cluster.")
+                    .WithExample(["scale-out", "add", "redis", "--role", "replica"])
+                    .WithExample(["scale-out", "add", "clickhouse", "--role", "replica", "--shard", "1"]);
+                scaleOut.AddCommand<ClusterScaleOutRemoveCommand>("remove")
+                    .WithDescription("Drain + remove a node from the cluster, then destroy its VM.")
+                    .WithExample(["scale-out", "remove", "redis", "redis-6"])
+                    .WithExample(["scale-out", "remove", "patroni", "pg-replica-2", "--yes"]);
+            });
+
+            config.AddBranch("backup", backup =>
+            {
+                backup.SetDescription("v0.6: per-data-cluster backup take + restore.");
+                backup.AddCommand<ClusterBackupTakeCommand>("take")
+                    .WithDescription("Take a snapshot of the cluster's data + write to a destination (NFS / S3 / local).")
+                    .WithExample(["backup", "take", "redis"])
+                    .WithExample(["backup", "take", "redis", "--tag", "before-migration"]);
+                backup.AddCommand<ClusterBackupRestoreCommand>("restore")
+                    .WithDescription("Restore a prior backup. DESTRUCTIVE: overwrites existing cluster data.")
+                    .WithExample(["backup", "restore", "redis", "backup-2026-05-16-01"])
+                    .WithExample(["backup", "restore", "redis", "backup-2026-05-16-01", "--yes"]);
             });
 
             config.AddBranch("kafka", kafka =>

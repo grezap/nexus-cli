@@ -307,6 +307,171 @@ public sealed class DemoRecordReportJson
     public double DurationSec { get; set; }
 }
 
+// === Cluster verb outputs (v0.6 / ADR-0009) ================================
+
+public sealed class ClusterMemberJson
+{
+    public string Hostname { get; set; } = "";
+    public string Ip { get; set; } = "";
+    public string Role { get; set; } = "";
+    public string Status { get; set; } = "";
+    public string? ShardId { get; set; }
+    public double? ReplicationLagSeconds { get; set; }
+}
+
+public sealed class ClusterStatusOutputJson
+{
+    public string ClusterId { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string OverallHealth { get; set; } = "";
+    public string? Leader { get; set; }
+    public string CapturedAtUtc { get; set; } = "";
+    public List<ClusterMemberJson> Members { get; set; } = new();
+}
+
+public sealed class FailoverTimelineSecondsJson
+{
+    public double PreFlightCompletedSec { get; set; }
+    public double FailureInjectedSec { get; set; }
+    public double NewLeaderObservedSec { get; set; }
+    public double RecoveryAttemptedSec { get; set; }
+    public double ClusterHealthyAgainSec { get; set; }
+}
+
+public sealed class ClusterFailoverOutputJson
+{
+    public string Scenario { get; set; } = "";
+    public string StartedAtUtc { get; set; } = "";
+    public string OriginalPrimary { get; set; } = "";
+    public string? NewPrimary { get; set; }
+    public double RtoSeconds { get; set; }
+    public string Recovery { get; set; } = "";
+    public string? RecoveryHint { get; set; }
+    public FailoverTimelineSecondsJson? Timeline { get; set; }
+}
+
+public sealed class ClusterScaleOutOutputJson
+{
+    public string OperationType { get; set; } = "";
+    public string Outcome { get; set; } = "";
+    public string? OutcomeReason { get; set; }
+    public List<string> AffectedNodes { get; set; } = new();
+    public double DurationSec { get; set; }
+    public string StartedAtUtc { get; set; } = "";
+}
+
+public sealed class ClusterScaleUpOutputJson
+{
+    public string VmName { get; set; } = "";
+    public string Outcome { get; set; } = "";
+    public string? OutcomeReason { get; set; }
+    public int? OldCpu { get; set; }
+    public int? NewCpu { get; set; }
+    public int? OldRamMb { get; set; }
+    public int? NewRamMb { get; set; }
+    public int? OldDiskGb { get; set; }
+    public int? NewDiskGb { get; set; }
+    public double DurationSec { get; set; }
+}
+
+public sealed class HealthProbeJson
+{
+    public string Name { get; set; } = "";
+    public string Target { get; set; } = "";
+    public string Status { get; set; } = "";
+    public string? Value { get; set; }
+    public string? Threshold { get; set; }
+}
+
+public sealed class ClusterHealthOutputJson
+{
+    public string ClusterId { get; set; } = "";
+    public string OverallHealth { get; set; } = "";
+    public string CapturedAtUtc { get; set; } = "";
+    public List<HealthProbeJson> Probes { get; set; } = new();
+}
+
+public sealed class TopologyNodeJson
+{
+    public string Hostname { get; set; } = "";
+    public string Role { get; set; } = "";
+    public string Status { get; set; } = "";
+    public double? ReplicationLagSeconds { get; set; }
+}
+
+public sealed class TopologyShardJson
+{
+    public string ShardId { get; set; } = "";
+    public string Primary { get; set; } = "";
+    public List<string> Replicas { get; set; } = new();
+    public string? SlotRange { get; set; }
+}
+
+public sealed class ClusterTopologyOutputJson
+{
+    public string ClusterId { get; set; } = "";
+    public string CapturedAtUtc { get; set; } = "";
+    public List<TopologyNodeJson> Nodes { get; set; } = new();
+    public List<TopologyShardJson>? Shards { get; set; }
+}
+
+public sealed class ClusterBackupOutputJson
+{
+    public string BackupId { get; set; } = "";
+    public string Destination { get; set; } = "";
+    public long SizeBytes { get; set; }
+    public double DurationSec { get; set; }
+    public string StartedAtUtc { get; set; } = "";
+}
+
+public sealed class ClusterRestoreOutputJson
+{
+    public string BackupId { get; set; } = "";
+    public long ItemsRestored { get; set; }
+    public double DurationSec { get; set; }
+    public string StartedAtUtc { get; set; } = "";
+}
+
+public sealed class CertRotatedNodeJson
+{
+    public string Hostname { get; set; } = "";
+    public string OldSerial { get; set; } = "";
+    public string NewSerial { get; set; } = "";
+    public string? Error { get; set; }
+}
+
+public sealed class ClusterCertRotationOutputJson
+{
+    public double DurationSec { get; set; }
+    public string StartedAtUtc { get; set; } = "";
+    public List<CertRotatedNodeJson> RotatedNodes { get; set; } = new();
+}
+
+public sealed class ClusterChaosOutputJson
+{
+    public string ScenarioApplied { get; set; } = "";
+    public string Target { get; set; } = "";
+    public bool Recovered { get; set; }
+    public double DurationSec { get; set; }
+    public string StartedAtUtc { get; set; } = "";
+    public List<HealthProbeJson> ObservedImpact { get; set; } = new();
+}
+
+public sealed class AclUserJson
+{
+    public string Name { get; set; } = "";
+    public bool Enabled { get; set; }
+    public List<string> Permissions { get; set; } = new();
+}
+
+public sealed class ClusterAclOutputJson
+{
+    public string ClusterId { get; set; } = "";
+    public string Verb { get; set; } = "";
+    public string CapturedAtUtc { get; set; } = "";
+    public List<AclUserJson> Users { get; set; } = new();
+}
+
 // === Source-gen context ====================================================
 
 [JsonSourceGenerationOptions(
@@ -333,4 +498,15 @@ public sealed class DemoRecordReportJson
 [JsonSerializable(typeof(DemoSpecJson))]
 [JsonSerializable(typeof(DemoRunReportJson))]
 [JsonSerializable(typeof(DemoRecordReportJson))]
+[JsonSerializable(typeof(ClusterStatusOutputJson))]
+[JsonSerializable(typeof(ClusterFailoverOutputJson))]
+[JsonSerializable(typeof(ClusterScaleOutOutputJson))]
+[JsonSerializable(typeof(ClusterScaleUpOutputJson))]
+[JsonSerializable(typeof(ClusterHealthOutputJson))]
+[JsonSerializable(typeof(ClusterTopologyOutputJson))]
+[JsonSerializable(typeof(ClusterBackupOutputJson))]
+[JsonSerializable(typeof(ClusterRestoreOutputJson))]
+[JsonSerializable(typeof(ClusterCertRotationOutputJson))]
+[JsonSerializable(typeof(ClusterChaosOutputJson))]
+[JsonSerializable(typeof(ClusterAclOutputJson))]
 public partial class NexusJsonContext : JsonSerializerContext;
