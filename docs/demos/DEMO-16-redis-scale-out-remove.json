@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-16-redis-scale-out-remove",
+  "title": "Redis: scale-out remove a node",
+  "description": "Drains + removes a Redis node from the cluster via `nexus scale-out remove redis <node>`. Reshards slots away first, then `del-node`, then destroys the VM. STUBBED in v0.6.0.",
+  "prerequisites": {
+    "vmsAlive": ["redis-1", "redis-2", "redis-3", "redis-4", "redis-5", "redis-6"],
+    "envVars": ["NEXUS_SSH_KEY", "NEXUS_VMRUN_PATH"]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out remove redis redis-6 --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["scale-out", "remove"],
+      "observe": [
+        { "where": "stdout", "what": "affected nodes table: redis-6 drained + forgotten; outcome=ok" },
+        { "where": "nexus status redis", "what": "5 nodes now (was 6); shard 3 has 1 primary + 0 replicas" }
+      ]
+    }
+  ],
+  "whatProves": "Redis Cluster can shrink horizontally with data drain (reshard-away + del-node). (Stubbed in v0.6.0; lands in 0.G.1.x.)"
+}

@@ -1,0 +1,21 @@
+{
+  "id": "DEMO-13-redis-health",
+  "title": "Redis: per-node health probes",
+  "description": "Runs `nexus health redis` -- SSH'd INFO replication probe per node + threshold-driven status. Replicas with > 5s lag yellow, > 30s lag red.",
+  "prerequisites": {
+    "vmsAlive": ["redis-1", "redis-2", "redis-3", "redis-4", "redis-5", "redis-6"],
+    "envVars": ["NEXUS_SSH_KEY"]
+  },
+  "steps": [
+    {
+      "command": "nexus health redis",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["overall=", "role", "replication-lag"],
+      "observe": [
+        { "where": "stdout", "what": "probes table: 6 'role' rows (one per node) + 3 'replication-lag' rows (one per replica) with seconds + threshold; overall health summary" }
+      ]
+    }
+  ],
+  "whatProves": "Per-node INFO replication parsing works; replication-lag threshold classification (green <5s / yellow <30s / red >=30s) renders correctly."
+}

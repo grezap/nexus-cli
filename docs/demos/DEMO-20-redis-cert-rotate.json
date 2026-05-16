@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-20-redis-cert-rotate",
+  "title": "Redis: rotate TLS certs across all nodes",
+  "description": "Forces a Vault Agent re-render + service reload across every Redis node. Captures the openssl serial before + after to verify the new cert was issued.",
+  "prerequisites": {
+    "vmsAlive": ["redis-1", "redis-2", "redis-3", "redis-4", "redis-5", "redis-6", "vault-1", "vault-2", "vault-3"],
+    "envVars": ["NEXUS_SSH_KEY"]
+  },
+  "steps": [
+    {
+      "command": "nexus cert-rotate redis --yes",
+      "waitAfterSeconds": 10,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["cert-rotate", "ok"],
+      "observe": [
+        { "where": "stdout", "what": "table: hostname / old serial / new serial / error (blank) -- one row per node; durations sum to ~30-45s" },
+        { "where": "openssl x509 -in /etc/nexus-redis/tls/server.crt -noout -serial on any node", "what": "matches the new serial reported by the CLI" }
+      ]
+    }
+  ],
+  "whatProves": "Vault Agent's template re-render mechanism is reliable; redis-server reload picks up the new keystore without dropping connections."
+}

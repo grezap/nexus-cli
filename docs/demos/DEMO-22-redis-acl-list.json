@@ -1,0 +1,30 @@
+{
+  "id": "DEMO-22-redis-acl-list",
+  "title": "Redis: list ACL users + permissions",
+  "description": "Runs `nexus acl redis list` -- SSH's to a node + runs `ACL LIST` + parses the output into a users table.",
+  "prerequisites": {
+    "vmsAlive": ["redis-1", "redis-2", "redis-3", "redis-4", "redis-5", "redis-6"],
+    "envVars": ["NEXUS_SSH_KEY"]
+  },
+  "steps": [
+    {
+      "command": "nexus acl redis list",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["acl", "default"],
+      "observe": [
+        { "where": "stdout", "what": "users table: at minimum the 'default' user with its permissions; any other ACL users added via Vault Agent template / operator manual config" }
+      ]
+    },
+    {
+      "command": "nexus acl redis describe --user default",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["default"],
+      "observe": [
+        { "where": "stdout", "what": "single-row table for 'default' user with its full permission flags" }
+      ]
+    }
+  ],
+  "whatProves": "RedisAdapter.AclAsync correctly parses Redis 6+ ACL LIST output; describe filtering by user works."
+}

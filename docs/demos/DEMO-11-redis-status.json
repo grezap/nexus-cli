@@ -1,0 +1,30 @@
+{
+  "id": "DEMO-11-redis-status",
+  "title": "Redis: live cluster status",
+  "description": "Runs `nexus status redis` against the running Redis Cluster. Shows the 6 nodes' roles + statuses + shard map.",
+  "prerequisites": {
+    "vmsAlive": ["redis-1", "redis-2", "redis-3", "redis-4", "redis-5", "redis-6"],
+    "envVars": ["NEXUS_SSH_KEY"]
+  },
+  "steps": [
+    {
+      "command": "nexus status redis",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["redis", "primary", "replica"],
+      "observe": [
+        { "where": "stdout", "what": "6-row table: 3 nodes role=primary + 3 nodes role=replica; status=alive for all; ShardId populated for primaries (slot range)" }
+      ]
+    },
+    {
+      "command": "nexus status redis --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["clusterId", "overallHealth", "members"],
+      "observe": [
+        { "where": "stdout", "what": "JSON ClusterStatusOutputJson with 6 ClusterMemberJson entries + overallHealth=green" }
+      ]
+    }
+  ],
+  "whatProves": "The RedisAdapter's GetStatusAsync correctly parses `CLUSTER NODES` output and renders + serializes the topology cleanly."
+}

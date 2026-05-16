@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-14-redis-topology",
+  "title": "Redis: cluster topology + slot map",
+  "description": "Runs `nexus topology redis` to surface the 3-shard topology with slot ranges + primary/replica pairing per shard. --watch redraws every 2s -- useful while observing a failover or rebalance.",
+  "prerequisites": {
+    "vmsAlive": ["redis-1", "redis-2", "redis-3", "redis-4", "redis-5", "redis-6"],
+    "envVars": ["NEXUS_SSH_KEY"]
+  },
+  "steps": [
+    {
+      "command": "nexus topology redis",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["nodes", "shard"],
+      "observe": [
+        { "where": "stdout (first table)", "what": "6 nodes with role + status + lag" },
+        { "where": "stdout (second table)", "what": "3 shards: each row is { ShardId, Primary, Replicas[], SlotRange }; slot ranges should sum to 16384 across shards" }
+      ]
+    }
+  ],
+  "whatProves": "RedisAdapter's TopologyAsync correctly stitches slot ranges from CLUSTER NODES + pairs primaries with their replicas per shard."
+}

@@ -1,0 +1,31 @@
+{
+  "id": "DEMO-12-redis-failover",
+  "title": "Redis: shard primary failover",
+  "description": "Drives a `CLUSTER FAILOVER` on a Redis replica to flip it to primary; measures RTO; verifies the previous primary becomes a replica.",
+  "prerequisites": {
+    "vmsAlive": ["redis-1", "redis-2", "redis-3", "redis-4", "redis-5", "redis-6"],
+    "envVars": ["NEXUS_SSH_KEY"]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster redis --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["redis-shard", "RTO", "new primary"],
+      "observe": [
+        { "where": "stdout", "what": "scenario=redis-shard · original primary · new primary · RTO seconds (~0.5-2s in the lab) · timeline (5 phases)" },
+        { "where": "redis-cli on any node: CLUSTER NODES", "what": "the originally-targeted replica now flagged 'master'; the previous primary now 'slave'" }
+      ]
+    },
+    {
+      "command": "nexus status redis",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["primary", "replica"],
+      "observe": [
+        { "where": "stdout", "what": "roles flipped: the replica picked above is now primary, the previous primary is now replica" }
+      ]
+    }
+  ],
+  "whatProves": "Redis Cluster gossip + CLUSTER FAILOVER produce a sub-second role flip under controlled conditions; the RedisAdapter measures + reports it via the failover-test timeline shape."
+}

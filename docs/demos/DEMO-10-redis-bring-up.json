@@ -1,0 +1,58 @@
+{
+  "id": "DEMO-10-redis-bring-up",
+  "title": "Redis Cluster bring-up from zero",
+  "description": "End-to-end: build the oltp-node Packer template, apply the nexus-infra-oltp Terraform env with only Redis enabled, run smoke-0.G.1.ps1, then introspect via `nexus status redis`. Closes Phase 0.G.1.",
+  "prerequisites": {
+    "vmsAlive": ["nexus-gateway", "dc-nexus", "vault-1", "vault-2", "vault-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_CACERT", "VAULT_TOKEN"]
+  },
+  "steps": [
+    {
+      "command": "pwsh -File ../nexus-infra-vmware/scripts/foundation.ps1 apply -Vars enable_oltp_dhcp_reservations=true",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["foundation apply complete"],
+      "observe": [
+        { "where": "stdout", "what": "6 dnsmasq dhcp-host reservations added for redis-1..6 (MACs :70-:75)" }
+      ]
+    },
+    {
+      "command": "pwsh -File ../nexus-infra-vmware/scripts/security.ps1 apply -Vars enable_oltp_pki=true,enable_oltp_redis_vault_agents=true",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["security apply complete"],
+      "observe": [
+        { "where": "stdout", "what": "Vault PKI role redis-server created + 6 per-node AppRoles + JSON sidecars at $HOME/.nexus/vault-agent-oltp-redis-*.json" }
+      ]
+    },
+    {
+      "command": "pwsh -File ../nexus-infra-oltp/scripts/oltp.ps1 apply -Vars enable_mongo=false,enable_percona=false,enable_patroni=false,enable_sql=false",
+      "waitAfterSeconds": 10,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["oltp apply complete"],
+      "observe": [
+        { "where": "stdout", "what": "6 module.vm clones + firstboot + redis-config + redis-vault-agents + redis-tls + redis-cluster-create overlays applied" },
+        { "where": "VMware Workstation Pro library", "what": "6 new VMs visible under H:\\VMS\\NexusPlatform\\05-oltp\\redis-1..6\\" }
+      ]
+    },
+    {
+      "command": "pwsh -File ../nexus-infra-oltp/scripts/oltp.ps1 smoke -Phase 0.G.1",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["ALL 0.G.1 SMOKE CHECKS PASSED"],
+      "observe": [
+        { "where": "stdout", "what": "~50 checks GREEN: 6 nodes systemd-active · CLUSTER INFO ok+slots=16384 · CLUSTER NODES shows 3 masters + 3 replicas · cross-shard MSET+MGET round-trip · TLS handshake from build host" }
+      ]
+    },
+    {
+      "command": "nexus status redis",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["redis", "primary", "replica"],
+      "observe": [
+        { "where": "stdout", "what": "table of 6 redis nodes with role + status + shard distribution; overall health green" }
+      ]
+    }
+  ],
+  "whatProves": "Phase 0.G.1 closure: nexus-infra-oltp's oltp-node Packer template builds; the foundation + security + oltp envs cross-coordinate; 6 Redis nodes form a 3+3 cluster with mTLS; the nexus-cli RedisAdapter introspects it correctly."
+}

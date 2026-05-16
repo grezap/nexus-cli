@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-17-redis-scale-up",
+  "title": "Redis: scale-up a replica VM (RAM)",
+  "description": "Vertically resizes a Redis replica VM. The IVmResizer powers off via vmrun, edits the .vmx (`memsize`), restarts, and verifies. Cluster-aware -- refuses primaries unless --force-primary. STUBBED in v0.6.0 (the full vmrun stop + .vmx edit + start sequence lands in 0.G.1.x).",
+  "prerequisites": {
+    "vmsAlive": ["redis-1", "redis-2", "redis-3", "redis-4", "redis-5", "redis-6"],
+    "envVars": ["NEXUS_SSH_KEY", "NEXUS_VMRUN_PATH"]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-up redis-2 --ram 4096 --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["scale-up", "ok"],
+      "observe": [
+        { "where": "stdout", "what": "old/new table: ram (MB) 2048 -> 4096; outcome=ok; duration ~30-60s (graceful guest shutdown + restart)" },
+        { "where": "VMware Workstation Pro library", "what": "redis-2's settings show 4 GB RAM" }
+      ]
+    }
+  ],
+  "whatProves": "scale-up is cluster-aware (refused primary without --force-primary) and idempotent (re-running with same size = no-op). (Stubbed in v0.6.0; lands in 0.G.1.x.)"
+}
