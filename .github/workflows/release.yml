@@ -12,6 +12,15 @@ on:
 permissions:
   contents: write
 
+# Force Node 24 runtime for every JS action regardless of pinned version.
+# Node 20 is deprecated on GitHub Actions runners as of 2026-06-02; this
+# env opts in now. Becomes a no-op once Node 24 is the runner default --
+# can be removed then. (Most actions here are already Node-24-native --
+# checkout@v6, upload-artifact@v7 -- but download-artifact@v4 still ships
+# Node 20; this env covers the gap until the next version lands.)
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     name: Build ${{ matrix.rid }}
