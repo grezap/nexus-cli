@@ -37,7 +37,7 @@
       ]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.64 'sudo /usr/local/sbin/nexus-etcdctl --user \"root:$(sudo cat /etc/nexus-etcd/etcd-root-password)\" get /service/nexus-pg/leader --print-value-only'",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.64 'ROOT_PWD=$(sudo cat /etc/nexus-etcd/etcd-root-password) && sudo /usr/local/sbin/nexus-etcdctl --user \"root:$ROOT_PWD\" get /service/nexus-pg/leader --print-value-only'",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["pg-replica-1"],
