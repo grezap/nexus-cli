@@ -1,0 +1,41 @@
+{
+  "id": "demo-0.G.4-patroni-mtls-roundtrip",
+  "title": "End-to-end mTLS psql round-trip via the HAProxy HA pair VIP",
+  "description": "Connects from outside-PG (the leader's nexusadmin shell) to PostgreSQL via the VRRP-floated VIP 192.168.70.60:5432 with sslmode=verify-full + sslrootcert pointing at the patroni-server CA bundle. Verifies the TLS handshake walks back to the lab root + the PG server reports the connection as SSL-on. Connecting via the VIP (not haproxy-pg-1 or haproxy-pg-2 directly) proves the cert IP-SAN design works -- both haproxy nodes' leaf certs carry the VIP so verify-full passes regardless of which haproxy currently holds it.",
+  "prerequisites": {
+    "vmsAlive": ["pg-primary", "pg-replica-1", "pg-replica-2", "haproxy-pg-1", "haproxy-pg-2"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "smoke-0.G.4.ps1 ALL GREEN; VIP 192.168.70.60 bound on exactly 1 haproxy node; pg_stat_ssl populated"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.61 'sudo test -s /etc/nexus-patroni/postgres-superuser-password && sudo test -s /etc/ssl/certs/patroni-ca.pem && echo PREFLIGHT_OK'",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["PREFLIGHT_OK"],
+      "observe": [
+        { "where": "stdout", "what": "KV-rendered postgres-superuser-password + operator-readable patroni-ca.pem both present on pg-primary" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.61 'SUPER_PWD=$(sudo cat /etc/nexus-patroni/postgres-superuser-password); PGPASSWORD=\"$SUPER_PWD\" psql \"host=192.168.70.60 port=5432 dbname=postgres user=nexusops sslmode=verify-full sslrootcert=/etc/ssl/certs/patroni-ca.pem\" -tA -c \"SELECT version(), current_setting(\\\"ssl\\\");\"'",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["PostgreSQL 17", "on"],
+      "observe": [
+        { "where": "stdout", "what": "Row with PostgreSQL 17.x banner + ssl=on; if the TLS chain fails the psql would error 'certificate verify failed'" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.61 'sudo -u postgres psql -h /var/run/nexus-patroni -U postgres -d postgres -tA -c \"SELECT ssl, version, client_addr FROM pg_stat_ssl JOIN pg_stat_activity USING (pid) WHERE usename=\\\"nexusops\\\" ORDER BY backend_start DESC LIMIT 1;\"'",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["t", "TLSv1"],
+      "observe": [
+        { "where": "stdout",                                  "what": "ssl=t (true), TLS version (1.2 or 1.3), client_addr = haproxy-pg backplane IP since HAProxy proxies the TCP stream" },
+        { "where": "ssh nexusadmin@192.168.70.61 sudo journalctl -u nexus-patroni.service -n 20", "what": "PG accepts the new connection over SSL; Patroni log shows no DCS state change" }
+      ]
+    }
+  ],
+  "whatProves": "End-to-end mTLS path through the HAProxy HA pair via VIP: psql client validates the server cert chain against the patroni-server CA bundle (the lab root); the cert's IP-SAN includes the VIP .60 so sslmode=verify-full against the floating IP passes regardless of which haproxy currently holds it; HAProxy proxies the TCP stream transparently (no SSL termination on the LB); PG's pg_stat_ssl confirms the live connection is encrypted with TLS 1.2 or 1.3. The same Vault PKI 90-day leaf TTL covers all 8 patroni-tier nodes uniformly."
+}

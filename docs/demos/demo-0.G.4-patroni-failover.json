@@ -1,0 +1,59 @@
+{
+  "id": "demo-0.G.4-patroni-failover",
+  "title": "Patroni-orchestrated leader switchover",
+  "description": "Triggers a controlled Patroni switchover (current leader -> pg-replica-1) via patronictl + verifies the new leader is elected, etcd DCS reflects the change, and HAProxy re-routes :5432 traffic to the new leader. Closes one of the four Phase 0.G.4 demo gates.",
+  "prerequisites": {
+    "vmsAlive": ["pg-primary", "pg-replica-1", "pg-replica-2", "etcd-1", "etcd-2", "etcd-3", "haproxy-pg-1", "haproxy-pg-2"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "smoke-0.G.4.ps1 ALL GREEN (1 Leader + 2 Streaming Replica + etcd quorum + VIP bound on 1 haproxy)"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.61 'sudo /usr/local/sbin/nexus-patronictl list --format json'",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["pg-primary", "pg-replica-1", "pg-replica-2", "Leader"],
+      "observe": [
+        { "where": "stdout", "what": "JSON array of 3 members; one with Role=Leader (record this as $OLD_LEADER)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.61 'sudo /usr/local/sbin/nexus-patronictl switchover --master $OLD_LEADER --candidate pg-replica-1 --force'",
+      "waitAfterSeconds": 10,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["Successfully switched over", "pg-replica-1"],
+      "observe": [
+        { "where": "stdout",                                             "what": "Switchover summary: old leader, new leader, elapsed time (~5-10 s under lab load)" },
+        { "where": "ssh nexusadmin@192.168.70.61 sudo journalctl -u nexus-patroni.service -n 30", "what": "demote -> promote chain on the 2 affected nodes; PG fast-shutdown + pg_rewind sequence" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.62 'sudo /usr/local/sbin/nexus-patronictl list --format json'",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["pg-replica-1", "Leader"],
+      "observe": [
+        { "where": "stdout", "what": "JSON array; Member=pg-replica-1 now has Role=Leader; previous leader is Role=Replica" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.64 'sudo /usr/local/sbin/nexus-etcdctl --user \"root:$(sudo cat /etc/nexus-etcd/etcd-root-password)\" get /service/nexus-pg/leader --print-value-only'",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["pg-replica-1"],
+      "observe": [
+        { "where": "stdout", "what": "etcd DCS confirms pg-replica-1 as canonical leader" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.67 'STATS_PWD=$(sudo cat /etc/nexus-haproxy/haproxy-stats-password); curl -sS -u nexusops:$STATS_PWD http://127.0.0.1:8404/stats\\;csv | awk -F, \"\\$1==\\\"pg_pool\\\" && \\$2==\\\"pg-replica-1\\\" {print \\$2,\\$18}\"' && ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.68 'STATS_PWD=$(sudo cat /etc/nexus-haproxy/haproxy-stats-password); curl -sS -u nexusops:$STATS_PWD http://127.0.0.1:8404/stats\\;csv | awk -F, \"\\$1==\\\"pg_pool\\\" && \\$2==\\\"pg-replica-1\\\" {print \\$2,\\$18}\"'",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["pg-replica-1 UP"],
+      "observe": [
+        { "where": "stdout", "what": "BOTH haproxy nodes' pg_pool row for pg-replica-1 == UP (each haproxy independently health-probes Patroni REST /leader and arrives at the same answer; identical haproxy.cfg)" }
+      ]
+    }
+  ],
+  "whatProves": "Patroni's etcd-DCS-driven leader election flips the writer role to pg-replica-1 within ~10 s; HAProxy's GET /leader health probe (inter 2s, fall 3, rise 2) detects the change and re-routes :5432 backend traffic without app config change. End-to-end: app-facing TCP endpoint stays stable while the underlying PG primary changes."
+}

@@ -1,0 +1,67 @@
+{
+  "id": "demo-0.G.4-etcd-leader-failover",
+  "title": "etcd raft re-election survives 1-member loss; Patroni unaffected",
+  "description": "Stops nexus-etcd.service on the current etcd leader (3-of-3 -> 2-of-3 still quorate). Verifies raft re-elects a new leader within ~5 s, Patroni's etcd3 client fails over transparently to a surviving endpoint, and PG service is uninterrupted (no Patroni-side primary change).",
+  "prerequisites": {
+    "vmsAlive": ["pg-primary", "pg-replica-1", "pg-replica-2", "etcd-1", "etcd-2", "etcd-3", "haproxy-pg-1", "haproxy-pg-2"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "smoke-0.G.4.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.64 'sudo /usr/local/sbin/nexus-etcdctl endpoint status --cluster --write-out=json | jq -r \".[] | select(.Status.leader == .Status.header.member_id) | .Endpoint\"'",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["https://etcd-"],
+      "observe": [
+        { "where": "stdout", "what": "Endpoint URL of the current etcd raft leader (record as $ETCD_LEADER_URL; map back to etcd-1/2/3 IP)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.61 'sudo /usr/local/sbin/nexus-patronictl list -f json | jq -r \".[] | select(.Role==\\\"Leader\\\") | .Member\"'",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["pg-"],
+      "observe": [
+        { "where": "stdout", "what": "Current Patroni leader (record as $PG_LEADER_BEFORE; should NOT change after etcd-side failover)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@$ETCD_LEADER_IP 'sudo systemctl stop nexus-etcd.service'",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "(no output; service stop is silent)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.65 'sudo /usr/local/sbin/nexus-etcdctl endpoint status --cluster --write-out=table 2>&1'",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["true"],
+      "observe": [
+        { "where": "stdout",                                  "what": "Of the 2 surviving members, one shows IS LEADER=true (new raft leader elected within ~5 s); the killed member shows 'request failed' or absent" },
+        { "where": "ssh nexusadmin@192.168.70.65 sudo journalctl -u nexus-etcd.service -n 20", "what": "Log line 'raft: <id> became leader at term N+1' on the new leader" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.61 'sudo /usr/local/sbin/nexus-patronictl list -f json | jq -r \".[] | select(.Role==\\\"Leader\\\") | .Member\"'",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["pg-"],
+      "observe": [
+        { "where": "stdout",                                              "what": "Same value as $PG_LEADER_BEFORE -- Patroni's etcd3 client transparently re-targeted a surviving endpoint; PG primary unchanged" },
+        { "where": "ssh nexusadmin@192.168.70.61 sudo journalctl -u nexus-patroni.service -n 20", "what": "Patroni log may show transient 'etcd endpoint health check failed' warnings as the client retries the killed endpoint, but no DCS state change + no PG demote/promote" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@$ETCD_LEADER_IP 'sudo systemctl start nexus-etcd.service'",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "ssh nexusadmin@$ETCD_LEADER_IP sudo journalctl -u nexus-etcd.service -n 10", "what": "Restarted member rejoins as follower: 'raft: ... became follower at term N+1'" }
+      ]
+    }
+  ],
+  "whatProves": "etcd raft tolerates a 1-of-3 member loss (still 2/3 quorate); leader re-election completes within ~5 s (raft election timeout 1 s + transit overhead). Patroni's etcd3 client is endpoint-list-aware + fails over transparently to a surviving endpoint -- PG service is uninterrupted. The 3-member etcd quorum is the canonical lab fault tolerance: tolerates 1 failure; a 5-member quorum would tolerate 2."
+}

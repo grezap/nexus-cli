@@ -1,0 +1,69 @@
+{
+  "id": "demo-0.G.4-haproxy-vip-cutover",
+  "title": "Genuine VRRP VIP migration between the HAProxy HA pair",
+  "description": "Drives a real keepalived VRRP failover by stopping nexus-haproxy.service on the current MASTER (haproxy-pg-1, priority 110). The check_haproxy.sh script detects the failure within fall=3 × interval=2 = ~6 s; weight=-30 demotes haproxy-pg-1's effective priority from 110 to 80, below haproxy-pg-2's 100. haproxy-pg-2 transitions BACKUP -> MASTER + binds VIP .60. App connections to <VIP>:5432 see a brief blip and then resume. Mirrors the operational pattern from 0.G.3 demo-12 (redis failover) but at the LB tier.",
+  "prerequisites": {
+    "vmsAlive": ["pg-primary", "pg-replica-1", "pg-replica-2", "etcd-1", "etcd-2", "etcd-3", "haproxy-pg-1", "haproxy-pg-2"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "smoke-0.G.4.ps1 ALL GREEN (VIP bound on exactly 1 haproxy node + cert IP-SAN includes VIP)"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.67 'ip -4 addr show dev nic0 | grep 192.168.70.60'",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["192.168.70.60"],
+      "observe": [
+        { "where": "stdout", "what": "VIP 192.168.70.60 currently bound on haproxy-pg-1 (MASTER) as a /24 secondary on nic0" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.68 'ip -4 addr show dev nic0 | grep 192.168.70.60 || echo NO_VIP_ON_BACKUP'",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["NO_VIP_ON_BACKUP"],
+      "observe": [
+        { "where": "stdout", "what": "haproxy-pg-2 (BACKUP) does NOT hold the VIP -- exactly-one-MASTER invariant holds" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.67 'sudo systemctl stop nexus-haproxy.service'",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout",                                            "what": "(no output -- service stop is silent)" },
+        { "where": "ssh nexusadmin@192.168.70.67 sudo journalctl -u keepalived.service -n 20", "what": "Within ~6 s: 'Backup received priority 0 advertisement from <self>' then 'Entering FAULT STATE' as check_haproxy.sh fails (weight=-30 fires)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.68 'ip -4 addr show dev nic0 | grep 192.168.70.60'",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["192.168.70.60"],
+      "observe": [
+        { "where": "stdout",                                            "what": "VIP 192.168.70.60 now bound on haproxy-pg-2 -- migration complete" },
+        { "where": "ssh nexusadmin@192.168.70.68 sudo journalctl -u keepalived.service -n 20", "what": "'Entering MASTER STATE' + 'setting promote_secondaries on interface nic0' + VIP added" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.61 'SUPER_PWD=$(sudo cat /etc/nexus-patroni/postgres-superuser-password); PGPASSWORD=\"$SUPER_PWD\" psql \"host=192.168.70.60 port=5432 user=nexusops dbname=postgres sslmode=verify-full sslrootcert=/etc/ssl/certs/patroni-ca.pem\" -tA -c \"SELECT now();\"'",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["202"],
+      "observe": [
+        { "where": "stdout",                                                              "what": "psql via VIP works post-failover; haproxy-pg-2 now serves :5432; TLS handshake validates against verify-full (the cert IP-SAN covers the VIP)" },
+        { "where": "ssh nexusadmin@192.168.70.68 sudo journalctl -u nexus-haproxy.service -n 10", "what": "haproxy-pg-2's nexus-haproxy log shows a new client connection accepted on :5432, forwarded to the current Patroni leader's backend" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.67 'sudo systemctl start nexus-haproxy.service'",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "ssh nexusadmin@192.168.70.67 sudo journalctl -u keepalived.service -n 10",         "what": "Within ~6 s: 'check_haproxy.sh' succeeds again (rise=2); 'Received advert with higher priority' from peer; entering MASTER state" },
+        { "where": "ssh nexusadmin@192.168.70.67 ip -4 addr show dev nic0 | grep 192.168.70.60",       "what": "VIP back on haproxy-pg-1 (preempt ON; lab visible-demo default. Set nopreempt to avoid flap in production)" }
+      ]
+    }
+  ],
+  "whatProves": "keepalived unicast VRRP elects exactly one MASTER across the haproxy HA pair (no split-brain because unicast bypasses VMware VMnet11's unreliable multicast forwarding). On MASTER health-script failure, BACKUP promotes itself within fall × interval = ~6 s; the VIP migrates at the kernel L3 layer; apps connecting to <VIP>:5432 see continuous service across a single-node HAProxy failure. The cert IP-SAN design means client sslmode=verify-full works against the floating VIP regardless of which haproxy currently holds it. The HA pair eliminates the SPOF that a single HAProxy would have had; the 'HA' promise in the phase name now covers the entire path."
+}
