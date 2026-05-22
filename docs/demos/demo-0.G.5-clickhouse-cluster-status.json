@@ -1,0 +1,40 @@
+{
+  "id": "demo-0.G.5-clickhouse-cluster-status",
+  "title": "ClickHouse cluster-status: 3 shards x 2 replicas + 3-node Keeper quorum",
+  "description": "Introspects the live ClickHouse cluster the way the nexus-cli ClickHouseAdapter cluster-status verb will: system.clusters (shard/replica map), system.replicas (health), and the Keeper RAFT quorum state via the mntr 4-letter-word. Until the adapter lands (later unified CLI phase) the same checks run over SSH.",
+  "prerequisites": {
+    "vmsAlive": ["ch-keeper-1", "ch-keeper-2", "ch-keeper-3", "ch-shard1-rep1", "ch-shard1-rep2", "ch-shard2-rep1", "ch-shard2-rep2", "ch-shard3-rep1", "ch-shard3-rep2"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "smoke-0.G.5.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT cluster, shard_num, replica_num, host_name FROM system.clusters WHERE cluster = ''nexus_analytics'' ORDER BY shard_num, replica_num FORMAT PrettyCompact'\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["nexus_analytics", "ch-shard1-rep1", "ch-shard3-rep2"],
+      "observe": [
+        { "where": "stdout", "what": "6 rows: shard_num 1/2/3 each with replica_num 1/2 -- the 3 shards x 2 replicas topology (ADR-0029)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT database, table, is_readonly, is_session_expired, future_parts, queue_size FROM system.replicas FORMAT PrettyCompact'\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["nexus", "events_local"],
+      "observe": [
+        { "where": "stdout", "what": "every ReplicatedMergeTree replica is_readonly=0 + is_session_expired=0 + queue_size small/0 (replication healthy)" }
+      ]
+    },
+    {
+      "command": "for ip in 192.168.70.41 192.168.70.42 192.168.70.43; do ssh -i $NEXUS_SSH_KEY nexusadmin@$ip \"exec 3<>/dev/tcp/127.0.0.1/9181; printf 'mntr\\n' >&3; timeout 3 cat <&3 | grep zk_server_state\"; done",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["leader", "follower"],
+      "observe": [
+        { "where": "stdout", "what": "exactly one Keeper reports zk_server_state=leader, the other two follower -- the 3-node RAFT quorum (ADR-0028)" }
+      ]
+    }
+  ],
+  "whatProves": "cluster-status reports the genuine sharded+replicated ClickHouse topology (3 shards x 2 replicas) coordinated by a healthy 3-node ClickHouse Keeper RAFT quorum -- the introspection sources the ClickHouseAdapter reads (system.clusters / system.replicas / Keeper mntr)."
+}

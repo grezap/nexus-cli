@@ -1,0 +1,48 @@
+{
+  "id": "demo-0.G.5-clickhouse-backup",
+  "title": "ClickHouse backup take/restore: cross-node via the shared NFS repository",
+  "description": "The nexus-cli backup verb (take + restore) for ClickHouse: BACKUP a table TO Disk('analytics_backups', ...) on one node and RESTORE it from a DIFFERENT node, proving the repository is genuinely cluster-shared (NFS from nexus-gateway, ADR-0032). MinIO/S3 migration is deferred to Phase 0.L (a destination swap, not a verb change).",
+  "prerequisites": {
+    "vmsAlive": ["ch-shard1-rep1", "ch-shard2-rep1", "nexus-gateway"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "smoke-0.G.5.ps1 ALL GREEN (backup mount section)"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"findmnt -t nfs4 /var/backups/analytics\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["192.168.70.1", "/var/backups/analytics"],
+      "observe": [
+        { "where": "stdout", "what": "the shared NFS backup repository is mounted from nexus-gateway (192.168.70.1) -- the same mount on all 6 data nodes" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query \\\"BACKUP TABLE nexus.events_local TO Disk('analytics_backups', 'demo-backup.zip')\\\"\"",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["BACKUP_CREATED"],
+      "observe": [
+        { "where": "stdout", "what": "a backup id + status BACKUP_CREATED -- the .zip is written to the shared NFS mount by shard1-rep1" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.46 \"clickhouse-client --secure --host localhost --port 9440 --query \\\"RESTORE TABLE nexus.events_local AS nexus.events_demo_restore FROM Disk('analytics_backups', 'demo-backup.zip')\\\"; clickhouse-client --secure --host localhost --port 9440 --query 'SELECT count() FROM nexus.events_demo_restore'\"",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["RESTORED"],
+      "observe": [
+        { "where": "stdout", "what": "status RESTORED + a non-zero row count -- shard2-rep1 restored a backup TAKEN BY shard1-rep1, proving the repository is cluster-shared" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.46 \"clickhouse-client --secure --host localhost --port 9440 --query 'DROP TABLE IF EXISTS nexus.events_demo_restore SYNC'\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "(cleanup) the restore-check table is dropped" }
+      ]
+    }
+  ],
+  "whatProves": "backup/restore round-trips through a genuinely cluster-shared repository (NFS from nexus-gateway): a backup taken on one node restores on another. ADR-0032 -- the destination swaps to MinIO/S3 at 0.L without changing the verb surface."
+}

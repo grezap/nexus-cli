@@ -1,0 +1,49 @@
+{
+  "id": "demo-0.G.5-clickhouse-cert-rotate",
+  "title": "ClickHouse cert-rotate: Vault Agent re-render + SYSTEM RELOAD CONFIG",
+  "description": "The nexus-cli cert-rotate verb for ClickHouse: force a fresh mTLS leaf from the clickhouse-server PKI role (Vault Agent re-render), split it into server.crt/server.key/ca.crt, and have ClickHouse pick it up via SYSTEM RELOAD CONFIG (no full restart). Verifies the cert serial changes + TLS still validates.",
+  "prerequisites": {
+    "vmsAlive": ["ch-shard1-rep1"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "smoke-0.G.5.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 'sudo openssl x509 -in /etc/clickhouse-server/tls/server.crt -noout -serial'",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["serial="],
+      "observe": [
+        { "where": "stdout", "what": "the current leaf serial -- record as $SERIAL_BEFORE" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 'sudo rm -f /etc/clickhouse-server/tls/bundle.pem; sudo systemctl restart nexus-vault-agent.service; sleep 6; sudo /usr/local/sbin/clickhouse-tls-split.sh /etc/clickhouse-server/tls clickhouse'",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["bundle split"],
+      "observe": [
+        { "where": "stdout", "what": "Vault Agent re-issues a fresh leaf from pki_int/issue/clickhouse-server; the split script writes new server.crt/key/ca.crt" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SYSTEM RELOAD CONFIG'; sudo openssl x509 -in /etc/clickhouse-server/tls/server.crt -noout -serial\"",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["serial="],
+      "observe": [
+        { "where": "stdout", "what": "a NEW serial (!= $SERIAL_BEFORE) -- the rotated leaf is live; SYSTEM RELOAD CONFIG re-reads the openSSL cert files without a restart" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT 1'\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["1"],
+      "observe": [
+        { "where": "stdout", "what": "TLS still validates with the rotated cert (returns 1) -- no downtime" }
+      ]
+    }
+  ],
+  "whatProves": "cert-rotate forces a fresh Vault-PKI leaf, re-renders the on-node TLS material, and ClickHouse picks it up via SYSTEM RELOAD CONFIG with no restart + no TLS downtime -- the 90-day rotation path the ClickHouseAdapter cert-rotate verb triggers."
+}

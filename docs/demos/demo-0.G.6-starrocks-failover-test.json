@@ -1,0 +1,46 @@
+{
+  "id": "demo-0.G.6-starrocks-failover-test",
+  "title": "StarRocks failover-test: FE leader loss -> re-election",
+  "description": "The nexus-cli failover-test verb for StarRocks: stop the FE Leader (3-of-3 -> 2-of-3 still majority), verify a Follower is elected Leader and DDL still works, then restore.",
+  "prerequisites": {
+    "vmsAlive": ["sr-fe-leader", "sr-fe-follower-1", "sr-fe-follower-2"],
+    "envVars": ["NEXUS_SSH_KEY", "SR_ROOT_PW"],
+    "smokeGate": "smoke-0.G.6.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -N -e 'SHOW FRONTENDS' | grep -i leader\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "identify the current Leader FE (record its IP)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 'sudo systemctl stop nexus-starrocks-fe.service'",
+      "waitAfterSeconds": 25,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "(silent) the Leader FE is down; 2 of 3 remain (still majority)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.32 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e 'SHOW FRONTENDS\\G' | grep -iE 'Role|Alive'\"",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["LEADER"],
+      "observe": [
+        { "where": "stdout", "what": "a surviving Follower has been elected LEADER (sub-minute re-election); DDL/queries continue against the new leader" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 'sudo systemctl start nexus-starrocks-fe.service'",
+      "waitAfterSeconds": 15,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "ssh nexusadmin@192.168.70.32 mysql ... SHOW FRONTENDS", "what": "the restarted FE rejoins as a Follower (back to 3 FE)" }
+      ]
+    }
+  ],
+  "whatProves": "the 3-FE BDB-JE quorum tolerates a Leader loss (2/3 majority), re-elects a new Leader within a sub-minute window, and the metadata plane stays available -- the failover-test verb measures the re-election RTO."
+}

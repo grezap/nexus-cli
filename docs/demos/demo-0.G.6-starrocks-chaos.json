@@ -1,0 +1,45 @@
+{
+  "id": "demo-0.G.6-starrocks-chaos",
+  "title": "StarRocks chaos: kill a BE; queries reroute, tablets re-replicate",
+  "description": "The nexus-cli chaos verb for StarRocks: stop a BE and verify queries still return full results (replication_num=3 means every tablet has a replica on a surviving BE), then restart and watch the FE re-balance/re-replicate.",
+  "prerequisites": {
+    "vmsAlive": ["sr-fe-leader", "sr-be-1", "sr-be-2", "sr-be-3"],
+    "envVars": ["NEXUS_SSH_KEY", "SR_ROOT_PW"],
+    "smokeGate": "smoke-0.G.6.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -N -e 'SELECT count(*) FROM nexus.events'\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "baseline row count (all 3 BE serving)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.34 'sudo systemctl stop nexus-starrocks-be.service'",
+      "waitAfterSeconds": 15,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "ssh nexusadmin@192.168.70.31 mysql ... SHOW BACKENDS", "what": "sr-be-1 shows Alive=false; the FE marks its tablets unavailable on that BE but each has replicas on the other 2" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -N -e 'SELECT count(*) FROM nexus.events'\"",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "same count as baseline -- the query reroutes to surviving tablet replicas (no data unavailability with replication_num=3)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.34 'sudo systemctl start nexus-starrocks-be.service'",
+      "waitAfterSeconds": 15,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "ssh nexusadmin@192.168.70.31 mysql ... SHOW BACKENDS", "what": "sr-be-1 returns Alive=true; the FE tablet scheduler re-balances/re-replicates as needed" }
+      ]
+    }
+  ],
+  "whatProves": "a BE loss does not make any tablet unavailable -- queries reroute to surviving replicas (replication_num=3) -- and the BE auto-recovers + re-balances on restart. Replication across BE is real."
+}

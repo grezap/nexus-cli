@@ -1,0 +1,56 @@
+{
+  "id": "demo-0.G.5-clickhouse-failover-test",
+  "title": "ClickHouse failover-test: Keeper quorum survives 1-node loss",
+  "description": "The nexus-cli failover-test verb for the analytics tier: stop the Keeper RAFT leader (3-of-3 -> 2-of-3 still quorate), verify the quorum re-elects within a few seconds and ReplicatedMergeTree inserts still commit (replication coordination uninterrupted), then restore the member.",
+  "prerequisites": {
+    "vmsAlive": ["ch-keeper-1", "ch-keeper-2", "ch-keeper-3", "ch-shard1-rep1", "ch-shard1-rep2"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "smoke-0.G.5.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "for ip in 192.168.70.41 192.168.70.42 192.168.70.43; do echo -n \"$ip \"; ssh -i $NEXUS_SSH_KEY nexusadmin@$ip \"exec 3<>/dev/tcp/127.0.0.1/9181; printf 'mntr\\n' >&3; timeout 3 cat <&3 | grep zk_server_state\"; done",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["leader"],
+      "observe": [
+        { "where": "stdout", "what": "identify the current Keeper leader (the one reporting zk_server_state=leader) -- record its IP as $KEEPER_LEADER" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@$KEEPER_LEADER 'sudo systemctl stop nexus-clickhouse-keeper.service'",
+      "waitAfterSeconds": 10,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "(silent) the RAFT leader is now down -- 2 of 3 remain (still quorate)" }
+      ]
+    },
+    {
+      "command": "for ip in 192.168.70.41 192.168.70.42 192.168.70.43; do ssh -i $NEXUS_SSH_KEY nexusadmin@$ip \"exec 3<>/dev/tcp/127.0.0.1/9181; printf 'mntr\\n' >&3; timeout 3 cat <&3 | grep zk_server_state\" 2>/dev/null; done",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["leader"],
+      "observe": [
+        { "where": "stdout", "what": "one of the 2 survivors now reports leader (re-elected within ~RAFT election timeout); the killed node is silent/connection-refused" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'INSERT INTO nexus.events SELECT number+2000000, now(), number%3, ''failover'' FROM numbers(20)'; clickhouse-client --secure --host localhost --port 9440 --query 'SELECT count() FROM nexus.events WHERE payload=''failover'''\"",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["20"],
+      "observe": [
+        { "where": "stdout", "what": "20 -- a ReplicatedMergeTree insert still commits with 1 Keeper down (the surviving 2-node quorum coordinates replication)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@$KEEPER_LEADER 'sudo systemctl start nexus-clickhouse-keeper.service'",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "ssh nexusadmin@$KEEPER_LEADER sudo journalctl -u nexus-clickhouse-keeper.service -n 15", "what": "restarted member rejoins the quorum as follower (back to 3 members)" }
+      ]
+    }
+  ],
+  "whatProves": "the 3-node ClickHouse Keeper RAFT quorum tolerates a 1-node loss (2/3 still quorate), re-elects a leader within seconds, and ReplicatedMergeTree replication coordination is uninterrupted -- the analytics-tier fault tolerance the failover-test verb measures (RTO captured from the mntr re-election delta)."
+}

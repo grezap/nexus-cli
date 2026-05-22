@@ -1,0 +1,22 @@
+{
+  "id": "demo-0.G.6-starrocks-health",
+  "title": "StarRocks health: BE disk/tablet load + FE state",
+  "description": "The nexus-cli health verb for StarRocks: per-BE disk usage + tablet count + per-FE state, from SHOW BACKENDS / SHOW PROC.",
+  "prerequisites": {
+    "vmsAlive": ["sr-fe-leader", "sr-be-1", "sr-be-2", "sr-be-3"],
+    "envVars": ["NEXUS_SSH_KEY", "SR_ROOT_PW"],
+    "smokeGate": "smoke-0.G.6.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e 'SHOW PROC \\\"/backends\\\"\\G'\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["TabletNum", "DataUsedCapacity"],
+      "observe": [
+        { "where": "stdout", "what": "per-BE TabletNum (load balance) + DataUsedCapacity / AvailCapacity (disk headroom) -- the health signals the verb surfaces" }
+      ]
+    }
+  ],
+  "whatProves": "health surfaces per-BE tablet load + disk capacity + FE liveness -- the operational health the StarRocksAdapter health verb reports."
+}

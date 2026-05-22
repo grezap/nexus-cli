@@ -1,0 +1,45 @@
+{
+  "id": "demo-0.G.5-clickhouse-scale-out",
+  "title": "ClickHouse scale-out: drain + re-add a shard replica (cluster-membership change)",
+  "description": "The nexus-cli scale-out verb (add/remove a NODE -- horizontal). Exercises the per-cluster env's idempotent node toggles: scale-in shard1 to a single replica (remove ch-shard1-rep2 via enable_ch_shard1_rep2=false), confirm the shard still serves from rep1, then scale back out (re-add) and confirm the re-added replica re-syncs from Keeper. The full add-a-brand-new-node path (clone a VM + remote_servers + macros) is the same toggle plus a foundation MAC reservation; documented in handbook §1.A.5.",
+  "prerequisites": {
+    "vmsAlive": ["ch-shard1-rep1", "ch-shard1-rep2", "ch-keeper-1", "ch-keeper-2", "ch-keeper-3"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "smoke-0.G.5.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "pwsh -File scripts/analytics-clickhouse.ps1 apply -Vars enable_ch_shard1_rep2=false",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "terraform destroys the ch-shard1-rep2 module + its overlays (scale-in shard1 to 1 replica); shard1-rep1 keeps serving" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT count() FROM nexus.events_local'\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "shard1's data is still fully readable from the surviving replica (rep1) -- no data loss on scale-in" }
+      ]
+    },
+    {
+      "command": "pwsh -File scripts/analytics-clickhouse.ps1 apply",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "default -Vars (all enabled) re-clones ch-shard1-rep2 + re-runs its overlays (scale-out back to 2 replicas)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.45 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT count() FROM nexus.events_local'\"",
+      "waitAfterSeconds": 10,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "the re-added ch-shard1-rep2 re-syncs from Keeper + converges to the same count as rep1 (idempotent join)" }
+      ]
+    }
+  ],
+  "whatProves": "scale-out is a clean cluster-membership change: a replica can be drained (removed) and re-added idempotently, re-syncing via Keeper, with no data loss while the shard's other replica serves. The env's per-node enable_* toggles are the node add/remove primitive."
+}

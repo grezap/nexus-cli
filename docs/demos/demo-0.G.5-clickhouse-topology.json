@@ -1,0 +1,30 @@
+{
+  "id": "demo-0.G.5-clickhouse-topology",
+  "title": "ClickHouse topology --watch: live shard/replica + parts distribution",
+  "description": "The live shard/replica map + per-shard data distribution the nexus-cli topology --watch verb will render. Shows the Distributed table's data spread across all 3 shards (sharding) and each shard's 2 replicas holding equal copies (replication).",
+  "prerequisites": {
+    "vmsAlive": ["ch-shard1-rep1", "ch-shard1-rep2", "ch-shard2-rep1", "ch-shard2-rep2", "ch-shard3-rep1", "ch-shard3-rep2"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "smoke-0.G.5.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "for ip in 192.168.70.44 192.168.70.46 192.168.70.48; do echo \"shard at $ip:\"; ssh -i $NEXUS_SSH_KEY nexusadmin@$ip \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT count() FROM nexus.events_local'\"; done",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "each of the 3 shards' rep1 reports a non-zero, roughly-even slice of the 600-row Distributed table -- data is sharded across all 3 shards" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT hostName() h, count() FROM remote(''192.168.10.44,192.168.10.45,192.168.10.46,192.168.10.47,192.168.10.48,192.168.10.49'', system.one) GROUP BY h FORMAT PrettyCompact' 2>/dev/null || clickhouse-client --secure --host localhost --port 9440 --query 'SELECT shard_num, replica_num, host_name FROM system.clusters WHERE cluster=''nexus_analytics'' FORMAT PrettyCompact'\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["ch-shard"],
+      "observe": [
+        { "where": "stdout", "what": "the full 6-node shard/replica map -- what topology --watch renders on a refresh loop" }
+      ]
+    }
+  ],
+  "whatProves": "topology --watch renders the live shard/replica map + the Distributed table's data distribution across all 3 shards with 2 converged replicas each -- the genuinely sharded AND replicated layout (ADR-0029)."
+}

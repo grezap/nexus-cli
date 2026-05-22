@@ -1,0 +1,37 @@
+{
+  "id": "demo-0.G.6-starrocks-scale-up",
+  "title": "StarRocks scale-up: vertical VM resize (RAM) on a BE",
+  "description": "The nexus-cli scale-up verb (vertical CPU/RAM/disk resize). Demonstrates the generic vmrun stop -> .vmx memsize edit -> start flow on sr-be-3 (6 GB -> 8 GB). Cluster-aware: a BE whose tablets have replicas on the other 2 BE can be resized with no query impact.",
+  "prerequisites": {
+    "vmsAlive": ["sr-fe-leader", "sr-be-1", "sr-be-2", "sr-be-3"],
+    "envVars": ["NEXUS_SSH_KEY", "NEXUS_VMRUN", "SR_ROOT_PW"],
+    "smokeGate": "smoke-0.G.6.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.36 'free -m | awk \"/Mem:/ {print \\$2}\"'",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "observe": [{ "where": "stdout", "what": "current RAM ~6000 MB (the right-sized 6 GB BE, vms.yaml)" }]
+    },
+    {
+      "command": "& $NEXUS_VMRUN stop 'H:\\VMS\\NexusPlatform\\04-analytics\\sr-be-3\\sr-be-3.vmx' soft",
+      "waitAfterSeconds": 25,
+      "expectedExitCode": 0,
+      "observe": [{ "where": "stdout", "what": "graceful BE shutdown; its tablets stay served by replicas on sr-be-1/2" }]
+    },
+    {
+      "command": "(Get-Content 'H:\\VMS\\NexusPlatform\\04-analytics\\sr-be-3\\sr-be-3.vmx') -replace '^memsize = .*', 'memsize = \"8192\"' | Set-Content 'H:\\VMS\\NexusPlatform\\04-analytics\\sr-be-3\\sr-be-3.vmx'; & $NEXUS_VMRUN start 'H:\\VMS\\NexusPlatform\\04-analytics\\sr-be-3\\sr-be-3.vmx' nogui",
+      "waitAfterSeconds": 45,
+      "expectedExitCode": 0,
+      "observe": [{ "where": "stdout", "what": ".vmx memsize rewritten to 8192 MB; VM powered back on" }]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.36 'free -m | awk \"/Mem:/ {print \\$2}\"'; ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -N -e 'SHOW BACKENDS' | grep 192.168.10.36\"",
+      "waitAfterSeconds": 20,
+      "expectedExitCode": 0,
+      "observe": [{ "where": "stdout", "what": "RAM now ~8192 MB AND sr-be-3 rejoined Alive=true -- vertical resize complete + cluster healthy" }]
+    }
+  ],
+  "whatProves": "scale-up resizes a BE's RAM via the generic vmrun stop -> .vmx edit -> start path; the BE cleanly rejoins. Cluster-aware: replicas on the other BE keep queries served during the resize."
+}

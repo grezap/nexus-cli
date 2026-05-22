@@ -1,0 +1,31 @@
+{
+  "id": "demo-0.G.6-starrocks-cluster-status",
+  "title": "StarRocks cluster-status: 3 FE quorum + 3 BE",
+  "description": "Introspects the live StarRocks cluster the way the nexus-cli StarRocksAdapter cluster-status verb will: SHOW FRONTENDS (1 LEADER + 2 FOLLOWER, BDB-JE quorum) + SHOW BACKENDS (3 alive). Over SSH+mysql until the adapter lands.",
+  "prerequisites": {
+    "vmsAlive": ["sr-fe-leader", "sr-fe-follower-1", "sr-fe-follower-2", "sr-be-1", "sr-be-2", "sr-be-3"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "smoke-0.G.6.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e 'SHOW FRONTENDS\\G'\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["LEADER", "FOLLOWER", "Alive: true"],
+      "observe": [
+        { "where": "stdout", "what": "3 FE rows: 1 Role=LEADER + 2 Role=FOLLOWER, all Alive=true -- the BDB-JE majority quorum (ADR-0030)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e 'SHOW BACKENDS\\G'\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["Alive: true"],
+      "observe": [
+        { "where": "stdout", "what": "3 BE rows all Alive=true; TabletNum > 0 on each (tablets distributed across all 3 BE)" }
+      ]
+    }
+  ],
+  "whatProves": "cluster-status reports the genuine FE quorum (1 leader + 2 followers) + 3 alive BE -- the introspection sources the StarRocksAdapter reads (SHOW FRONTENDS / SHOW BACKENDS over the MySQL protocol)."
+}

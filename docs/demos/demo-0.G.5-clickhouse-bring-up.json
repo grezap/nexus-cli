@@ -1,0 +1,47 @@
+{
+  "id": "demo-0.G.5-clickhouse-bring-up",
+  "title": "ClickHouse cluster bring-up + cold-rebuild (the demo verb showcase)",
+  "description": "The cluster-level demo (per feedback_demo_discipline): the from-zero bring-up of the 9-node ClickHouse cluster + the cold-rebuild gate. Also the `nexus demo` verb showcase -- once the ClickHouseAdapter lands, `nexus demo run demo-0.G.5-clickhouse-*` executes the per-verb specs. Cross-env order: foundation (dhcp+DNS+NFS) -> security (PKI+AppRoles+KV) -> packer build x2 -> analytics-clickhouse apply -> smoke.",
+  "prerequisites": {
+    "vmsAlive": ["nexus-gateway", "dc-nexus", "vault-1", "vault-2", "vault-3", "vault-transit"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "(this demo IS the gate)"
+  },
+  "steps": [
+    {
+      "command": "cd nexus-infra-vmware && pwsh -File scripts/foundation.ps1 apply && pwsh -File scripts/security.ps1 apply",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "foundation writes the 9 dhcp-host reservations + clickhouse.nexus.lab round-robin + the /srv/nfs/analytics-backups export; security writes the clickhouse-server PKI role + 9 AppRole sidecars + the admin/app KV seeds" },
+        { "where": "ls $HOME/.nexus/vault-agent-analytics-clickhouse-*.json", "what": "9 per-host sidecars present (the analytics-clickhouse env reads these at plan time)" }
+      ]
+    },
+    {
+      "command": "cd nexus-infra-analytics && (cd packer/analytics-clickhouse-keeper-node && packer init . && packer build .) && (cd packer/analytics-clickhouse-server-node && packer init . && packer build .)",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "H:\\VMS\\NexusPlatform\\_templates\\analytics-clickhouse-keeper-node\\ + analytics-clickhouse-server-node\\", "what": "two .vmx templates built (clickhouse-keeper / clickhouse-server + clickhouse-client baked, nexus-* units DISABLED, apt units masked)" }
+      ]
+    },
+    {
+      "command": "cd nexus-infra-analytics && pwsh -File scripts/analytics-clickhouse.ps1 apply",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "9 clones -> firstboot -> nftables -> vault-agents -> tls -> keeper-config (RAFT quorum) -> server-config (remote_servers+macros+secure-zookeeper) -> schema-bootstrap (ON CLUSTER DDL + RBAC + fan-out/convergence proof) -> backup-repo (NFS + cross-node BACKUP/RESTORE)" }
+      ]
+    },
+    {
+      "command": "cd nexus-infra-analytics && pwsh -File scripts/analytics-clickhouse.ps1 smoke",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["ALL 0.G.5 SMOKE CHECKS PASSED"],
+      "observe": [
+        { "where": "stdout", "what": "every section GREEN: identity, vault-agent, mTLS (PKCS#8 + round-robin SAN), Keeper quorum, system.clusters (3x2), Distributed fan-out (600), replica convergence, RBAC, round-robin DNS, backup mount" }
+      ]
+    }
+  ],
+  "whatProves": "the 9-node ClickHouse cluster builds from absolute zero (foundation -> security -> packer -> apply -> smoke) and is genuinely sharded AND replicated, mTLS-everywhere, Keeper-coordinated, and backup-capable. The cold-rebuild gate (destroy -> build -> apply -> smoke ALL GREEN) is the phase-0.G.5 exit criterion."
+}

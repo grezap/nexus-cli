@@ -1,0 +1,47 @@
+{
+  "id": "demo-0.G.5-clickhouse-chaos",
+  "title": "ClickHouse chaos: kill a shard replica; Distributed query reroutes",
+  "description": "The nexus-cli chaos verb for the analytics tier: kill clickhouse-server on one replica of shard 2 and verify a Distributed SELECT still returns shard 2's rows from the surviving replica (no data unavailability with replication_num/2-per-shard), then auto-recover on restart (the replica catches up via Keeper).",
+  "prerequisites": {
+    "vmsAlive": ["ch-shard1-rep1", "ch-shard2-rep1", "ch-shard2-rep2", "ch-shard3-rep1"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "smoke-0.G.5.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT count() FROM nexus.events'\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["600"],
+      "observe": [
+        { "where": "stdout", "what": "baseline Distributed count = 600 (all 3 shards reachable)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.46 'sudo systemctl stop nexus-clickhouse-server.service'",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "(silent) shard2-rep1 is down; shard2-rep2 (192.168.70.47) still serves shard 2" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT count() FROM nexus.events SETTINGS skip_unavailable_shards=0'\"",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["600"],
+      "observe": [
+        { "where": "stdout", "what": "still 600 -- the Distributed query reroutes shard 2 to its surviving replica (shard2-rep2); no rows lost (replication tolerates 1 replica loss per shard, ADR-0029)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.46 'sudo systemctl start nexus-clickhouse-server.service'",
+      "waitAfterSeconds": 10,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "ssh nexusadmin@192.168.70.46 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT is_readonly, absolute_delay FROM system.replicas'\"", "what": "recovered replica rejoins (is_readonly=0) and catches up via Keeper (absolute_delay returns to ~0)" }
+      ]
+    }
+  ],
+  "whatProves": "killing one replica of a shard does not make that shard's data unavailable -- the Distributed query reroutes to the surviving replica (2 replicas per shard) -- and the replica auto-recovers + re-syncs via Keeper on restart. Replication is real, not cosmetic."
+}

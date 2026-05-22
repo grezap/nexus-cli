@@ -1,0 +1,31 @@
+{
+  "id": "demo-0.G.6-starrocks-topology",
+  "title": "StarRocks topology --watch: tablets sharded across 3 BE, replicated x3",
+  "description": "The nexus-cli topology --watch verb for StarRocks: the tablet distribution that proves the table is sharded (DISTRIBUTED BY HASH BUCKETS across all 3 BE) AND replicated (replication_num=3).",
+  "prerequisites": {
+    "vmsAlive": ["sr-fe-leader", "sr-be-1", "sr-be-2", "sr-be-3"],
+    "envVars": ["NEXUS_SSH_KEY", "SR_ROOT_PW"],
+    "smokeGate": "smoke-0.G.6.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e 'SHOW CREATE TABLE nexus.events\\G'\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["DISTRIBUTED BY HASH", "replication_num"],
+      "observe": [
+        { "where": "stdout", "what": "DISTRIBUTED BY HASH(event_id) BUCKETS 6 + \"replication_num\" = \"3\" -- sharded + replicated by design" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e 'ADMIN SHOW REPLICA DISTRIBUTION FROM nexus.events'\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["BackendId"],
+      "observe": [
+        { "where": "stdout", "what": "replica counts spread across all 3 BackendIds -- tablets + their 3 replicas distributed across all 3 BE (what topology --watch renders)" }
+      ]
+    }
+  ],
+  "whatProves": "topology --watch shows tablets hash-distributed across all 3 BE with replication_num=3 -- the genuinely sharded AND replicated layout (ADR-0030)."
+}

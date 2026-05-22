@@ -1,0 +1,37 @@
+{
+  "id": "demo-0.G.6-starrocks-scale-out",
+  "title": "StarRocks scale-out: drain + re-add a BE (ALTER SYSTEM)",
+  "description": "The nexus-cli scale-out verb for StarRocks (add/remove a NODE -- horizontal). DECOMMISSION a BE so its tablets migrate to the survivors, confirm queries still serve, then re-add it (ALTER SYSTEM ADD BACKEND) and watch tablets re-balance. The add-a-brand-new-BE path is the same ALTER SYSTEM ADD BACKEND plus a new VM clone + foundation reservation (handbook §1.B).",
+  "prerequisites": {
+    "vmsAlive": ["sr-fe-leader", "sr-be-1", "sr-be-2", "sr-be-3"],
+    "envVars": ["NEXUS_SSH_KEY", "SR_ROOT_PW"],
+    "smokeGate": "smoke-0.G.6.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e \\\"ALTER SYSTEM DECOMMISSION BACKEND '192.168.10.36:9050'\\\"\"",
+      "waitAfterSeconds": 30,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "ssh nexusadmin@192.168.70.31 mysql ... SHOW BACKENDS", "what": "sr-be-3 enters DECOMMISSION; its tablets migrate to sr-be-1/2 (TabletNum drains to 0) -- a clean horizontal scale-in" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -N -e 'SELECT count(*) FROM nexus.events'\"",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "queries still serve full results during/after the drain (replicas on the survivors)" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e \\\"ALTER SYSTEM ADD BACKEND '192.168.10.36:9050'\\\"\"",
+      "waitAfterSeconds": 20,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "ssh nexusadmin@192.168.70.31 mysql ... SHOW BACKENDS", "what": "sr-be-3 re-joins Alive=true; the FE tablet scheduler re-balances tablets back onto it (scale-out)" }
+      ]
+    }
+  ],
+  "whatProves": "scale-out/in is a clean cluster-membership change: a BE can be DECOMMISSIONed (tablets migrate to survivors) and re-added (tablets re-balance) with no data loss + no query interruption. ALTER SYSTEM ADD/DECOMMISSION BACKEND is the node add/remove primitive."
+}

@@ -1,0 +1,33 @@
+{
+  "id": "demo-0.G.6-starrocks-cert-rotate",
+  "title": "StarRocks cert-rotate: Vault Agent re-render + rolling FE/BE restart",
+  "description": "The nexus-cli cert-rotate verb for StarRocks: force a fresh mTLS leaf from the starrocks-server PKI role (Vault Agent re-render + split), then a rolling restart per node to pick up the new cert (StarRocks reads the keystore at start). FE quorum + tablet replicas keep the cluster available during the rolling restart.",
+  "prerequisites": {
+    "vmsAlive": ["sr-fe-leader", "sr-fe-follower-1", "sr-fe-follower-2", "sr-be-1", "sr-be-2", "sr-be-3"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "smoke-0.G.6.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.32 'sudo openssl x509 -in /opt/starrocks/fe/conf/tls/server.crt -noout -serial'",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["serial="],
+      "observe": [{ "where": "stdout", "what": "current leaf serial on a Follower FE -- record as $SERIAL_BEFORE" }]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.32 'sudo rm -f /opt/starrocks/fe/conf/tls/bundle.pem; sudo systemctl restart nexus-vault-agent.service; sleep 6; sudo /usr/local/sbin/starrocks-tls-split.sh /opt/starrocks/fe/conf/tls starrocks; sudo openssl x509 -in /opt/starrocks/fe/conf/tls/server.crt -noout -serial'",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["serial="],
+      "observe": [{ "where": "stdout", "what": "a NEW serial (!= $SERIAL_BEFORE) -- the rotated leaf is on disk" }]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.32 'sudo systemctl restart nexus-starrocks-fe.service'",
+      "waitAfterSeconds": 20,
+      "expectedExitCode": 0,
+      "observe": [{ "where": "ssh nexusadmin@192.168.70.31 mysql ... SHOW FRONTENDS", "what": "the rolled Follower rejoins Alive=true with the rotated cert; the other 2 FE kept the quorum available during the restart (rolling, one node at a time)" }]
+    }
+  ],
+  "whatProves": "cert-rotate forces a fresh Vault-PKI leaf + re-renders the on-node TLS material; a rolling per-node restart picks it up while the FE quorum + tablet replicas keep the cluster available -- the 90-day rotation path the StarRocksAdapter cert-rotate verb triggers."
+}

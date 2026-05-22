@@ -1,0 +1,47 @@
+{
+  "id": "demo-0.G.6-starrocks-bring-up",
+  "title": "StarRocks cluster bring-up + cold-rebuild (the demo verb showcase)",
+  "description": "The cluster-level demo: from-zero bring-up of the 6-node StarRocks cluster + the cold-rebuild gate. Builds AFTER 0.G.5 (ClickHouse) is sealed + its VMs stopped. Cross-env order: foundation -> security -> packer build x2 -> analytics-starrocks apply -> smoke.",
+  "prerequisites": {
+    "vmsAlive": ["nexus-gateway", "dc-nexus", "vault-1", "vault-2", "vault-3", "vault-transit"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "smokeGate": "(this demo IS the gate)"
+  },
+  "steps": [
+    {
+      "command": "cd nexus-infra-vmware && pwsh -File scripts/foundation.ps1 apply && pwsh -File scripts/security.ps1 apply",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "foundation writes the 6 StarRocks dhcp-host reservations + the starrocks-fe.nexus.lab round-robin + extends the NFS export to the BE; security writes the starrocks-server PKI role + 6 AppRole sidecars + root/app KV seeds" },
+        { "where": "ls $HOME/.nexus/vault-agent-analytics-starrocks-*.json", "what": "6 per-host sidecars present" }
+      ]
+    },
+    {
+      "command": "cd nexus-infra-analytics && (cd packer/analytics-starrocks-fe-node && packer init . && packer build .) && (cd packer/analytics-starrocks-be-node && packer init . && packer build .)",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "H:\\VMS\\NexusPlatform\\_templates\\analytics-starrocks-fe-node\\ + analytics-starrocks-be-node\\", "what": "two .vmx templates built (JDK + StarRocks FE / BE from the release tarball, nexus-* units DISABLED)" }
+      ]
+    },
+    {
+      "command": "cd nexus-infra-analytics && pwsh -File scripts/analytics-starrocks.ps1 apply",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "6 clones -> firstboot -> nftables -> vault-agents -> tls -> fe-bootstrap (leader + 2 followers; BDB-JE quorum) -> be-join (ALTER SYSTEM ADD BACKEND x3) -> schema-bootstrap (DISTRIBUTED BY HASH BUCKETS + replication_num=3 + RBAC) -> backup-repo (NFS + repository)" }
+      ]
+    },
+    {
+      "command": "cd nexus-infra-analytics && pwsh -File scripts/analytics-starrocks.ps1 smoke",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["ALL 0.G.6 SMOKE CHECKS PASSED"],
+      "observe": [
+        { "where": "stdout", "what": "every section GREEN: identity, vault-agent, mTLS, FE quorum (1 leader + 2 followers), 3 BE alive, tablets across 3 BE + replication_num=3, RBAC, round-robin DNS, backup mount" }
+      ]
+    }
+  ],
+  "whatProves": "the 6-node StarRocks cluster builds from absolute zero and is genuinely sharded (tablets across 3 BE) AND replicated (replication_num=3) with a fault-tolerant FE BDB-JE quorum, mTLS, and backup-capability. The cold-rebuild gate is the phase-0.G.6 exit criterion + the v0.1.0 tag trigger for nexus-infra-analytics."
+}

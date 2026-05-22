@@ -1,0 +1,46 @@
+{
+  "id": "demo-0.G.5-clickhouse-scale-up",
+  "title": "ClickHouse scale-up: vertical VM resize (RAM) on a node",
+  "description": "The nexus-cli scale-up verb (change CPU/RAM/disk on an existing VM -- vertical). Demonstrates the generic vmrun stop -> .vmx memsize edit -> start -> verify flow on ch-keeper-1 (2 GB -> 3 GB). scale-up is cluster-aware: it refuses to resize a node holding a critical role mid-operation without an explicit override.",
+  "prerequisites": {
+    "vmsAlive": ["ch-keeper-1", "ch-keeper-2", "ch-keeper-3"],
+    "envVars": ["NEXUS_SSH_KEY", "NEXUS_VMRUN"],
+    "smokeGate": "smoke-0.G.5.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.41 'free -m | awk \"/Mem:/ {print \\$2}\"'",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "current RAM ~2000 MB (the right-sized 2 GB keeper, vms.yaml)" }
+      ]
+    },
+    {
+      "command": "& $NEXUS_VMRUN stop 'H:\\VMS\\NexusPlatform\\04-analytics\\ch-keeper-1\\ch-keeper-1.vmx' soft",
+      "waitAfterSeconds": 20,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "graceful guest shutdown (VMware Tools); a non-leader Keeper going down keeps the quorum at 2/3 (still quorate)" }
+      ]
+    },
+    {
+      "command": "(Get-Content 'H:\\VMS\\NexusPlatform\\04-analytics\\ch-keeper-1\\ch-keeper-1.vmx') -replace '^memsize = .*', 'memsize = \"3072\"' | Set-Content 'H:\\VMS\\NexusPlatform\\04-analytics\\ch-keeper-1\\ch-keeper-1.vmx'; & $NEXUS_VMRUN start 'H:\\VMS\\NexusPlatform\\04-analytics\\ch-keeper-1\\ch-keeper-1.vmx' nogui",
+      "waitAfterSeconds": 45,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": ".vmx memsize rewritten to 3072 MB; VM powered back on" }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.41 'free -m | awk \"/Mem:/ {print \\$2}\"; exec 3<>/dev/tcp/127.0.0.1/9181; printf \"mntr\\n\" >&3; timeout 3 cat <&3 | grep zk_server_state'",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["follower"],
+      "observe": [
+        { "where": "stdout", "what": "RAM now ~3072 MB AND the keeper rejoined the quorum (zk_server_state=follower/leader) -- vertical resize complete + cluster healthy" }
+      ]
+    }
+  ],
+  "whatProves": "scale-up resizes a node's RAM via the generic vmrun stop -> .vmx edit -> start path and the node cleanly rejoins the cluster. Cluster-aware: a Keeper follower (or a data replica whose shard has a surviving replica) can be resized with no service impact; a sole-surviving member would require an explicit override."
+}
