@@ -6,7 +6,7 @@
 
 ## Context
 
-`nexus-cli` is the operator surface for the NexusPlatform 66-VM lab (per
+`nexus-cli` is the operator surface for the NexusPlatform lab (88 VMs built through Phase 0.L.4) (per
 master plan E29). It needs: rich verb routing, Spectre-style table rendering
 for `cluster-status`, dependency-injection hooks for HTTP / Vault / SSH
 clients, and a Native AOT publish path that meets the ≤25 MB exit gate on
