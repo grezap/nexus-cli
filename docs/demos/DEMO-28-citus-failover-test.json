@@ -1,0 +1,24 @@
+{
+  "id": "DEMO-28-citus-failover-test",
+  "title": "Citus: failover test (kill a worker Patroni leader -> standby promoted, VIP follows, queries continue)",
+  "description": "The future nexus-cli CitusAdapter `failover-test` verb -- stops nexus-patroni on the current worker1 leader, watches Patroni promote the streaming standby, confirms the keepalived VIP (.212) floats to the new leader (so pg_dist_node needs no rewrite), and proves a cross-shard aggregate still returns through the coordinator. Destructive (forces a real failover) but self-healing -- restarts the stopped node to rejoin as replica.",
+  "prerequisites": {
+    "vmsAlive": ["citus-coord-1", "citus-coord-2", "citus-worker1-1", "citus-worker1-2", "citus-worker2-1", "citus-worker2-2"],
+    "envVars": ["NEXUS_SSH_KEY"]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test citus --group worker1",
+      "waitAfterSeconds": 90,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["leader stopped", "new leader", "VIP moved", "cross-shard query OK", "rejoined"],
+      "observe": [
+        { "where": "stdout", "what": "old worker1 leader stopped -> Patroni elects the standby -> VIP .212 rebinds on the new leader -> SELECT count(*) FROM events still returns 800+ -> stopped node restarted + rejoins as replica" },
+        { "where": "ssh 192.168.70.207", "what": "sudo /usr/local/sbin/nexus-patronictl list citus-worker1 -- Leader flips between the two nodes" },
+        { "where": "ssh 192.168.70.208", "what": "ip -4 addr show dev nic0 -- VIP .212 appears on whichever node is the leader" },
+        { "where": "ssh 192.168.70.205", "what": "sudo -u postgres psql -h /var/run/nexus-citus -d citus -c 'SELECT count(*) FROM events' -- routed through coordinator, unaffected by the worker failover" }
+      ]
+    }
+  ],
+  "whatProves": "A worker Patroni failover is invisible to the coordinator: registering workers by VIP means the keepalived-floated VIP moves to the promoted standby and pg_dist_node stays valid -- distributed queries continue with no metadata rewrite. PG-native sharding + Patroni HA compose."
+}

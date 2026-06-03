@@ -1,0 +1,23 @@
+{
+  "id": "DEMO-29-citus-scale-out",
+  "title": "Citus: scale-out (add a 3rd worker group + rebalance shards onto it)",
+  "description": "The future nexus-cli CitusAdapter `scale-out` verb -- after a new worker Patroni group (citus-worker3 pair + VIP .214) is stood up, registers it with citus_add_node('worker3.citus.nexus.lab', 5432) and runs rebalance_table_shards() so existing shards move onto the new worker online. Demonstrates horizontal elastic growth of the distributed table with no downtime. (Forward-declared: starts passing once the CitusAdapter scale-out impl + the worker3 overlay land.)",
+  "prerequisites": {
+    "vmsAlive": ["citus-coord-1", "citus-worker1-1", "citus-worker2-1", "citus-worker3-1", "citus-worker3-2"],
+    "envVars": ["NEXUS_SSH_KEY"]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out citus --add-worker worker3",
+      "waitAfterSeconds": 60,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["citus_add_node", "worker3.citus.nexus.lab", "rebalance", "shards moved"],
+      "observe": [
+        { "where": "stdout", "what": "worker3 added to pg_dist_node (groupid grows); rebalance_table_shards('events') moves a share of shards onto worker3; final count(distinct nodename) in citus_shards == 3" },
+        { "where": "ssh 192.168.70.205", "what": "sudo -u postgres psql -h /var/run/nexus-citus -d citus -c 'SELECT nodename,count(*) FROM citus_shards GROUP BY nodename' -- shards now spread across 3 workers" },
+        { "where": "ssh 192.168.70.205", "what": "sudo -u postgres psql -h /var/run/nexus-citus -d citus -c 'SELECT * FROM citus_rebalance_status()' -- online rebalance progress" }
+      ]
+    }
+  ],
+  "whatProves": "Citus scales horizontally online: adding a worker group + rebalance_table_shards redistributes shards with no downtime -- the elastic-growth story for PG-native sharding, complementing the Vitess Reshard equivalent."
+}

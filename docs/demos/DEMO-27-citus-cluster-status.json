@@ -1,0 +1,23 @@
+{
+  "id": "DEMO-27-citus-cluster-status",
+  "title": "Citus: cluster status (coordinator, workers, Patroni groups, shards)",
+  "description": "The future nexus-cli CitusAdapter `status` verb -- prints the distributed-cluster membership from pg_dist_node (coordinator + 2 active worker primaries, by VIP), each Patroni group's leader/replica (coord / worker1 / worker2), and the shard placement summary for the `events` distributed table. Read-only; safe to run anytime.",
+  "prerequisites": {
+    "vmsAlive": ["citus-etcd-1", "citus-etcd-2", "citus-etcd-3", "citus-coord-1", "citus-coord-2", "citus-worker1-1", "citus-worker1-2", "citus-worker2-1", "citus-worker2-2"],
+    "envVars": ["NEXUS_SSH_KEY"]
+  },
+  "steps": [
+    {
+      "command": "nexus status citus",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["coordinator", "worker1.citus.nexus.lab", "worker2.citus.nexus.lab", "Leader", "events"],
+      "observe": [
+        { "where": "stdout", "what": "table: pg_dist_node -> {groupid 0 coordinator coord.citus.nexus.lab, groupid N worker1.citus.nexus.lab, groupid M worker2.citus.nexus.lab (all isactive)}; Patroni: citus-coord/worker1/worker2 each 1 Leader + 1 Replica; events shards split across both workers" },
+        { "where": "ssh 192.168.70.205", "what": "sudo -u postgres psql -h /var/run/nexus-citus -d citus -c 'SELECT * FROM pg_dist_node ORDER BY groupid' + 'SELECT nodename,count(*) FROM citus_shards GROUP BY nodename' -- the raw source the verb wraps" },
+        { "where": "ssh 192.168.70.205", "what": "sudo /usr/local/sbin/nexus-patronictl list citus-coord -- Patroni leader/replica per scope" }
+      ]
+    }
+  ],
+  "whatProves": "The CitusAdapter reads distributed-cluster topology (pg_dist_node) + Patroni group state + shard placement and renders a one-shot health view -- the input to every other verb (failover-test, scale-out)."
+}
