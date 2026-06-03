@@ -1,0 +1,23 @@
+{
+  "id": "DEMO-24-vitess-cluster-status",
+  "title": "Vitess: cluster status (keyspace, shards, tablet types)",
+  "description": "The future nexus-cli VitessAdapter `status` verb -- prints the keyspace `commerce`, both shards (-80 / 80-), and each shard's tablet types (1 PRIMARY + 2 REPLICA) by reading the topo via vtctldclient over gRPC mTLS. Read-only; safe to run anytime.",
+  "prerequisites": {
+    "vmsAlive": ["vitess-etcd-1", "vitess-etcd-2", "vitess-etcd-3", "vitess-control-1", "vitess-shard1-tablet-1", "vitess-shard1-tablet-2", "vitess-shard1-tablet-3", "vitess-shard2-tablet-1", "vitess-shard2-tablet-2", "vitess-shard2-tablet-3"],
+    "envVars": ["NEXUS_SSH_KEY"]
+  },
+  "steps": [
+    {
+      "command": "nexus status vitess",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["commerce", "-80", "80-", "PRIMARY", "REPLICA"],
+      "observe": [
+        { "where": "stdout", "what": "table: keyspace=commerce; shard -80 -> {nexus-100 PRIMARY, nexus-101 REPLICA, nexus-102 REPLICA}; shard 80- -> {nexus-200 PRIMARY, nexus-201 REPLICA, nexus-202 REPLICA}" },
+        { "where": "ssh 192.168.70.193", "what": "sudo /usr/local/sbin/nexus-vtctldclient GetTablets --keyspace commerce -- the raw source the verb wraps" },
+        { "where": "web http://192.168.70.193:15000", "what": "vtctld UI shows the same shard/tablet map" }
+      ]
+    }
+  ],
+  "whatProves": "The VitessAdapter reads cluster topology via vtctld gRPC mTLS and renders a one-shot health view -- the input to every other verb (failover-test, scale-out)."
+}

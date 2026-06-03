@@ -1,0 +1,24 @@
+{
+  "id": "DEMO-26-vitess-scale-out",
+  "title": "Vitess: scale-out (add a REPLICA tablet to a shard)",
+  "description": "The future nexus-cli VitessAdapter `scale-out` verb (add a NODE, horizontal -- per nexus-cli verb terminology) -- provisions a new vttablet+Percona tablet, joins it to shard -80 as a REPLICA (init_tablet_type=replica -> registers in topo -> VTOrc wires replication from the PRIMARY). Demonstrates per-shard read-scaling. (Contrast `scale-up` = grow CPU/RAM on an existing tablet.)",
+  "prerequisites": {
+    "vmsAlive": ["vitess-etcd-1", "vitess-control-1", "vitess-shard1-tablet-1"],
+    "envVars": ["NEXUS_SSH_KEY"],
+    "notes": "Requires a free tablet VM + dhcp pin + Vault sidecar provisioned (foundation + security apply for the new MAC/uid). In v1 this verb documents the topology change; the VM provisioning is the terraform path (add an enable_vitess_shard1_tablet_4 module + reservation)."
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out vitess --shard -80 --tablet-uid 103",
+      "waitAfterSeconds": 60,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["nexus-103", "REPLICA", "shard -80", "replication running"],
+      "observe": [
+        { "where": "stdout", "what": "new tablet nexus-103 registered in shard -80 as REPLICA; replication from the PRIMARY catching up; shard now 1 PRIMARY + 3 REPLICA" },
+        { "where": "ssh 192.168.70.193", "what": "GetTablets --keyspace commerce --shard -80 now lists 4 tablets" },
+        { "where": "web http://192.168.70.193:15000", "what": "vtctld UI shows the 4th tablet SERVING after catch-up" }
+      ]
+    }
+  ],
+  "whatProves": "A shard scales horizontally for read capacity by adding REPLICA tablets without downtime; VTOrc/Vitess wires replication automatically; vtgate begins routing reads to the new replica once SERVING."
+}

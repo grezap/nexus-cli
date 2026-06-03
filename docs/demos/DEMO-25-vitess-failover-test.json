@@ -1,0 +1,23 @@
+{
+  "id": "DEMO-25-vitess-failover-test",
+  "title": "Vitess: failover-test (VTOrc auto-reparent on primary kill)",
+  "description": "The future nexus-cli VitessAdapter `failover-test` verb -- records shard -80's current PRIMARY, stops its vttablet+mysqld, waits for VTOrc to promote a replica (auto-reparent), verifies the keyspace stays writable via vtgate, then restarts the killed tablet and confirms it rejoins as REPLICA. DESTRUCTIVE: requires --yes.",
+  "prerequisites": {
+    "vmsAlive": ["vitess-control-1", "vitess-vtgate-1", "vitess-shard1-tablet-1", "vitess-shard1-tablet-2", "vitess-shard1-tablet-3"],
+    "envVars": ["NEXUS_SSH_KEY"]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test vitess --shard -80 --yes",
+      "waitAfterSeconds": 120,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["old primary", "new primary", "writable", "rejoined REPLICA"],
+      "observe": [
+        { "where": "stdout", "what": "old primary nexus-100 -> killed; VTOrc promotes nexus-101/102; 'cluster writable' INSERT via vtgate succeeds; killed tablet restarted -> 'rejoined REPLICA'; back to 1P+2R" },
+        { "where": "web http://192.168.70.193:16000", "what": "VTOrc UI logs the RecoverDeadPrimary analysis + the chosen new primary" },
+        { "where": "ssh 192.168.70.193", "what": "sudo /usr/local/sbin/nexus-vtctldclient GetTablets --keyspace commerce --shard -80 shows the new PRIMARY" }
+      ]
+    }
+  ],
+  "whatProves": "VTOrc performs unattended reparent on PRIMARY loss with semi_sync durability (no acked write lost); vtgate re-routes transparently; the killed tablet self-heals back to REPLICA. The HA guarantee of the relational sharding tier."
+}
