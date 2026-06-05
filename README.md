@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.F%20v0.5.0%20%E2%9C%85%205%2F5%20verbs-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.G.1%20v0.6.0%20%E2%9C%85%20Redis%20adapter%20live-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,7 +12,15 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.5.0):** **All 5 of 5 master-plan verbs ship — Phase 0.F closed.** `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), `failover-test {consul-leader, nomad-leader, swarm-manager}` (v0.3.x), `demo {list, run, record}` (v0.4.0), and **`kafka failover {east-to-west, west-to-east}`** (v0.5.0; ADR-0008 — region-loss DR via vmrun-suspend × 3 source brokers + produce/consume round-trip on the target + vmrun-resume). Verified live: consul 1.55s · nomad 2.716s · swarm-manager 21.59s · kafka east→west 13.20s · kafka west→east 13.57s — all RTOs auto-recovered, all under their master-plan budgets.
+> **Current state (v0.6.0):** Phase 0.G **data-tier adapter expansion** underway — the
+> `IClusterAdapter` SPI plus the **first concrete adapter, Redis**, ship **live-verified** (all
+> 11 data-tier verbs green against the running `redis` cluster: status · health · topology ·
+> failover RTO≈2.1s · cert-rotate · acl · backup take/restore · scale-out add/remove · chaos;
+> AOT 23.77 MB / 30 MB gate). See [`docs/handbook.md`](./docs/handbook.md) for the analytical verb
+> reference + troubleshooting runbook, and [`docs/verification/0.G.1-redis.md`](./docs/verification/0.G.1-redis.md)
+> for the live evidence. The 9 remaining cluster adapters land per the canon order (ADR-0010).
+>
+> **Phase 0.F (v0.5.0) remains closed: all 5 of 5 master-plan verbs ship.** `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), `failover-test {consul-leader, nomad-leader, swarm-manager}` (v0.3.x), `demo {list, run, record}` (v0.4.0), and **`kafka failover {east-to-west, west-to-east}`** (v0.5.0; ADR-0008 — region-loss DR via vmrun-suspend × 3 source brokers + produce/consume round-trip on the target + vmrun-resume). Verified live: consul 1.55s · nomad 2.716s · swarm-manager 21.59s · kafka east→west 13.20s · kafka west→east 13.57s — all RTOs auto-recovered, all under their master-plan budgets.
 
 ## What's in here
 
@@ -41,6 +49,27 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 | `nexus demo record <id>` | ✅ v0.4.0 | Generate VHS `.tape` + render to GIF via the `vhs` binary (graceful fallback if vhs isn't installed) |
 | `nexus kafka failover east-to-west` | ✅ v0.5.0 | Vmrun-suspend the 3 kafka-east brokers, prove kafka-west keeps serving via RF=3 produce/consume round-trip, vmrun-resume; live RTO **13.20 s** (60 s gate) |
 | `nexus kafka failover west-to-east` | ✅ v0.5.0 | Symmetric: vmrun-suspend the 3 kafka-west brokers; live RTO **13.57 s**. The more demo-worthy direction (ecosystem stays up) |
+
+**Data-tier cluster verbs (v0.6.x — ADR-0009 `IClusterAdapter` SPI)** — one adapter per cluster,
+SSH-shell-out to the on-node CLI, no managed DB drivers. **Redis is live (v0.6.0)**; the 9 remaining
+adapters land per the canon order.
+
+| Verb | Status | What it does |
+|---|---|---|
+| `nexus status <cluster>` | ✅ redis | per-cluster members + live roles + health |
+| `nexus health <cluster>` | ✅ redis | per-node probes (replication lag, etc.) |
+| `nexus topology <cluster> [--watch]` | ✅ redis | shard/replica map |
+| `nexus failover-test cluster <cluster>` | ✅ redis | controlled primary loss + measured RTO |
+| `nexus cert-rotate <cluster>` | ✅ redis | issue a fresh TLS leaf per node + reload |
+| `nexus acl <cluster> <list\|describe\|grant\|revoke>` | ✅ redis (read) | inspect / mutate access control |
+| `nexus backup take\|restore <cluster>` | ✅ redis | engine-native snapshot + restore round-trip |
+| `nexus scale-out add\|remove <cluster>` | ✅ redis | role-aware live cluster-membership change |
+| `nexus scale-up <vm>` | ✅ generic | vertical VM resize (cluster-aware; refuses primaries) |
+| `nexus chaos <cluster> <scenario>` | ✅ redis | time-boxed, self-reverting fault injection |
+
+Clusters: `redis` · `mongo` · `percona` · `postgres` · `clickhouse` · `starrocks` ·
+`sql-fci`/`sql-ag` · `mongo-sharded` · `vitess` · `citus` · `kafka`. See
+[`docs/handbook.md`](./docs/handbook.md) §1 for the analytical per-verb reference.
 
 Run `nexus --help` for the live verb list against the binary you have installed.
 
@@ -156,7 +185,7 @@ Nexus.Cli.Adapters may depend on Nexus.Cli.Core.
 Nothing depends on Nexus.Cli.
 ```
 
-ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Eight ADRs cover framework choice (0001), AOT cadence (0002), layout (0003), auth model (0004), Dapper-on-AOT (0005), hand-rolled vms.yaml reader (0006), SSH.NET over ssh.exe (0007), and the v0.5 kafka-failover demo-grade-via-SSH design (0008).
+ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Ten ADRs cover framework choice (0001), AOT cadence (0002), layout (0003), auth model (0004), Dapper-on-AOT (0005), hand-rolled vms.yaml reader (0006), SSH.NET over ssh.exe (0007), the v0.5 kafka-failover demo-grade-via-SSH design (0008), the `IClusterAdapter` SPI + extended demo spec (0009), and the cross-adapter patterns + Redis exemplar (0010).
 
 ## Roadmap
 
@@ -173,6 +202,8 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Eight ADRs cover framewor
 | v0.3.0 | `failover-test`; SSH client + raft introspection |
 | v0.4.0 | `demo run/record` — VHS .tape orchestration + Playwright bridge |
 | v0.5.0 | `kafka failover {east-to-west, west-to-east}` — ADR-0008; live RTOs 13.20 s + 13.57 s (60 s gate); **shipped 2026-05-15**, closes the v0.x roadmap with 5/5 master-plan verbs live |
+| **v0.6.0** | Phase 0.G.1 — `IClusterAdapter` SPI + the **Redis adapter** (all 11 data-tier verbs live-verified); AOT gate → ≤30 MB (ADR-0024); **23.77 MB** |
+| v0.6.x–v0.8.0 | The 9 remaining adapters in canon order (Mongo → Percona → Patroni → ClickHouse → StarRocks → SQL-FCI/AG → mongo-sharded → Vitess → Citus) |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing

@@ -1,5 +1,8 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
+using System.Text;
+using System.Text.Json;
 using Nexus.Cli.Core;
 using Nexus.Cli.Core.Abstractions;
 using Nexus.Cli.Core.Models;
@@ -25,40 +28,50 @@ namespace Nexus.Cli.Adapters.Cluster;
 /// <see cref="KafkaFailoverService"/> constructor shape).
 /// </para>
 /// <para>
-/// redis-cli invocation pattern: <c>sudo bash -c 'REDISCLI_AUTH=$(cat
-/// /etc/nexus-redis/auth-password.txt) /usr/bin/redis-cli --tls --cacert
-/// /etc/nexus-redis/tls/ca.pem &lt;ARGS&gt;'</c>. Sudo is required because
-/// <c>/etc/nexus-redis/</c> is <c>0750 root:redis</c> and nexusadmin is not
-/// in the redis group (the
-/// <see cref="Nexus.Cli.Adapters.Cluster.KafkaFailoverService"/>-era
-/// <c>feedback_sudo_required_for_consul_etc_traverse.md</c> lesson, Redis
-/// edition).
+/// redis-cli invocation pattern (reverse-engineered against the LIVE cluster, 0.G.1):
+/// <c>sudo redis-cli --tls --cacert /etc/nexus-redis/tls/ca.crt --cert
+/// /etc/nexus-redis/tls/server.crt --key /etc/nexus-redis/tls/server.key &lt;ARGS&gt;</c>.
+/// The cluster is <b>mTLS-only</b> (<c>port 0</c> + <c>tls-port 6379</c> +
+/// <c>tls-auth-clients yes</c>) -- there is NO AUTH password; the client cert/key are the
+/// identity and the CA file is <c>ca.crt</c> (not <c>ca.pem</c>). Sudo is required because
+/// <c>/etc/nexus-redis/</c> is <c>0750 root:redis</c> and nexusadmin is not in the redis
+/// group (the <c>feedback_sudo_required_for_consul_etc_traverse.md</c> lesson, Redis edition).
 /// </para>
 /// <para>
-/// Implementation status (0.G.1 framework ship):
+/// Implementation status (v0.6.0 -- ALL live-verified against the running cluster 2026-06-05;
+/// see docs/verification/0.G.1-redis.md):
 /// <list type="bullet">
-///   <item><c>GetStatusAsync</c> -- IMPLEMENTED (parses <c>CLUSTER NODES</c>)</item>
-///   <item><c>FailoverAsync</c> -- IMPLEMENTED (CLUSTER FAILOVER on a replica + role-flip poll)</item>
-///   <item><c>HealthAsync</c> -- IMPLEMENTED (per-node INFO replication probes)</item>
-///   <item><c>TopologyAsync</c> -- IMPLEMENTED (slot range distribution)</item>
-///   <item><c>RotateCertAsync</c> -- IMPLEMENTED (touches Vault Agent re-render marker per node)</item>
-///   <item><c>AclAsync</c> -- IMPLEMENTED (ACL LIST parsing)</item>
-///   <item><c>CanResizeVm</c> -- IMPLEMENTED (refuses current primaries)</item>
-///   <item><c>ScaleOutAddAsync</c> / <c>ScaleOutRemoveAsync</c> -- STUB (lands in 0.G.1.x; needs a live cluster to iterate against the clone + cluster-add-node + reshard dance)</item>
-///   <item><c>BackupTakeAsync</c> / <c>BackupRestoreAsync</c> -- STUB (BGSAVE + scp pattern; lands in 0.G.1.x)</item>
-///   <item><c>ApplyChaosAsync</c> -- STUB (pumba/nftables chaos tooling lands in 0.G.x)</item>
+///   <item><c>GetStatusAsync</c> / <c>HealthAsync</c> / <c>TopologyAsync</c> -- CLUSTER NODES / INFO probes</item>
+///   <item><c>FailoverAsync</c> -- CLUSTER FAILOVER on a replica + role-flip poll (RTO ~2.1s)</item>
+///   <item><c>RotateCertAsync</c> -- genuine re-issue via the node's own Vault token (pki_int/issue/redis-server)</item>
+///   <item><c>AclAsync</c> -- ACL LIST/DESCRIBE (grant/revoke pending)</item>
+///   <item><c>ScaleOutAddAsync</c> / <c>ScaleOutRemoveAsync</c> -- role-aware add-node / del-node (apply-on-demand provisioning, ADR-0010)</item>
+///   <item><c>BackupTakeAsync</c> / <c>BackupRestoreAsync</c> -- per-primary BGSAVE node-local snapshot + restore round-trip</item>
+///   <item><c>ApplyChaosAsync</c> -- pushes nexus-chaos.sh; time-boxed self-reverting faults</item>
+///   <item><c>CanResizeVm</c> -- refuses current primaries (consumed by IVmResizer)</item>
 /// </list>
 /// </para>
 /// </summary>
 public sealed class RedisAdapter : IClusterAdapter
 {
     private const string ClusterName = "redis";
-    private const string AuthCatPrefix = "sudo bash -c 'REDISCLI_AUTH=$(cat /etc/nexus-redis/auth-password.txt) /usr/bin/redis-cli --tls --cacert /etc/nexus-redis/tls/ca.pem";
+    // Connection contract reverse-engineered against the LIVE cluster (0.G.1 live-verify,
+    // 2026-06-05): redis.conf has `port 0` + `tls-port 6379` + `tls-auth-clients yes`, so
+    // the cluster is mTLS-ONLY -- there is NO AUTH password (no /etc/nexus-redis/auth-password.txt).
+    // The client must present a cert+key; the CA file is `ca.crt` (not `ca.pem`). redis-cli runs
+    // ON the target node (via SSH) so it reaches the local instance on 127.0.0.1:6379.
+    private const string RedisCliPrefix = "sudo bash -c '/usr/bin/redis-cli --tls --cacert /etc/nexus-redis/tls/ca.crt --cert /etc/nexus-redis/tls/server.crt --key /etc/nexus-redis/tls/server.key";
 
     private static readonly TimeSpan SshTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan FailoverPollInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan FailoverDeadline = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan BackupTimeout = TimeSpan.FromSeconds(120);
     private static readonly char[] AddressSeparators = [':', '@'];
+
+    // Bare redis-cli invocation (mTLS, no AUTH) for embedding in multi-command remote
+    // scripts via `sudo $R ...`. RedisCliPrefix wraps this in `sudo bash -c` for one-shots;
+    // this bare form composes inside larger `;`-separated scripts run over one SSH channel.
+    private const string RedisCliBare = "/usr/bin/redis-cli --tls --cacert /etc/nexus-redis/tls/ca.crt --cert /etc/nexus-redis/tls/server.crt --key /etc/nexus-redis/tls/server.key";
 
     private readonly IVmsCatalog _catalog;
     private readonly ISshClient _ssh;
@@ -95,7 +108,7 @@ public sealed class RedisAdapter : IClusterAdapter
         var firstNode = cluster.Value.Nodes[0];
 
         var target = new SshTarget(firstNode.Vmnet11, 22, _sshUsername, _sshKeyPath);
-        var cmd = $"{AuthCatPrefix} CLUSTER NODES'";
+        var cmd = $"{RedisCliPrefix} CLUSTER NODES'";
         var exec = await _ssh.ExecuteAsync(target, cmd, SshTimeout, cancellationToken).ConfigureAwait(false);
         if (exec.IsFail)
             return Result.Fail<ClusterStatus>($"ssh to {firstNode.Name} ({firstNode.Vmnet11}) failed: {exec.Error}");
@@ -153,11 +166,15 @@ public sealed class RedisAdapter : IClusterAdapter
                 return Result.Fail<FailoverResult>("no replica nodes found in cluster status");
         }
 
-        var originalPrimaryHostname = ResolvePrimaryForReplica(statusBefore.Value!, targetReplica) ?? "unknown";
-
         // Issue CLUSTER FAILOVER on the target replica.
         var sshTarget = new SshTarget(targetReplica.IpAddress, 22, _sshUsername, _sshKeyPath);
-        var failoverCmd = $"{AuthCatPrefix} CLUSTER FAILOVER'";
+
+        // Resolve the original primary authoritatively from the replica's live
+        // master_host (INFO replication) -- the role labels in our model don't carry
+        // the replica->master mapping, and a hostname heuristic is wrong once roles move.
+        var originalPrimaryHostname = await ResolveMasterHostAsync(sshTarget, statusBefore.Value!, cancellationToken).ConfigureAwait(false) ?? "unknown";
+
+        var failoverCmd = $"{RedisCliPrefix} CLUSTER FAILOVER'";
         var failoverExec = await _ssh.ExecuteAsync(sshTarget, failoverCmd, SshTimeout, cancellationToken).ConfigureAwait(false);
         var failureInjectedAt = sw.Elapsed;
         if (failoverExec.IsFail)
@@ -206,29 +223,123 @@ public sealed class RedisAdapter : IClusterAdapter
     }
 
     // -----------------------------------------------------------------------
-    // ScaleOutAddAsync -- STUB
+    // ScaleOutAddAsync -- IMPLEMENTED (apply-on-demand provisioning + role-aware join)
+    // Per ADR-0010: the new node is minted by the proven IaC graph; this adapter does
+    // the role-aware cluster JOIN over SSH. It discovers a provisioned-but-unjoined,
+    // reachable redis node (a freshly-applied growth node, or one freed by a prior
+    // scale-out remove) and joins it as the requested --role.
     // -----------------------------------------------------------------------
-    public Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
+    public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
-        // TODO 0.G.1.x: clone a new VM from oltp-node template, configure
-        // /etc/nexus-redis/, start redis-server, run `redis-cli --cluster
-        // add-node <new>:6379 <existing>:6379 [--cluster-slave --cluster-master-id <id>]`,
-        // then `--cluster reshard` to redistribute slots. Requires a live
-        // running cluster to iterate against.
-        return Task.FromResult(Result.Fail<ScaleOutResult>(
-            "RedisAdapter.ScaleOutAddAsync not implemented in the 0.G.1 framework ship; lands in 0.G.1.x once the live cluster is up to iterate against (clone + cluster-add-node + reshard dance)."));
+        var role = (request.Role ?? "replica").Trim().ToLowerInvariant();
+        if (role is not ("replica" or "primary"))
+            return Result.Fail<ScaleOutResult>($"redis scale-out role must be 'replica' or 'primary' (got '{request.Role}').");
+
+        var cluster = _catalog.GetCluster(ClusterName);
+        if (cluster.IsFail) return Result.Fail<ScaleOutResult>(cluster.Error!);
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var sw = Stopwatch.StartNew();
+
+        var seed = cluster.Value!.Nodes[0];
+        var seedTarget = new SshTarget(seed.Vmnet11, 22, _sshUsername, _sshKeyPath);
+        var nodes = await GetRawNodesAsync(seedTarget, cancellationToken).ConfigureAwait(false);
+        if (nodes.Count == 0) return Result.Fail<ScaleOutResult>("could not read CLUSTER NODES from any member");
+        var memberIps = nodes.Select(n => n.Ip).ToHashSet(StringComparer.Ordinal);
+
+        // Discover a provisioned-but-unjoined, reachable redis node.
+        NodeRecord? candidate = null;
+        foreach (var n in cluster.Value.Nodes)
+        {
+            if (memberIps.Contains(n.Vmnet11)) continue;
+            var t = new SshTarget(n.Vmnet11, 22, _sshUsername, _sshKeyPath);
+            var ping = await _ssh.ExecuteAsync(t, "sudo systemctl is-active nexus-redis 2>/dev/null || echo down", SshTimeout, cancellationToken).ConfigureAwait(false);
+            if (ping.IsOk && ping.Value!.Stdout.Contains("active", StringComparison.Ordinal)) { candidate = n; break; }
+        }
+        if (candidate is null)
+            return Result.Fail<ScaleOutResult>(
+                "no provisioned-but-unjoined redis node is reachable. Provision one first (apply-on-demand, ADR-0010): "
+                + "`pwsh -File nexus-infra-oltp/scripts/oltp-redis.ps1 apply -Vars redis_extra_count=1`, then re-run `scale-out add`.");
+
+        var newIp = candidate.Vmnet11;
+        var joinSeedIp = nodes.First(n => n.Role == "primary").Ip;
+        string joinArgs;
+        if (role == "replica")
+        {
+            var primaryIds = nodes.Where(n => n.Role == "primary").Select(n => n.Id).ToList();
+            var masterId = primaryIds
+                .OrderBy(id => nodes.Count(n => n.Role == "replica" && n.MasterId == id))
+                .First();
+            joinArgs = $"--cluster add-node {newIp}:6379 {joinSeedIp}:6379 --cluster-slave --cluster-master-id {masterId}";
+        }
+        else
+        {
+            joinArgs = $"--cluster add-node {newIp}:6379 {joinSeedIp}:6379";
+        }
+
+        var joinTarget = new SshTarget(newIp, 22, _sshUsername, _sshKeyPath);
+        var joinExec = await _ssh.ExecuteAsync(joinTarget, $"sudo {RedisCliBare} {joinArgs}", BackupTimeout, cancellationToken).ConfigureAwait(false);
+        if (joinExec.IsFail || joinExec.Value!.ExitCode != 0)
+            return Result.Fail<ScaleOutResult>($"add-node failed for {candidate.Name}: {(joinExec.IsFail ? joinExec.Error : Tail(joinExec.Value!.Stdout + joinExec.Value.Stderr, 300))}");
+
+        var note = role == "primary"
+            ? " (new primary joined empty; run `redis-cli --cluster reshard` to assign it slots)"
+            : "";
+        sw.Stop();
+        return Result.Ok(new ScaleOutResult(
+            OperationType: "add",
+            AffectedNodes: [candidate.Name],
+            Outcome: "ok",
+            OutcomeReason: $"joined {candidate.Name} ({newIp}) as {role}{note}",
+            Duration: sw.Elapsed,
+            StartedAtUtc: startedAt));
     }
 
     // -----------------------------------------------------------------------
-    // ScaleOutRemoveAsync -- STUB
+    // ScaleOutRemoveAsync -- IMPLEMENTED (drain-guard + del-node + reset)
+    // Refuses to remove a slot-holding primary (would lose data -- reshard away first).
+    // For a replica: CLUSTER FORGET via del-node, then CLUSTER RESET HARD the removed
+    // node so it is a clean, empty node ready to be re-added or deprovisioned.
     // -----------------------------------------------------------------------
-    public Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
+    public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
-        // TODO 0.G.1.x: `redis-cli --cluster reshard` slots AWAY from the target,
-        // then `redis-cli --cluster del-node <existing>:6379 <id>` to forget +
-        // shutdown. terraform destroys the VM after the cluster forgets it.
-        return Task.FromResult(Result.Fail<ScaleOutResult>(
-            "RedisAdapter.ScaleOutRemoveAsync not implemented in the 0.G.1 framework ship; lands in 0.G.1.x (reshard-away + del-node dance)."));
+        if (string.IsNullOrWhiteSpace(request.NodeName))
+            return Result.Fail<ScaleOutResult>("scale-out remove requires a node name");
+
+        var cluster = _catalog.GetCluster(ClusterName);
+        if (cluster.IsFail) return Result.Fail<ScaleOutResult>(cluster.Error!);
+        var node = cluster.Value!.Nodes.FirstOrDefault(n => string.Equals(n.Name, request.NodeName, StringComparison.OrdinalIgnoreCase));
+        if (node is null) return Result.Fail<ScaleOutResult>($"node '{request.NodeName}' is not in the redis cluster");
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var sw = Stopwatch.StartNew();
+
+        var seed = cluster.Value.Nodes.First(n => !string.Equals(n.Name, node.Name, StringComparison.OrdinalIgnoreCase));
+        var seedTarget = new SshTarget(seed.Vmnet11, 22, _sshUsername, _sshKeyPath);
+        var nodes = await GetRawNodesAsync(seedTarget, cancellationToken).ConfigureAwait(false);
+        var member = nodes.FirstOrDefault(n => n.Ip == node.Vmnet11);
+        if (string.IsNullOrEmpty(member.Id))
+            return Result.Fail<ScaleOutResult>($"{node.Name} ({node.Vmnet11}) is not currently a cluster member");
+        if (member.HasSlots && request.Drain)
+            return Result.Fail<ScaleOutResult>(
+                $"{node.Name} is a PRIMARY holding slots; reshard its slots away first "
+                + "(`redis-cli --cluster reshard`) before removing -- removing a slot-holding primary would lose data.");
+
+        var delExec = await _ssh.ExecuteAsync(seedTarget, $"sudo {RedisCliBare} --cluster del-node {seed.Vmnet11}:6379 {member.Id}", BackupTimeout, cancellationToken).ConfigureAwait(false);
+        if (delExec.IsFail || delExec.Value!.ExitCode != 0)
+            return Result.Fail<ScaleOutResult>($"del-node failed: {(delExec.IsFail ? delExec.Error : Tail(delExec.Value!.Stdout + delExec.Value.Stderr, 300))}");
+
+        var removedTarget = new SshTarget(node.Vmnet11, 22, _sshUsername, _sshKeyPath);
+        await _ssh.ExecuteAsync(removedTarget, $"sudo {RedisCliBare} CLUSTER RESET HARD", SshTimeout, cancellationToken).ConfigureAwait(false);
+
+        sw.Stop();
+        return Result.Ok(new ScaleOutResult(
+            OperationType: "remove",
+            AffectedNodes: [node.Name],
+            Outcome: "ok",
+            OutcomeReason: $"removed {node.Name} ({node.Vmnet11}) from the cluster + reset (ready for re-add or deprovision)",
+            Duration: sw.Elapsed,
+            StartedAtUtc: startedAt));
     }
 
     // -----------------------------------------------------------------------
@@ -245,7 +356,7 @@ public sealed class RedisAdapter : IClusterAdapter
         foreach (var node in cluster.Value!.Nodes)
         {
             var target = new SshTarget(node.Vmnet11, 22, _sshUsername, _sshKeyPath);
-            var cmd = $"{AuthCatPrefix} INFO replication'";
+            var cmd = $"{RedisCliPrefix} INFO replication'";
             var exec = await _ssh.ExecuteAsync(target, cmd, SshTimeout, cancellationToken).ConfigureAwait(false);
             if (exec.IsFail || exec.Value!.ExitCode != 0)
             {
@@ -324,26 +435,90 @@ public sealed class RedisAdapter : IClusterAdapter
     }
 
     // -----------------------------------------------------------------------
-    // BackupTakeAsync -- STUB
+    // BackupTakeAsync -- IMPLEMENTED (per shard-primary BGSAVE -> node-local snapshot)
+    // NFS is NOT mounted on redis nodes (0.G.1 live finding), so each shard primary's
+    // dump.rdb is snapshotted node-locally under /var/backups/nexus-redis/<id>.
     // -----------------------------------------------------------------------
-    public Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
+    public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
-        // TODO 0.G.1.x: per-shard primary BGSAVE, wait for completion, scp
-        // /var/lib/redis/dump.rdb to nfs://nexus-gateway:/srv/nfs/backups/redis/<backupId>.rdb,
-        // record sizes + duration.
-        return Task.FromResult(Result.Fail<BackupResult>(
-            "RedisAdapter.BackupTakeAsync not implemented in the 0.G.1 framework ship; lands in 0.G.1.x (BGSAVE + scp pattern)."));
+        var statusRes = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        if (statusRes.IsFail) return Result.Fail<BackupResult>(statusRes.Error!);
+        var primaries = statusRes.Value!.Members.Where(m => m.Role == "primary").ToList();
+        if (primaries.Count == 0) return Result.Fail<BackupResult>("no shard primaries found to back up");
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var sw = Stopwatch.StartNew();
+        var backupId = string.IsNullOrWhiteSpace(request.Tag)
+            ? $"redis-backup-{startedAt:yyyyMMdd-HHmmss}"
+            : $"redis-{request.Tag}-{startedAt:yyyyMMdd-HHmmss}";
+        var destDir = $"/var/backups/nexus-redis/{backupId}";
+        long totalBytes = 0;
+
+        foreach (var p in primaries)
+        {
+            var target = new SshTarget(p.IpAddress, 22, _sshUsername, _sshKeyPath);
+            var script =
+                $"R=\"{RedisCliBare}\"; sudo mkdir -p {destDir}; sudo $R BGSAVE >/dev/null 2>&1; " +
+                "for i in $(seq 1 30); do s=$(sudo $R INFO persistence | tr -d '\\r' | grep rdb_bgsave_in_progress | cut -d: -f2); [ \"$s\" = \"0\" ] && break; sleep 1; done; " +
+                "dir=$(sudo $R CONFIG GET dir | tail -1 | tr -d '\\r'); fn=$(sudo $R CONFIG GET dbfilename | tail -1 | tr -d '\\r'); " +
+                $"sudo cp \"$dir/$fn\" \"{destDir}/{p.Hostname}.rdb\"; sudo stat -c %s \"{destDir}/{p.Hostname}.rdb\"";
+            var exec = await _ssh.ExecuteAsync(target, script, BackupTimeout, cancellationToken).ConfigureAwait(false);
+            if (exec.IsFail || exec.Value!.ExitCode != 0)
+                return Result.Fail<BackupResult>($"backup on {p.Hostname} failed: {(exec.IsFail ? exec.Error : Tail(exec.Value!.Stderr, 200))}");
+            var outLines = exec.Value.Stdout.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            if (outLines.Length > 0 && long.TryParse(outLines[^1].Trim(), out var bytes)) totalBytes += bytes;
+        }
+        sw.Stop();
+
+        return Result.Ok(new BackupResult(
+            BackupId: backupId,
+            Destination: $"{destDir} (node-local; {primaries.Count} shard-primary .rdb files)",
+            SizeBytes: totalBytes,
+            Duration: sw.Elapsed,
+            StartedAtUtc: startedAt));
     }
 
     // -----------------------------------------------------------------------
-    // BackupRestoreAsync -- STUB
+    // BackupRestoreAsync -- IMPLEMENTED (stop -> replace dump.rdb -> start -> verify DBSIZE)
+    // DESTRUCTIVE: overwrites each shard primary's data with its snapshot. Replicas
+    // re-sync from their primary automatically afterwards.
     // -----------------------------------------------------------------------
-    public Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
+    public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
-        // TODO 0.G.1.x: scp the snapshot back, stop redis-server, replace
-        // /var/lib/redis/dump.rdb, restart, verify keys returned.
-        return Task.FromResult(Result.Fail<RestoreResult>(
-            "RedisAdapter.BackupRestoreAsync not implemented in the 0.G.1 framework ship; lands in 0.G.1.x."));
+        if (string.IsNullOrWhiteSpace(request.BackupId))
+            return Result.Fail<RestoreResult>("restore requires a backup id");
+        var statusRes = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        if (statusRes.IsFail) return Result.Fail<RestoreResult>(statusRes.Error!);
+        var primaries = statusRes.Value!.Members.Where(m => m.Role == "primary").ToList();
+        if (primaries.Count == 0) return Result.Fail<RestoreResult>("no shard primaries found to restore");
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var sw = Stopwatch.StartNew();
+        var destDir = $"/var/backups/nexus-redis/{request.BackupId}";
+        long itemsRestored = 0;
+
+        foreach (var p in primaries)
+        {
+            var snap = $"{destDir}/{p.Hostname}.rdb";
+            var target = new SshTarget(p.IpAddress, 22, _sshUsername, _sshKeyPath);
+            var script =
+                $"test -s {snap} || {{ echo MISSING-SNAPSHOT; exit 9; }}; R=\"{RedisCliBare}\"; " +
+                "dir=$(sudo $R CONFIG GET dir | tail -1 | tr -d '\\r'); fn=$(sudo $R CONFIG GET dbfilename | tail -1 | tr -d '\\r'); " +
+                $"sudo systemctl stop nexus-redis; sudo cp {snap} \"$dir/$fn\"; sudo chown redis:redis \"$dir/$fn\"; sudo systemctl start nexus-redis; " +
+                "for i in $(seq 1 20); do sudo $R PING >/dev/null 2>&1 && break; sleep 1; done; sudo $R DBSIZE | tr -d '\\r'";
+            var exec = await _ssh.ExecuteAsync(target, script, BackupTimeout, cancellationToken).ConfigureAwait(false);
+            if (exec.IsFail || exec.Value!.ExitCode != 0)
+                return Result.Fail<RestoreResult>($"restore on {p.Hostname} failed: {(exec.IsFail ? exec.Error : Tail(exec.Value!.Stdout + exec.Value.Stderr, 200))}");
+            var outLines = exec.Value.Stdout.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            if (outLines.Length > 0 && long.TryParse(outLines[^1].Trim(), out var n)) itemsRestored += n;
+        }
+        sw.Stop();
+
+        return Result.Ok(new RestoreResult(
+            BackupId: request.BackupId,
+            ItemsRestored: itemsRestored,
+            Duration: sw.Elapsed,
+            StartedAtUtc: startedAt));
     }
 
     // -----------------------------------------------------------------------
@@ -363,43 +538,70 @@ public sealed class RedisAdapter : IClusterAdapter
         {
             var target = new SshTarget(node.Vmnet11, 22, _sshUsername, _sshKeyPath);
 
-            // Capture old serial.
+            // Old serial (for the before/after report).
             var oldSerialExec = await _ssh.ExecuteAsync(target,
                 "sudo openssl x509 -in /etc/nexus-redis/tls/server.crt -noout -serial 2>/dev/null | sed 's/serial=//'",
                 SshTimeout, cancellationToken).ConfigureAwait(false);
-            var oldSerial = oldSerialExec.IsOk && oldSerialExec.Value!.ExitCode == 0
-                ? oldSerialExec.Value.Stdout.Trim()
-                : "(unknown)";
+            var oldSerial = oldSerialExec.IsOk && oldSerialExec.Value!.ExitCode == 0 && oldSerialExec.Value.Stdout.Trim().Length > 0
+                ? oldSerialExec.Value.Stdout.Trim() : "(unknown)";
 
-            // Trigger Vault Agent re-render by restarting it (simplest reliable
-            // mechanism; Vault Agent re-issues the cert template + writes new
-            // server.crt/.key on start).
-            var rotateExec = await _ssh.ExecuteAsync(target,
-                "sudo systemctl restart nexus-vault-agent.service && sleep 3 && sudo systemctl is-active nexus-vault-agent.service",
-                SshTimeout, cancellationToken).ConfigureAwait(false);
-            if (rotateExec.IsFail || rotateExec.Value!.ExitCode != 0)
+            // Genuine re-issue: SSH to the node and use ITS OWN Vault identity (the auto-auth
+            // token sink) to issue a fresh leaf from pki_int/issue/redis-server. The Agent's
+            // pkiCert template caches the 90-day cert and won't rotate on demand, so we go
+            // direct via the node's `vault` CLI (SSH-shell-out, no managed driver -- ADR-0024);
+            // JSON is parsed here in the AOT binary (JsonDocument, reflection-free). NOTE: the
+            // on-node Agent will re-assert its cached cert on its NEXT render -- true persistent
+            // rotation needs the Agent's pkiCert cache refreshed (an infra concern; handbook 3.3).
+            var cn = $"{node.Name}.redis.nexus.lab";
+            var alts = $"{node.Name},{node.Name}.nexus.lab,{node.Name}.redis.nexus.lab,localhost";
+            var ips = $"{node.Vmnet10},{node.Vmnet11},127.0.0.1";
+            var issueCmd =
+                "T=$(sudo cat /run/nexus-vault-agent/token 2>/dev/null); " +
+                "sudo env VAULT_ADDR=https://192.168.70.121:8200 VAULT_TOKEN=\"$T\" VAULT_CACERT=/etc/nexus-redis/tls/ca.crt " +
+                $"/usr/local/bin/vault write -format=json pki_int/issue/redis-server common_name={cn} alt_names={alts} ip_sans={ips} ttl=2160h";
+            var issueExec = await _ssh.ExecuteAsync(target, issueCmd, SshTimeout, cancellationToken).ConfigureAwait(false);
+            if (issueExec.IsFail || issueExec.Value!.ExitCode != 0)
             {
-                rotated.Add(new CertRotatedNode(node.Name, oldSerial, NewSerial: "(unchanged)",
-                    Error: rotateExec.IsFail ? rotateExec.Error : $"vault-agent restart failed: {Tail(rotateExec.Value!.Stderr, 200)}"));
+                rotated.Add(new CertRotatedNode(node.Name, oldSerial, "(unchanged)",
+                    Error: issueExec.IsFail ? issueExec.Error : $"vault issue failed: {Tail(issueExec.Value!.Stderr, 200)}"));
                 continue;
             }
 
-            // Signal redis-server to reload TLS materials. Redis 6.2+ supports
-            // CONFIG SET dynamic TLS reload; simpler is systemctl reload.
-            await _ssh.ExecuteAsync(target,
-                "sudo systemctl reload-or-restart redis-server.service",
-                SshTimeout, cancellationToken).ConfigureAwait(false);
+            string cert, key, ca, newSerial;
+            try
+            {
+                using var doc = JsonDocument.Parse(issueExec.Value.Stdout);
+                var d = doc.RootElement.GetProperty("data");
+                cert = d.GetProperty("certificate").GetString() ?? "";
+                key = d.GetProperty("private_key").GetString() ?? "";
+                ca = d.GetProperty("issuing_ca").GetString() ?? "";
+                newSerial = d.GetProperty("serial_number").GetString() ?? "(unknown)";
+            }
+            catch (Exception ex)
+            {
+                rotated.Add(new CertRotatedNode(node.Name, oldSerial, "(unchanged)",
+                    Error: $"could not parse vault issue response: {ex.Message}"));
+                continue;
+            }
 
-            // Capture new serial.
-            var newSerialExec = await _ssh.ExecuteAsync(target,
-                "sudo openssl x509 -in /etc/nexus-redis/tls/server.crt -noout -serial 2>/dev/null | sed 's/serial=//'",
-                SshTimeout, cancellationToken).ConfigureAwait(false);
-            var newSerial = newSerialExec.IsOk && newSerialExec.Value!.ExitCode == 0
-                ? newSerialExec.Value.Stdout.Trim()
-                : "(unknown)";
+            // Write the new materials (server.crt/.key + bundle.pem = cert+key+ca) + reload redis.
+            var bundle = cert.TrimEnd() + "\n" + key.TrimEnd() + "\n" + ca.TrimEnd() + "\n";
+            var writeCmd =
+                $"echo {B64(cert)}|base64 -d|sudo tee /etc/nexus-redis/tls/server.crt >/dev/null; " +
+                $"echo {B64(key)}|base64 -d|sudo tee /etc/nexus-redis/tls/server.key >/dev/null; " +
+                $"echo {B64(bundle)}|base64 -d|sudo tee /etc/nexus-redis/tls/bundle.pem >/dev/null; " +
+                "sudo chown root:redis /etc/nexus-redis/tls/server.crt /etc/nexus-redis/tls/server.key /etc/nexus-redis/tls/bundle.pem; " +
+                "sudo chmod 0640 /etc/nexus-redis/tls/server.crt /etc/nexus-redis/tls/server.key /etc/nexus-redis/tls/bundle.pem; " +
+                "sudo systemctl reload-or-restart nexus-redis; echo WROTE";
+            var writeExec = await _ssh.ExecuteAsync(target, writeCmd, SshTimeout, cancellationToken).ConfigureAwait(false);
+            if (writeExec.IsFail || writeExec.Value!.ExitCode != 0 || !writeExec.Value.Stdout.Contains("WROTE", StringComparison.Ordinal))
+            {
+                rotated.Add(new CertRotatedNode(node.Name, oldSerial, "(unchanged)",
+                    Error: writeExec.IsFail ? writeExec.Error : $"writing new cert failed: {Tail(writeExec.Value!.Stderr, 200)}"));
+                continue;
+            }
 
-            rotated.Add(new CertRotatedNode(node.Name, oldSerial, newSerial,
-                Error: oldSerial == newSerial && oldSerial != "(unknown)" ? "serial unchanged (cert may not have rotated)" : null));
+            rotated.Add(new CertRotatedNode(node.Name, oldSerial, newSerial, Error: null));
         }
         sw.Stop();
 
@@ -407,15 +609,104 @@ public sealed class RedisAdapter : IClusterAdapter
     }
 
     // -----------------------------------------------------------------------
-    // ApplyChaosAsync -- STUB
+    // ApplyChaosAsync -- IMPLEMENTED (push helper -> inject -> observe -> lift -> confirm)
+    // Pushes the embedded nexus-chaos.sh helper over SSH (idempotent), injects the
+    // time-boxed self-reverting fault, observes impact via HealthAsync mid-window,
+    // lifts explicitly, then confirms the cluster returns to green. ADR-0010.
     // -----------------------------------------------------------------------
-    public Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
+    public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
-        // TODO 0.G.x: chaos tooling (pumba for container chaos; nftables drops
-        // for network-partition; tc qdisc for slow-disk/packet-loss). Per-cluster
-        // semantics need design + a chaos-injection helper service on each VM.
-        return Task.FromResult(Result.Fail<ChaosOutcome>(
-            $"RedisAdapter.ApplyChaosAsync scenario='{scenario.ScenarioType}' not implemented in the 0.G.1 framework ship; chaos tooling lands in 0.G.x."));
+        var known = new[] { "network-partition", "packet-loss", "slow-disk", "cpu-starve", "memory-pressure", "process-kill" };
+        if (!known.Contains(scenario.ScenarioType, StringComparer.OrdinalIgnoreCase))
+            return Result.Fail<ChaosOutcome>($"unknown chaos scenario '{scenario.ScenarioType}'. Known: {string.Join(", ", known)}");
+
+        var statusRes = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        if (statusRes.IsFail) return Result.Fail<ChaosOutcome>(statusRes.Error!);
+
+        // Pick the node: explicit target, else the first replica (safer than a primary).
+        var members = statusRes.Value!.Members;
+        var victim = !string.IsNullOrWhiteSpace(scenario.Target)
+            ? members.FirstOrDefault(m => string.Equals(m.Hostname, scenario.Target, StringComparison.OrdinalIgnoreCase))
+            : (members.FirstOrDefault(m => m.Role == "replica") ?? (members.Count > 0 ? members[0] : null));
+        if (victim is null) return Result.Fail<ChaosOutcome>("no chaos target node found");
+
+        var target = new SshTarget(victim.IpAddress, 22, _sshUsername, _sshKeyPath);
+        var startedAt = DateTimeOffset.UtcNow;
+        var sw = Stopwatch.StartNew();
+
+        var push = await PushChaosHelperAsync(target, cancellationToken).ConfigureAwait(false);
+        if (push.IsFail) return Result.Fail<ChaosOutcome>(push.Error!);
+
+        var dur = scenario.DurationSeconds <= 0 ? 30 : scenario.DurationSeconds;
+        var helperTarget = string.Equals(scenario.ScenarioType, "process-kill", StringComparison.OrdinalIgnoreCase) ? "nexus-redis" : "";
+        var intensity = scenario.IntensityPercent?.ToString(CultureInfo.InvariantCulture) ?? "";
+
+        var injectCmd = $"sudo /usr/local/bin/nexus-chaos.sh inject {scenario.ScenarioType} {dur} '{intensity}' '{helperTarget}'";
+        var injectExec = await _ssh.ExecuteAsync(target, injectCmd, SshTimeout, cancellationToken).ConfigureAwait(false);
+        if (injectExec.IsFail || injectExec.Value!.ExitCode != 0)
+            return Result.Fail<ChaosOutcome>($"chaos inject on {victim.Hostname} failed: {(injectExec.IsFail ? injectExec.Error : Tail(injectExec.Value!.Stderr, 200))}");
+
+        // Observe impact mid-window, then lift explicitly (the helper also self-reverts).
+        await Task.Delay(TimeSpan.FromSeconds(Math.Min(dur, 20)), cancellationToken).ConfigureAwait(false);
+        var impact = await HealthAsync(cancellationToken).ConfigureAwait(false);
+        var observed = impact.IsOk ? impact.Value!.Probes : (IReadOnlyList<HealthProbe>)Array.Empty<HealthProbe>();
+
+        await _ssh.ExecuteAsync(target, $"sudo /usr/local/bin/nexus-chaos.sh lift {scenario.ScenarioType}", SshTimeout, cancellationToken).ConfigureAwait(false);
+
+        // Confirm recovery.
+        var recovered = false;
+        var deadline = sw.Elapsed + TimeSpan.FromSeconds(45);
+        while (sw.Elapsed < deadline)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
+            var post = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            if (post.IsOk && post.Value!.OverallHealth == "green") { recovered = true; break; }
+        }
+        sw.Stop();
+
+        return Result.Ok(new ChaosOutcome(
+            ScenarioApplied: scenario.ScenarioType,
+            Target: victim.Hostname,
+            ObservedImpact: observed,
+            Duration: sw.Elapsed,
+            StartedAtUtc: startedAt,
+            Recovered: recovered));
+    }
+
+    /// <summary>Install (idempotent) the embedded nexus-chaos.sh helper on a node.</summary>
+    private async Task<Result<bool>> PushChaosHelperAsync(SshTarget target, CancellationToken cancellationToken)
+    {
+        var asm = typeof(RedisAdapter).Assembly;
+        var resName = asm.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith("nexus-chaos.sh", StringComparison.Ordinal));
+        if (resName is null) return Result.Fail<bool>("embedded nexus-chaos.sh resource not found in the assembly");
+        string script;
+        using (var s = asm.GetManifestResourceStream(resName)!)
+        using (var r = new StreamReader(s))
+            script = (await r.ReadToEndAsync(cancellationToken).ConfigureAwait(false)).Replace("\r\n", "\n");
+        var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(script));
+        var cmd = $"echo {b64} | base64 -d | sudo tee /usr/local/bin/nexus-chaos.sh >/dev/null && sudo chmod +x /usr/local/bin/nexus-chaos.sh && echo PUSHED";
+        var exec = await _ssh.ExecuteAsync(target, cmd, SshTimeout, cancellationToken).ConfigureAwait(false);
+        if (exec.IsFail || exec.Value!.ExitCode != 0 || !exec.Value.Stdout.Contains("PUSHED", StringComparison.Ordinal))
+            return Result.Fail<bool>($"failed to install nexus-chaos.sh: {(exec.IsFail ? exec.Error : Tail(exec.Value!.Stderr, 200))}");
+        return Result.Ok(true);
+    }
+
+    /// <summary>Parse raw CLUSTER NODES (id, ip, role, masterId, hasSlots) from any member.</summary>
+    private async Task<List<(string Id, string Ip, string Role, string MasterId, bool HasSlots)>> GetRawNodesAsync(SshTarget member, CancellationToken cancellationToken)
+    {
+        var result = new List<(string, string, string, string, bool)>();
+        var exec = await _ssh.ExecuteAsync(member, $"{RedisCliPrefix} CLUSTER NODES'", SshTimeout, cancellationToken).ConfigureAwait(false);
+        if (exec.IsFail || exec.Value!.ExitCode != 0) return result;
+        foreach (var line in exec.Value.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var p = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (p.Length < 8) continue;
+            var ip = p[1].Split(AddressSeparators, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
+            var role = p[2].Contains("master") ? "primary" : p[2].Contains("slave") ? "replica" : "unknown";
+            var masterId = p[3] == "-" ? "" : p[3];
+            result.Add((p[0], ip, role, masterId, p.Length > 8));
+        }
+        return result;
     }
 
     // -----------------------------------------------------------------------
@@ -436,7 +727,7 @@ public sealed class RedisAdapter : IClusterAdapter
 
         if (verb is "list" or "describe")
         {
-            var cmd = $"{AuthCatPrefix} ACL LIST'";
+            var cmd = $"{RedisCliPrefix} ACL LIST'";
             var exec = await _ssh.ExecuteAsync(target, cmd, SshTimeout, cancellationToken).ConfigureAwait(false);
             if (exec.IsFail)
                 return Result.Fail<AclSnapshot>($"ssh failed: {exec.Error}");
@@ -535,21 +826,18 @@ public sealed class RedisAdapter : IClusterAdapter
     }
 
     /// <summary>
-    /// Given a replica, find its primary's hostname. Used by FailoverAsync to
-    /// report OriginalPrimary. Naive heuristic in 0.G.1: same shard pair by
-    /// hostname suffix (redis-1 + redis-2 form a shard pair, redis-3 + redis-4
-    /// form another, redis-5 + redis-6 form the third). Real implementation
-    /// in 0.G.1.x will use the CLUSTER NODES master id field.
+    /// Resolve a replica's current primary from its live INFO replication
+    /// <c>master_host</c>, mapping the master IP back to a hostname via the known
+    /// members. Authoritative even after roles have moved (unlike a hostname
+    /// heuristic). Used by <see cref="FailoverAsync"/> to report OriginalPrimary.
     /// </summary>
-    private static string? ResolvePrimaryForReplica(ClusterStatus status, ClusterMember replica)
+    private async Task<string?> ResolveMasterHostAsync(SshTarget replica, ClusterStatus status, CancellationToken cancellationToken)
     {
-        // Heuristic pairing by index (redis-N where N is even -> replica of N-1).
-        var match = System.Text.RegularExpressions.Regex.Match(replica.Hostname, @"redis-(\d+)$");
-        if (!match.Success) return null;
-        if (!int.TryParse(match.Groups[1].Value, out var n)) return null;
-        var primaryIndex = n - 1;
-        return status.Members.FirstOrDefault(m =>
-            m.Role == "primary" && m.Hostname.EndsWith($"-{primaryIndex}", StringComparison.Ordinal))?.Hostname;
+        var exec = await _ssh.ExecuteAsync(replica, $"{RedisCliPrefix} INFO replication'", SshTimeout, cancellationToken).ConfigureAwait(false);
+        if (exec.IsFail || exec.Value!.ExitCode != 0) return null;
+        var masterIp = ExtractInfoField(exec.Value.Stdout, "master_host");
+        if (string.IsNullOrWhiteSpace(masterIp)) return null;
+        return status.Members.FirstOrDefault(m => m.IpAddress == masterIp)?.Hostname ?? masterIp;
     }
 
     /// <summary>
@@ -594,4 +882,6 @@ public sealed class RedisAdapter : IClusterAdapter
         if (string.IsNullOrEmpty(s)) return string.Empty;
         return s.Length <= n ? s : s.Substring(s.Length - n);
     }
+
+    private static string B64(string s) => Convert.ToBase64String(Encoding.UTF8.GetBytes(s));
 }

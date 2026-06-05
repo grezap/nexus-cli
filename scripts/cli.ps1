@@ -21,7 +21,7 @@
   build       -- dotnet build -c Release (no AOT)
   test        -- dotnet test --no-restore -c Release
   publish     -- dotnet publish src/Nexus.Cli (Native AOT) for one or both RIDs
-  size-check  -- assert each published binary <= 25 MB (master plan exit gate)
+  size-check  -- assert each published binary <= 30 MB (Phase 0.G exit gate, ADR-0024)
   lint        -- dotnet format --verify-no-changes
   clean       -- remove bin/, obj/, artifacts/ across the repo
   cycle       -- clean -> build -> test -> publish -> size-check (halts on failure)
@@ -54,7 +54,10 @@ param(
     [ValidateSet('win-x64', 'linux-x64', 'all')]
     [string]$Rid = 'win-x64',
 
-    [int]$MaxSizeMB = 25
+    # Phase 0.G adapter expansion raised the AOT exit gate 25 -> 30 MB
+    # (nexus-platform-plan ADR-0024 / nexus-cli ADR-0009). The v0.5.0 historical
+    # 25 MB gate stays sealed (22.75 MB met).
+    [int]$MaxSizeMB = 30
 )
 
 $ErrorActionPreference = 'Stop'

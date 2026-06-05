@@ -20,4 +20,10 @@
     <InternalsVisibleTo Include="Nexus.Cli.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- On-node chaos-injection helper pushed to nodes over SSH by RedisAdapter
+         (ApplyChaosAsync). Embedded so the single AOT binary carries it. -->
+    <EmbeddedResource Include="Cluster\Resources\nexus-chaos.sh" />
+  </ItemGroup>
+
 </Project>

@@ -45,7 +45,7 @@ public sealed class DemoRunner : IDemoRunner
             }
             var step = spec.Steps[i];
             var stepSw = Stopwatch.StartNew();
-            var (exit, outTail, errTail) = await ExecShellAsync(step.Command, cancellationToken).ConfigureAwait(false);
+            var (exit, outFull, errFull) = await ExecShellAsync(step.Command, cancellationToken).ConfigureAwait(false);
             stepSw.Stop();
 
             // ADR-0009: if expectations are set, they drive step success/failure
@@ -62,7 +62,8 @@ public sealed class DemoRunner : IDemoRunner
                     failures.Add($"expected exit code {step.ExpectedExitCode.Value}, got {exit}");
                 if (step.ExpectedOutputContains is { Count: > 0 })
                 {
-                    var combined = outTail + "\n" + errTail;
+                    // Assert against the FULL output -- tokens may sit above the displayed tail.
+                    var combined = outFull + "\n" + errFull;
                     foreach (var token in step.ExpectedOutputContains)
                     {
                         if (!combined.Contains(token, StringComparison.Ordinal))
@@ -75,7 +76,8 @@ public sealed class DemoRunner : IDemoRunner
             }
 
             stepResults.Add(new DemoStepResult(
-                i, step.Command, exit, outTail, errTail, stepSw.Elapsed,
+                i, step.Command, exit,
+                TailLines(outFull, StdoutTailLines), TailLines(errFull, StdoutTailLines), stepSw.Elapsed,
                 ExpectationMet: expectationMet,
                 ExpectationFailureReason: expectationFailureReason));
 
@@ -206,7 +208,8 @@ public sealed class DemoRunner : IDemoRunner
             await proc.WaitForExitAsync(stepCts.Token).ConfigureAwait(false);
             var stdout = await stdoutTask.ConfigureAwait(false);
             var stderr = await stderrTask.ConfigureAwait(false);
-            return (proc.ExitCode, TailLines(stdout, StdoutTailLines), TailLines(stderr, StdoutTailLines));
+            // Return FULL output; the caller truncates to a tail for display but asserts on full.
+            return (proc.ExitCode, stdout, stderr);
         }
         catch (Exception ex)
         {

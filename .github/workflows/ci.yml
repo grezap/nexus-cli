@@ -68,7 +68,7 @@ jobs:
             -c Release -r ${{ matrix.rid }} `
             -o artifacts/${{ matrix.rid }}
 
-      - name: Size budget (<= 25 MB)
+      - name: Size budget (<= 30 MB, Phase 0.G gate per ADR-0024)
         shell: pwsh
         run: pwsh -File scripts/cli.ps1 size-check -Rid ${{ matrix.rid }}
 
