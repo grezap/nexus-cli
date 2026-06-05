@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-45-percona-scale-out-add",
+  "title": "Percona: scale-out add (Galera SST join)",
+  "description": "Runs `nexus scale-out add percona`: discovers a provisioned-but-unjoined PXC node (service stopped) and starts nexus-percona so it SST/IST-joins Galera and reaches Synced.",
+  "prerequisites": {
+    "vmsAlive": ["pxc-node-1", "pxc-node-2", "pxc-node-3", "proxysql-1", "proxysql-2"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out add percona --role secondary --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["joined the Galera cluster", "Synced"],
+      "observe": [
+        { "where": "stdout", "what": "<node> joined the Galera cluster via SST/IST (Synced)" },
+        { "where": "nexus health percona", "what": "cluster-size back to 3 on all nodes" }
+      ]
+    }
+  ],
+  "whatProves": "PerconaAdapter.ScaleOutAddAsync brings an unjoined node back into Galera via SST (apply-on-demand; exact is-active match avoids the substring trap)."
+}

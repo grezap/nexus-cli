@@ -1,0 +1,21 @@
+{
+  "id": "DEMO-43-percona-topology",
+  "title": "Percona: PXC + ProxySQL topology",
+  "description": "Runs `nexus topology percona`: PXC nodes with their ProxySQL-derived roles (writer/backup_writer) + the 2 routers. Galera is replication, not sharding (no shard map).",
+  "prerequisites": {
+    "vmsAlive": ["pxc-node-1", "pxc-node-2", "pxc-node-3", "proxysql-1", "proxysql-2"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus topology percona",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["topology percona", "primary", "replica", "router"],
+      "observe": [
+        { "where": "stdout", "what": "node table (hostname/role/status); no shard section (Galera multi-primary replication, not sharded)" }
+      ]
+    }
+  ],
+  "whatProves": "PerconaAdapter.TopologyAsync renders the PXC + ProxySQL graph with Shards=null."
+}

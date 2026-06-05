@@ -1,0 +1,21 @@
+{
+  "id": "DEMO-48-percona-backup-restore",
+  "title": "Percona: backup restore round-trip",
+  "description": "Runs `nexus backup restore percona <id>`: finds the node holding the dump, strips USE/CREATE DATABASE, restores into a nexus_restore_verify schema (non-destructive), and counts restored rows.",
+  "prerequisites": {
+    "vmsAlive": ["pxc-node-1", "pxc-node-2", "pxc-node-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus backup restore percona percona-demo-REPLACE_WITH_ID --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["backup restore", "items restored"],
+      "observe": [
+        { "where": "stdout", "what": "items restored >= 1 (the galera_init_test row), restored into nexus_restore_verify" }
+      ]
+    }
+  ],
+  "whatProves": "PerconaAdapter.BackupRestoreAsync round-trips the logical dump end-to-end. Replace the id with one from `backup take`."
+}

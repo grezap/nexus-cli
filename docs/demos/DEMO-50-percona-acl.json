@@ -1,0 +1,30 @@
+{
+  "id": "DEMO-50-percona-acl",
+  "title": "Percona: ACL list + grant",
+  "description": "Runs `nexus acl percona list` (SELECT user,host FROM mysql.user) then `nexus acl percona grant` (CREATE USER + GRANT). Galera replicates the user to all PXC nodes.",
+  "prerequisites": {
+    "vmsAlive": ["pxc-node-1", "pxc-node-2", "pxc-node-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus acl percona list",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["acl percona", "nexus-cluster-admin", "smoke-rw"],
+      "observe": [
+        { "where": "stdout", "what": "user table: nexus-cluster-admin + smoke-rw + wsrep_sst + clustercheck" }
+      ]
+    },
+    {
+      "command": "nexus acl percona grant --user demo-reader --permissions SELECT --yes",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["acl percona", "demo-reader"],
+      "observe": [
+        { "where": "stdout", "what": "demo-reader created; the command re-describes the user to confirm" }
+      ]
+    }
+  ],
+  "whatProves": "PerconaAdapter.AclAsync lists mysql.user and idempotently grants via CREATE USER + GRANT (operator has GRANT OPTION)."
+}

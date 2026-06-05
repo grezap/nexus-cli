@@ -1,0 +1,21 @@
+{
+  "id": "DEMO-51-percona-chaos",
+  "title": "Percona: chaos process-kill + auto-heal",
+  "description": "Runs `nexus chaos percona process-kill`: pushes nexus-chaos.sh, kills nexus-percona on a non-writer PXC node, observes impact, then restarts it so it rejoins Galera and confirms recovery to green.",
+  "prerequisites": {
+    "vmsAlive": ["pxc-node-1", "pxc-node-2", "pxc-node-3", "proxysql-1", "proxysql-2"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus chaos percona process-kill --yes",
+      "waitAfterSeconds": 6,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["chaos", "process-kill", "recovered"],
+      "observe": [
+        { "where": "stdout", "what": "target=<non-writer pxc node>; observed-impact health table; cluster recovered to GREEN after the node rejoins Galera (Synced)" }
+      ]
+    }
+  ],
+  "whatProves": "PerconaAdapter.ApplyChaosAsync injects a time-boxed fault via nexus-chaos.sh, observes Galera impact, restarts the node, and confirms auto-heal."
+}

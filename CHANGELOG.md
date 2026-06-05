@@ -6,6 +6,45 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-06-05
+
+Phase 0.G.3: the **Percona XtraDB Cluster (Galera) + ProxySQL adapter** — the second password-auth
+adapter and the first **synchronous multi-primary** engine — live-verified end-to-end against the
+running `percona` cluster. Reuses the v0.6.1 Vault-KV operator-credential model verbatim (no
+framework change). AOT **24.03 MB / 30 MB** (+0.13 MB over v0.6.1). 71/71 tests.
+
+### Added — Percona adapter (Phase 0.G.3)
+
+- **`PerconaAdapter`** implements all of `IClusterAdapter` over SSH + on-node `mysql` (PXC backends +
+  the ProxySQL `:6032` admin) + `mysqldump` (no managed driver): `status` · `health` (per-PXC
+  wsrep-state/size/status/ready + ProxySQL liveness) · `topology` · `failover-test cluster percona`
+  (ProxySQL writer failover, live RTO ≈ 2.3s) · `scale-out add`/`remove` (Galera SST join /
+  graceful leave, writer-guard) · `backup take`/`restore` (`mysqldump --skip-add-locks` + restore
+  round-trip) · `cert-rotate` (Vault re-issue → `pki_int/issue/percona-server`, rolling restart of
+  all 5 nodes) · `acl list/grant` (`mysql.user` + `CREATE USER`/`GRANT`) · `chaos` (process-kill
+  `nexus-percona` + Galera rejoin). Two control planes: PXC `wsrep_%` status + ProxySQL admin
+  `runtime_mysql_servers` (ONLINE-only) for the writer/reader hostgroup map.
+- **Operator-credential model** reused from v0.6.1 (ADR-0011): authenticate as the dedicated
+  `nexus-cluster-admin` MySQL user (ALL PRIVILEGES WITH GRANT OPTION); its password + the ProxySQL
+  admin password live only in Vault KV (`nexus/oltp/percona/operator-password`,
+  `.../proxysql-admin-password`), fetched at runtime via `INexusVaultClient`. Infra (nexus-infra-vmware
+  security creds-seed v2 + PXC agent-policy v2; nexus-infra-oltp `role-overlay-percona-operator-user.tf`)
+  — proven in a from-zero cold-rebuild apply graph.
+- **[ADR-0012]** — PerconaAdapter (Galera + ProxySQL). **`docs/verification/0.G.3-percona.md`** —
+  full live evidence + the bugs live-verify caught. **`docs/demos/DEMO-41..51`** (11) — System B demos.
+
+### Fixed (surfaced by live-verify against the running cluster)
+
+- **ProxySQL `SHUNNED` status read as a writer** — only `ONLINE` rows in `runtime_mysql_servers`
+  reflect a node's effective hostgroup (a node lingers in writer-10 as SHUNNED while serving from
+  backup-20). Without the filter all 3 PXC nodes looked like the writer.
+- **`"inactive".Contains("active") == true`** — `scale-out add` node-discovery + ProxySQL liveness
+  used a substring check; fixed with an exact `is-active` prefix match.
+- **PXC `strict_mode=ENFORCING` rejects `LOCK TABLES`** — mysqldump's default `--add-locks` aborted
+  the restore (0 rows). Fixed: `--skip-add-locks --no-tablespaces`.
+- **(infra) galera-bootstrap `sed -e '$a\'`** — `$a` eaten by PowerShell `@"..."@` interpolation
+  ("sed: missing command") failed the from-zero apply; replaced with `printf '\n…\n'`.
+
 ## [0.6.1] — 2026-06-05
 
 Phase 0.G.2: the **MongoDB adapter** — the first **password-authenticated** cluster adapter —

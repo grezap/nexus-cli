@@ -1,0 +1,21 @@
+{
+  "id": "DEMO-42-percona-health",
+  "title": "Percona: Galera healthcheck",
+  "description": "Runs `nexus health percona`: per-PXC wsrep-state/cluster-size/cluster-status/wsrep-ready + ProxySQL liveness.",
+  "prerequisites": {
+    "vmsAlive": ["pxc-node-1", "pxc-node-2", "pxc-node-3", "proxysql-1", "proxysql-2"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus health percona",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["health percona", "wsrep-state", "cluster-size", "Synced", "Primary"],
+      "observe": [
+        { "where": "stdout", "what": "per PXC node: wsrep-state=Synced, cluster-size=3, cluster-status=Primary, wsrep-ready=ON; both ProxySQL active → overall green" }
+      ]
+    }
+  ],
+  "whatProves": "PerconaAdapter.HealthAsync derives the Galera health surface (Synced/size/Primary/ready) per node + ProxySQL liveness."
+}

@@ -1,0 +1,21 @@
+{
+  "id": "DEMO-41-percona-status",
+  "title": "Percona: live PXC + ProxySQL status",
+  "description": "Runs `nexus status percona`: the 3 Galera PXC nodes (ProxySQL writer=primary, others=replica) + 2 ProxySQL routers + the writer leader.",
+  "prerequisites": {
+    "vmsAlive": ["pxc-node-1", "pxc-node-2", "pxc-node-3", "proxysql-1", "proxysql-2"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus status percona",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["percona", "primary", "replica", "router", "leader"],
+      "observe": [
+        { "where": "stdout", "what": "exactly 1 pxc-node role=primary (the ProxySQL writer, hostgroup 10 ONLINE) + 2 replica (backup_writer) + 2 proxysql role=router; leader=<writer>" }
+      ]
+    }
+  ],
+  "whatProves": "PerconaAdapter.GetStatusAsync reads wsrep state from each PXC node + the ProxySQL hostgroup assignment (ONLINE-only) to derive writer vs replica."
+}

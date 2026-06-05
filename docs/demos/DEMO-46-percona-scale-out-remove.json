@@ -1,0 +1,21 @@
+{
+  "id": "DEMO-46-percona-scale-out-remove",
+  "title": "Percona: scale-out remove (graceful Galera leave)",
+  "description": "Runs `nexus scale-out remove percona <node>`: stops nexus-percona on a non-writer PXC node so it gracefully leaves Galera (ProxySQL marks it offline). Refuses the current writer.",
+  "prerequisites": {
+    "vmsAlive": ["pxc-node-1", "pxc-node-2", "pxc-node-3", "proxysql-1", "proxysql-2"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out remove percona pxc-node-1 --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["scale-out remove", "gracefully left", "Galera"],
+      "observe": [
+        { "where": "stdout", "what": "gracefully left pxc-node-1 (service stopped; ProxySQL marks it offline; ready for re-add)" }
+      ]
+    }
+  ],
+  "whatProves": "PerconaAdapter.ScaleOutRemoveAsync gracefully drains a Galera member with a writer-guard (refuses the current ProxySQL writer)."
+}

@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-44-percona-failover",
+  "title": "Percona: ProxySQL writer failover + RTO",
+  "description": "Runs `nexus failover-test cluster percona`: stops nexus-percona on the current ProxySQL writer, measures how fast ProxySQL promotes a backup_writer to writer (hostgroup 10), then restarts the stopped node.",
+  "prerequisites": {
+    "vmsAlive": ["pxc-node-1", "pxc-node-2", "pxc-node-3", "proxysql-1", "proxysql-2"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster percona --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["percona-proxysql-writer-failover", "original primary", "new primary", "recovered"],
+      "observe": [
+        { "where": "stdout", "what": "original writer -> new writer; RTO timeline. Live: ~2.3s." },
+        { "where": "proxysql admin :6032: runtime_mysql_servers", "what": "a different node now holds hostgroup 10 ONLINE" }
+      ]
+    }
+  ],
+  "whatProves": "PerconaAdapter.FailoverAsync demonstrates the real HA primitive (ADR-0025): ProxySQL re-routes writes to a promoted backup_writer when the writer dies; the Galera cluster stays writable."
+}

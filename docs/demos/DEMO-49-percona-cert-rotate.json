@@ -1,0 +1,21 @@
+{
+  "id": "DEMO-49-percona-cert-rotate",
+  "title": "Percona: TLS cert rotation (Vault re-issue + rolling restart)",
+  "description": "Runs `nexus cert-rotate percona`: per node (3 PXC + 2 ProxySQL), issues a fresh leaf via the node's own Vault token (pki_int/issue/percona-server), writes server-cert/server-key/ca.pem, and rolling-restarts the service.",
+  "prerequisites": {
+    "vmsAlive": ["pxc-node-1", "pxc-node-2", "pxc-node-3", "proxysql-1", "proxysql-2"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus cert-rotate percona --yes",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["cert-rotate", "old serial", "new serial"],
+      "observe": [
+        { "where": "stdout", "what": "per-node old serial != new serial for all 5 nodes, error column empty (rolling, ~90s; PXC members one at a time so Galera tolerates each restart)" }
+      ]
+    }
+  ],
+  "whatProves": "PerconaAdapter.RotateCertAsync performs a genuine Vault re-issue + rolling restart across the PXC + ProxySQL tier."
+}

@@ -168,7 +168,8 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 |---|---|---|---|---|---|---|---|---|---|---|
 | redis | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ gen | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ list |
 | mongo | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ gen | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ list+grant |
-| percona · postgres · clickhouse · starrocks · sql-* · mongo-sharded · vitess · citus | ⏳ per canon order | | | | | | | | | |
+| percona | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ gen | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ list+grant |
+| postgres · clickhouse · starrocks · sql-* · mongo-sharded · vitess · citus | ⏳ per canon order | | | | | | | | | |
 
 ✅ live-verified · ⚠ coded, fix pending · ⏳ pending. Dates = live-verify date.
 
@@ -269,6 +270,23 @@ The diagnostic ladder (run top-down; each rung names the fix):
     a time (RS tolerates a single member down).
   - `failover-test cluster mongo` runs `rs.stepDown(60)` on the PRIMARY (which holds the old primary
     down 60s); RTO ≈ 2.8s live. `scale-out remove` refuses the current PRIMARY (step it down first).
+- **Percona (`v0.6.2`) — Galera + ProxySQL gotchas caught only by live-verify:**
+  - **Two control planes:** cluster state on the PXC nodes (`SHOW STATUS LIKE 'wsrep_%'` via
+    `nexus-cluster-admin` over mTLS :3306), routing state in ProxySQL admin (`:6032` →
+    `runtime_mysql_servers`). `status`/`topology` map a node's role from its ProxySQL hostgroup;
+    operator + ProxySQL-admin passwords both come from Vault KV.
+  - **ProxySQL `SHUNNED` rows:** a node lingers in the writer hostgroup (10) as SHUNNED while it
+    actually serves from backup_writer (20) — read **ONLY `ONLINE` rows** to derive the real writer,
+    else all 3 look like the writer.
+  - **`scale-out add` discovery:** an exact `is-active` match — `"inactive".Contains("active")` is
+    `true`, so a substring check sees a *stopped* node as joined ("all already joined").
+  - **`backup`:** `mysqldump --skip-add-locks --no-tablespaces --single-transaction` — PXC
+    `strict_mode=ENFORCING` rejects the explicit `LOCK TABLES` mysqldump emits by default (the restore
+    fails `ERROR 1105` between LOCK/UNLOCK → 0 rows). Restore strips `USE`/`CREATE DATABASE` into a
+    verify schema.
+  - **`failover-test`** = ProxySQL writer failover (stop the hostgroup-10 writer, poll for a promoted
+    backup_writer); RTO ≈ 2.3s live. `cert-rotate` rolls all 5 nodes (PXC one at a time; Galera
+    tolerates a single member restart). `scale-out remove` refuses the current writer.
 
 ### §3.4 AOT size gate
 ≤30 MB (linux-x64 + win-x64) for the 0.G line (ADR-0024). `pwsh -File scripts/cli.ps1 size-check`.

@@ -63,7 +63,7 @@ public static class ClusterBootstrapper
             new RedisAdapter(catalog, ssh, sshUser, sshKey),
             new KafkaAdapter(kafkaFailover),
             new MongoAdapter(catalog, ssh, sshUser, sshKey, vault),
-            // 0.G.3+: new PerconaAdapter(catalog, ssh, sshUser, sshKey, vault),
+            new PerconaAdapter(catalog, ssh, sshUser, sshKey, vault),
             // 0.G.4+: new PatroniAdapter(catalog, ssh, sshUser, sshKey, vault),
             // 0.G.5+: new ClickHouseAdapter(catalog, ssh, sshUser, sshKey),
             // 0.G.6+: new StarRocksAdapter(catalog, ssh, sshUser, sshKey),

@@ -1,0 +1,21 @@
+{
+  "id": "DEMO-47-percona-backup-take",
+  "title": "Percona: backup take (mysqldump)",
+  "description": "Runs `nexus backup take percona --tag <t>`: mysqldump --single-transaction --skip-add-locks of nexus_smoke to a node-local gzip on a non-writer (--skip-add-locks because PXC strict_mode prohibits explicit LOCK TABLES).",
+  "prerequisites": {
+    "vmsAlive": ["pxc-node-1", "pxc-node-2", "pxc-node-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus backup take percona --tag demo",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["backup take", "sql.gz", "mysqldump"],
+      "observe": [
+        { "where": "stdout", "what": "backup id (percona-demo-<ts>) · /var/backups/nexus-percona/<id>.sql.gz (node-local) · size > 0" }
+      ]
+    }
+  ],
+  "whatProves": "PerconaAdapter.BackupTakeAsync produces a non-empty PXC-strict-mode-safe logical dump of nexus_smoke."
+}
