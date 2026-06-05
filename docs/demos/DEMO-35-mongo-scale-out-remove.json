@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-35-mongo-scale-out-remove",
+  "title": "Mongo: scale-out remove (rs.remove)",
+  "description": "Runs `nexus scale-out remove mongo <node>`: rs.remove()s a SECONDARY from nexus-rs. Refuses the PRIMARY (step it down first).",
+  "prerequisites": {
+    "vmsAlive": ["mongo-1", "mongo-2", "mongo-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out remove mongo mongo-3 --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["scale-out remove", "removed", "nexus-rs"],
+      "observe": [
+        { "where": "stdout", "what": "removed mongo-3:27017 from nexus-rs (node still running; ready for re-add or deprovision)" },
+        { "where": "nexus status mongo", "what": "member count decreased to 2" }
+      ]
+    }
+  ],
+  "whatProves": "MongoAdapter.ScaleOutRemoveAsync rs.remove()s a member with a primary-guard (refuses removing the current PRIMARY)."
+}

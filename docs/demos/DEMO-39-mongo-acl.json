@@ -1,0 +1,30 @@
+{
+  "id": "DEMO-39-mongo-acl",
+  "title": "Mongo: ACL list + grant",
+  "description": "Runs `nexus acl mongo list` (db.getUsers) then `nexus acl mongo grant` (createUser/grantRolesToUser). Idempotent grant.",
+  "prerequisites": {
+    "vmsAlive": ["mongo-1", "mongo-2", "mongo-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus acl mongo list",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["acl mongo", "nexus-cluster-admin", "smoke-rw"],
+      "observe": [
+        { "where": "stdout", "what": "user table: nexus-cluster-admin (clusterMonitor/clusterManager/backup/restore/userAdminAnyDatabase@admin) + smoke-rw (readWrite@nexus_smoke)" }
+      ]
+    },
+    {
+      "command": "nexus acl mongo grant --user demo-reader --permissions read --yes",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["acl mongo", "demo-reader", "read@admin"],
+      "observe": [
+        { "where": "stdout", "what": "demo-reader created with read@admin; the command re-describes the user to confirm" }
+      ]
+    }
+  ],
+  "whatProves": "MongoAdapter.AclAsync reads users via db.getUsers() (userAdminAnyDatabase) and idempotently grants roles via createUser/grantRolesToUser."
+}

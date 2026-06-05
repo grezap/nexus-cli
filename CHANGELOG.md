@@ -6,6 +6,48 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-06-05
+
+Phase 0.G.2: the **MongoDB adapter** — the first **password-authenticated** cluster adapter —
+live-verified end-to-end against the running `mongo` replica set (`nexus-rs`). Establishes the
+**Vault-KV operator-credential model** for every password-auth engine to come (Percona / Patroni /
+SQL). AOT **23.9 MB / 30 MB** (+0.13 MB over v0.6.0). 71/71 tests.
+
+### Added — Mongo adapter (Phase 0.G.2)
+
+- **`MongoAdapter`** implements all of `IClusterAdapter` over SSH + on-node `mongosh` / `mongodump` /
+  `mongorestore` (no managed driver): `status` · `health` (quorum / single-primary / per-secondary
+  lag) · `topology` · `failover-test cluster mongo` (`rs.stepDown`, live RTO ≈ 2.8s) ·
+  `scale-out add`/`remove` (`rs.add`/`rs.remove`, primary-guard) · `backup take`/`restore`
+  (`mongodump --archive --gzip` + `mongorestore` ns-remap round-trip) · `cert-rotate` (genuine
+  re-issue via the node's own Vault token → `pki_int/issue/mongo-server`, rolling restart) ·
+  `acl list/describe/grant/revoke` (`getUsers`/`createUser`/`grantRolesToUser`) · `chaos`
+  (process-kill `nexus-mongo` + observe + self-revert).
+- **Operator-credential model** — adapter authenticates as the dedicated least-privilege
+  **`nexus-cluster-admin`** user (clusterMonitor + clusterManager + backup + restore +
+  userAdminAnyDatabase); its password lives **only** in Vault KV (`nexus/oltp/mongo/operator-password`)
+  and is fetched at runtime via the new **optional `INexusVaultClient`** plumbed through
+  `ClusterBootstrapper` (`TryBuildVaultClient` from `VAULT_ADDR`/`TOKEN`/`CACERT`; mTLS-only Redis +
+  Kafka unaffected; a missing token yields an actionable error). Infra (nexus-infra-vmware security +
+  nexus-infra-oltp oltp-mongo): operator-password seed + agent-policy v3 (read grant) + idempotent
+  `nexus-cluster-admin` createUser overlay — proven in a from-zero cold-rebuild apply graph.
+- **[ADR-0011]** — MongoAdapter + the Vault-KV operator-credential model.
+  **`docs/verification/0.G.2-mongo.md`** — full live evidence + the four bugs live-verify caught.
+  **`docs/demos/DEMO-30..40`** (11) — executable, self-verifying System B demos for the mongo verb surface.
+
+### Fixed (surfaced by live-verify against the running RS)
+
+- **`--eval` single-quote mangling** — the remote shell wraps `--eval '<js>'` in single quotes, so all
+  embedded JS now uses double-quoted literals (single-quoted JS terminated the shell quote →
+  `SyntaxError` on `scale-out`/`failover`).
+- **`mongodump` dumped 0 app docs** — the URI's `/admin` database path scoped the dump to admin system
+  collections (fixed: target `/nexus_smoke?…&authSource=admin`); a `readPreference=secondary` dump
+  returned 0 docs (fixed: read from PRIMARY).
+- **`mongorestore` ns-remap restored 0 docs** — `--nsInclude` is required to select the namespace
+  before `--nsFrom`/`--nsTo` rename it.
+- **`backup restore` archive discovery** — backups are node-local on the secondary that ran the dump;
+  restore now finds the node holding the archive and runs there.
+
 ## [0.6.0] — 2026-06-05
 
 Phase 0.G data-tier adapter expansion begins: the **`IClusterAdapter` SPI framework** (0.G.0)

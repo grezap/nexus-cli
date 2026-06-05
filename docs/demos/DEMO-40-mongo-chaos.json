@@ -1,0 +1,21 @@
+{
+  "id": "DEMO-40-mongo-chaos",
+  "title": "Mongo: chaos process-kill + auto-heal",
+  "description": "Runs `nexus chaos mongo process-kill`: pushes nexus-chaos.sh, kills nexus-mongo on a secondary for a time-boxed window, observes impact mid-window, lifts, and confirms recovery to green.",
+  "prerequisites": {
+    "vmsAlive": ["mongo-1", "mongo-2", "mongo-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus chaos mongo process-kill --yes",
+      "waitAfterSeconds": 6,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["chaos", "process-kill", "recovered"],
+      "observe": [
+        { "where": "stdout", "what": "target=<secondary>; observed-impact table shows that member failed + quorum 2/3 + 1 PRIMARY held; cluster recovered to GREEN after lift" }
+      ]
+    }
+  ],
+  "whatProves": "MongoAdapter.ApplyChaosAsync injects a time-boxed self-reverting fault via the embedded nexus-chaos.sh, observes RS impact, and confirms auto-heal."
+}

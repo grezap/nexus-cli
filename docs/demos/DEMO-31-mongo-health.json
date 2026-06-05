@@ -1,0 +1,21 @@
+{
+  "id": "DEMO-31-mongo-health",
+  "title": "Mongo: replica-set healthcheck",
+  "description": "Runs `nexus health mongo`: quorum, single-primary, and per-secondary replication-lag probes.",
+  "prerequisites": {
+    "vmsAlive": ["mongo-1", "mongo-2", "mongo-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus health mongo",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["health mongo", "quorum", "primary", "replication-lag"],
+      "observe": [
+        { "where": "stdout", "what": "quorum 3/3 (>= majority) green · exactly-1-PRIMARY green · per-secondary lag (<10s green) · overall=green" }
+      ]
+    }
+  ],
+  "whatProves": "MongoAdapter.HealthAsync derives quorum/primary/lag probes from a single rs.status() projection and rolls them into an overall status."
+}

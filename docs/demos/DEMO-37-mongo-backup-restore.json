@@ -1,0 +1,21 @@
+{
+  "id": "DEMO-37-mongo-backup-restore",
+  "title": "Mongo: backup restore round-trip (mongorestore ns-remap)",
+  "description": "Runs `nexus backup restore mongo <id>`: locates the node holding the archive and mongorestores nexus_smoke.* into a nexus_restore_verify.* namespace (non-destructive round-trip), counting the restored docs.",
+  "prerequisites": {
+    "vmsAlive": ["mongo-1", "mongo-2", "mongo-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus backup restore mongo mongo-demo-REPLACE_WITH_ID --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["backup restore", "items restored"],
+      "observe": [
+        { "where": "stdout", "what": "items restored >= 1 (the rs_init_test doc), restored into nexus_restore_verify via --nsInclude + --nsFrom/--nsTo" }
+      ]
+    }
+  ],
+  "whatProves": "MongoAdapter.BackupRestoreAsync round-trips the archive: discover archive node -> mongorestore with --nsInclude ns-remap -> count restored docs. Replace the id with one from `backup take`."
+}

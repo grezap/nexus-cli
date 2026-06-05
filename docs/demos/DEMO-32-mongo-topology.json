@@ -1,0 +1,21 @@
+{
+  "id": "DEMO-32-mongo-topology",
+  "title": "Mongo: replica-set topology",
+  "description": "Runs `nexus topology mongo`: members + roles + replication state (a replica set is not sharded, so no shard map).",
+  "prerequisites": {
+    "vmsAlive": ["mongo-1", "mongo-2", "mongo-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus topology mongo",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["topology mongo", "primary", "secondary"],
+      "observe": [
+        { "where": "stdout", "what": "node table (hostname/role/status/lag); no shard section (RS is not sharded)" }
+      ]
+    }
+  ],
+  "whatProves": "MongoAdapter.TopologyAsync renders the RS member graph with Shards=null, distinguishing a replica set from the sharded engines."
+}

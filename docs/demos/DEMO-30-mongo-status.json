@@ -1,0 +1,30 @@
+{
+  "id": "DEMO-30-mongo-status",
+  "title": "Mongo: live replica-set status",
+  "description": "Runs `nexus status mongo` against the running nexus-rs. Shows the 3 members' roles + health + the elected leader.",
+  "prerequisites": {
+    "vmsAlive": ["mongo-1", "mongo-2", "mongo-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus status mongo",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["mongo", "primary", "secondary", "leader"],
+      "observe": [
+        { "where": "stdout", "what": "3-row table: 1 role=primary + 2 role=secondary; status=alive for all; leader=<primary>" }
+      ]
+    },
+    {
+      "command": "nexus status mongo --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["clusterId", "overallHealth", "members"],
+      "observe": [
+        { "where": "stdout", "what": "JSON ClusterStatusOutputJson with 3 members + overallHealth=green + leader set" }
+      ]
+    }
+  ],
+  "whatProves": "MongoAdapter.GetStatusAsync authenticates as nexus-cluster-admin (password from Vault KV), runs rs.status() over mTLS, and parses members + the PRIMARY leader."
+}

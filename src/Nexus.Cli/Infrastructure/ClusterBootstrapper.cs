@@ -1,6 +1,8 @@
 using Nexus.Cli.Adapters.Cluster;
+using Nexus.Cli.Adapters.Http;
 using Nexus.Cli.Adapters.Inventory;
 using Nexus.Cli.Adapters.Ssh;
+using Nexus.Cli.Adapters.Vault;
 using Nexus.Cli.Adapters.Vmware;
 using Nexus.Cli.Core.Abstractions;
 
@@ -44,19 +46,54 @@ public static class ClusterBootstrapper
         // preserve the v0.5 wiring.
         var kafkaFailover = KafkaFailoverBootstrapper.Build();
 
+        // Optional Vault client for adapters whose engines authenticate with a
+        // password held ONLY in Vault KV (the credential model locked 2026-06-05:
+        // Mongo/Percona/Patroni/SQL operator passwords live in nexus/oltp/.../...,
+        // never on nodes). Resolved from VAULT_ADDR/VAULT_TOKEN/VAULT_CACERT exactly
+        // like cluster-status + failover-test (VaultTokenResolver). When those env
+        // vars are absent the client is null; password-needing verbs then return a
+        // clear "set VAULT_TOKEN/ADDR/CACERT" error rather than failing obscurely.
+        // mTLS-only adapters (Redis, Kafka) ignore it. The HttpClient/factory live
+        // for the process lifetime (short-lived CLI; reclaimed at exit) -- matching
+        // how NexusBootstrapper holds its Vault client.
+        var vault = TryBuildVaultClient();
+
         var adapters = new IClusterAdapter[]
         {
             new RedisAdapter(catalog, ssh, sshUser, sshKey),
             new KafkaAdapter(kafkaFailover),
-            // 0.G.2+: new MongoAdapter(catalog, ssh, sshUser, sshKey),
-            // 0.G.3+: new PerconaAdapter(catalog, ssh, sshUser, sshKey),
-            // 0.G.4+: new PatroniAdapter(catalog, ssh, sshUser, sshKey),
+            new MongoAdapter(catalog, ssh, sshUser, sshKey, vault),
+            // 0.G.3+: new PerconaAdapter(catalog, ssh, sshUser, sshKey, vault),
+            // 0.G.4+: new PatroniAdapter(catalog, ssh, sshUser, sshKey, vault),
             // 0.G.5+: new ClickHouseAdapter(catalog, ssh, sshUser, sshKey),
             // 0.G.6+: new StarRocksAdapter(catalog, ssh, sshUser, sshKey),
-            // 0.G.7+: new SqlFciAdapter(catalog, ssh, sshUser, sshKey),
-            // 0.G.7+: new SqlAgAdapter(catalog, ssh, sshUser, sshKey),
+            // 0.G.7+: new SqlFciAdapter(catalog, ssh, sshUser, sshKey, vault),
+            // 0.G.7+: new SqlAgAdapter(catalog, ssh, sshUser, sshKey, vault),
         };
         return new ClusterRegistry(adapters);
+    }
+
+    /// <summary>
+    /// Best-effort build of an <see cref="INexusVaultClient"/> from the process
+    /// environment (VAULT_ADDR / VAULT_TOKEN / VAULT_CACERT, via
+    /// <see cref="VaultTokenResolver"/>). Returns null when the env isn't set or the
+    /// CA bundle is missing -- the adapters degrade gracefully with an actionable
+    /// error on the verbs that actually need it. Never throws.
+    /// </summary>
+    private static VaultClient? TryBuildVaultClient()
+    {
+        try
+        {
+            var resolver = new VaultTokenResolver(new ProcessEnvironmentReader());
+            var ctx = resolver.Resolve();
+            if (ctx.IsFail) return null;
+            var httpFactory = new NexusHttpClientFactory(ctx.Value!.CaBundlePath);
+            return new VaultClient(ctx.Value, httpFactory);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public static IVmResizer BuildVmResizer(IClusterRegistry registry)

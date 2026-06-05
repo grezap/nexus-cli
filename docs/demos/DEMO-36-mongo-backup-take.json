@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-36-mongo-backup-take",
+  "title": "Mongo: backup take (mongodump --archive --gzip)",
+  "description": "Runs `nexus backup take mongo --tag <t>`: mongodump of the nexus_smoke application DB to a node-local gzip archive on a secondary.",
+  "prerequisites": {
+    "vmsAlive": ["mongo-1", "mongo-2", "mongo-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus backup take mongo --tag demo",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["backup take", "nexus-rs", "archive.gz"],
+      "observe": [
+        { "where": "stdout", "what": "backup id (mongo-demo-<ts>) · destination /var/backups/nexus-mongo/<id>.archive.gz (node-local on a secondary) · size > 0" },
+        { "where": "ssh <secondary>: ls -l /var/backups/nexus-mongo/", "what": "the .archive.gz file exists with the reported size" }
+      ]
+    }
+  ],
+  "whatProves": "MongoAdapter.BackupTakeAsync produces a non-empty mongodump archive of nexus_smoke (URI database path scopes the dump; reads from PRIMARY)."
+}

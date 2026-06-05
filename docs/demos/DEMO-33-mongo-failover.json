@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-33-mongo-failover",
+  "title": "Mongo: planned failover (rs.stepDown) + RTO",
+  "description": "Runs `nexus failover-test cluster mongo`: steps down the current PRIMARY, measures the election RTO until a NEW primary appears, then confirms the cluster healed.",
+  "prerequisites": {
+    "vmsAlive": ["mongo-1", "mongo-2", "mongo-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster mongo --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["mongo-rs-stepdown", "original primary", "new primary", "recovered"],
+      "observe": [
+        { "where": "stdout", "what": "original primary -> new primary; RTO timeline (failure injected / new primary observed); recovery=recovered. Live: ~2.8s." },
+        { "where": "ssh mongo node: rs.status()", "what": "a different member now stateStr=PRIMARY; the stepped-down node is SECONDARY" }
+      ]
+    }
+  ],
+  "whatProves": "MongoAdapter.FailoverAsync runs rs.stepDown(60) on the PRIMARY and measures a real election RTO; the RS self-heals to 1 PRIMARY + 2 SECONDARY."
+}

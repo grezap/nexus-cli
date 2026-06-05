@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-34-mongo-scale-out-add",
+  "title": "Mongo: scale-out add (rs.add)",
+  "description": "Runs `nexus scale-out add mongo --role secondary`: discovers a provisioned-but-unjoined reachable mongo node and rs.add()s it as a SECONDARY (apply-on-demand, ADR-0010).",
+  "prerequisites": {
+    "vmsAlive": ["mongo-1", "mongo-2", "mongo-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out add mongo --role secondary --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["scale-out add", "nexus-rs", "SECONDARY"],
+      "observe": [
+        { "where": "stdout", "what": "added <node>:27017 to nexus-rs as a SECONDARY (initial-sync follows)" },
+        { "where": "nexus status mongo", "what": "member count increased; new node syncing then alive" }
+      ]
+    }
+  ],
+  "whatProves": "MongoAdapter.ScaleOutAddAsync joins a provisioned-but-unjoined node via rs.add() routed to the PRIMARY (apply-on-demand; no hand-rolled clone)."
+}

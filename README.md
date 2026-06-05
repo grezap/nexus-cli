@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.G.1%20v0.6.0%20%E2%9C%85%20Redis%20adapter%20live-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.G.2%20v0.6.1%20%E2%9C%85%20Mongo%20adapter%20live-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,12 +12,15 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.6.0):** Phase 0.G **data-tier adapter expansion** underway — the
-> `IClusterAdapter` SPI plus the **first concrete adapter, Redis**, ship **live-verified** (all
-> 11 data-tier verbs green against the running `redis` cluster: status · health · topology ·
-> failover RTO≈2.1s · cert-rotate · acl · backup take/restore · scale-out add/remove · chaos;
-> AOT 23.77 MB / 30 MB gate). See [`docs/handbook.md`](./docs/handbook.md) for the analytical verb
-> reference + troubleshooting runbook, and [`docs/verification/0.G.1-redis.md`](./docs/verification/0.G.1-redis.md)
+> **Current state (v0.6.1):** Phase 0.G **data-tier adapter expansion** underway — **2 of 11
+> adapters live-verified**. **Redis** (v0.6.0, mTLS-only) + **Mongo** (v0.6.1, the first
+> password-auth adapter) ship with all data-tier verbs green against their running clusters: Mongo on
+> `nexus-rs` — status · health · topology · failover RTO≈2.8s · scale-out add/remove · backup
+> take/restore · cert-rotate · acl list/grant · chaos. Mongo introduces the **Vault-KV
+> operator-credential model** (the `nexus-cluster-admin` password lives only in Vault KV, fetched at
+> runtime via the optional `INexusVaultClient`) — the standard for every password-auth engine to come.
+> AOT **23.9 MB / 30 MB** gate. See [`docs/handbook.md`](./docs/handbook.md) for the analytical verb
+> reference + troubleshooting runbook, and [`docs/verification/0.G.2-mongo.md`](./docs/verification/0.G.2-mongo.md)
 > for the live evidence. The 9 remaining cluster adapters land per the canon order (ADR-0010).
 >
 > **Phase 0.F (v0.5.0) remains closed: all 5 of 5 master-plan verbs ship.** `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), `failover-test {consul-leader, nomad-leader, swarm-manager}` (v0.3.x), `demo {list, run, record}` (v0.4.0), and **`kafka failover {east-to-west, west-to-east}`** (v0.5.0; ADR-0008 — region-loss DR via vmrun-suspend × 3 source brokers + produce/consume round-trip on the target + vmrun-resume). Verified live: consul 1.55s · nomad 2.716s · swarm-manager 21.59s · kafka east→west 13.20s · kafka west→east 13.57s — all RTOs auto-recovered, all under their master-plan budgets.
@@ -51,19 +54,19 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 | `nexus kafka failover west-to-east` | ✅ v0.5.0 | Symmetric: vmrun-suspend the 3 kafka-west brokers; live RTO **13.57 s**. The more demo-worthy direction (ecosystem stays up) |
 
 **Data-tier cluster verbs (v0.6.x — ADR-0009 `IClusterAdapter` SPI)** — one adapter per cluster,
-SSH-shell-out to the on-node CLI, no managed DB drivers. **Redis is live (v0.6.0)**; the 9 remaining
-adapters land per the canon order.
+SSH-shell-out to the on-node CLI, no managed DB drivers. **Redis + Mongo are live (v0.6.0 / v0.6.1)**;
+the 8 remaining adapters land per the canon order.
 
 | Verb | Status | What it does |
 |---|---|---|
-| `nexus status <cluster>` | ✅ redis | per-cluster members + live roles + health |
-| `nexus health <cluster>` | ✅ redis | per-node probes (replication lag, etc.) |
-| `nexus topology <cluster> [--watch]` | ✅ redis | shard/replica map |
-| `nexus failover-test cluster <cluster>` | ✅ redis | controlled primary loss + measured RTO |
-| `nexus cert-rotate <cluster>` | ✅ redis | issue a fresh TLS leaf per node + reload |
-| `nexus acl <cluster> <list\|describe\|grant\|revoke>` | ✅ redis (read) | inspect / mutate access control |
-| `nexus backup take\|restore <cluster>` | ✅ redis | engine-native snapshot + restore round-trip |
-| `nexus scale-out add\|remove <cluster>` | ✅ redis | role-aware live cluster-membership change |
+| `nexus status <cluster>` | ✅ redis · mongo | per-cluster members + live roles + health |
+| `nexus health <cluster>` | ✅ redis · mongo | per-node probes (replication lag, etc.) |
+| `nexus topology <cluster> [--watch]` | ✅ redis · mongo | shard/replica map |
+| `nexus failover-test cluster <cluster>` | ✅ redis · mongo | controlled primary loss + measured RTO |
+| `nexus cert-rotate <cluster>` | ✅ redis · mongo | issue a fresh TLS leaf per node + reload |
+| `nexus acl <cluster> <list\|describe\|grant\|revoke>` | ✅ redis (read) · mongo (list+grant) | inspect / mutate access control |
+| `nexus backup take\|restore <cluster>` | ✅ redis · mongo | engine-native snapshot + restore round-trip |
+| `nexus scale-out add\|remove <cluster>` | ✅ redis · mongo | role-aware live cluster-membership change |
 | `nexus scale-up <vm>` | ✅ generic | vertical VM resize (cluster-aware; refuses primaries) |
 | `nexus chaos <cluster> <scenario>` | ✅ redis | time-boxed, self-reverting fault injection |
 
@@ -203,7 +206,8 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Ten ADRs cover framework 
 | v0.4.0 | `demo run/record` — VHS .tape orchestration + Playwright bridge |
 | v0.5.0 | `kafka failover {east-to-west, west-to-east}` — ADR-0008; live RTOs 13.20 s + 13.57 s (60 s gate); **shipped 2026-05-15**, closes the v0.x roadmap with 5/5 master-plan verbs live |
 | **v0.6.0** | Phase 0.G.1 — `IClusterAdapter` SPI + the **Redis adapter** (all 11 data-tier verbs live-verified); AOT gate → ≤30 MB (ADR-0024); **23.77 MB** |
-| v0.6.x–v0.8.0 | The 9 remaining adapters in canon order (Mongo → Percona → Patroni → ClickHouse → StarRocks → SQL-FCI/AG → mongo-sharded → Vitess → Citus) |
+| **v0.6.1** | Phase 0.G.2 — the **Mongo adapter** (first password-auth adapter; Vault-KV operator-credential model + optional `INexusVaultClient`); all data-tier verbs live-verified on `nexus-rs`; **23.9 MB** |
+| v0.6.2–v0.8.0 | The 8 remaining adapters in canon order (Percona → Patroni → ClickHouse → StarRocks → SQL-FCI/AG → mongo-sharded → Vitess → Citus) |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing

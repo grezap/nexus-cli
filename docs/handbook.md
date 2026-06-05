@@ -167,7 +167,8 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 | Cluster | status | health | topology | failover | scale-out | scale-up | backup | cert-rotate | chaos | acl |
 |---|---|---|---|---|---|---|---|---|---|---|
 | redis | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ gen | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ list |
-| mongo · percona · postgres · clickhouse · starrocks · sql-* · mongo-sharded · vitess · citus | ⏳ per canon order | | | | | | | | | |
+| mongo | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ gen | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ list+grant |
+| percona · postgres · clickhouse · starrocks · sql-* · mongo-sharded · vitess · citus | ⏳ per canon order | | | | | | | | | |
 
 ✅ live-verified · ⚠ coded, fix pending · ⏳ pending. Dates = live-verify date.
 
@@ -222,6 +223,26 @@ The diagnostic ladder (run top-down; each rung names the fix):
    ⇒ **mTLS-only, NO password** (`default … nopass`). The client cert+key are required; the CA file
    is `ca.crt` (not `ca.pem`); `/etc/nexus-redis/auth-password.txt` does **not** exist. Confirm the
    real cert filenames + auth model from `/etc/nexus-<engine>/` for every cluster — they differ.
+   **Mongo reality (live-verified 2026-06-05):** unit `nexus-mongo` (stock `mongod` masked);
+   `requireTLS` on 27017 with a **combined** `server.pem` (leaf+key) + `ca.crt` under
+   `/etc/nexus-mongo/tls/`; keyFile internal auth + `authorization=enabled`. The operator CLI auths as
+   **`nexus-cluster-admin`** whose password is in **Vault KV** (`nexus/oltp/mongo/operator-password`),
+   so the verbs need `VAULT_ADDR`/`VAULT_TOKEN`/`VAULT_CACERT` set (a missing token yields an
+   actionable error). On-node probe:
+   ```bash
+   KF=$(sudo cat /etc/nexus-mongo/keyfile | tr -d '\n')          # __system bootstrap identity (off-limits for ops)
+   OPWD=$(VAULT_ADDR=https://192.168.70.121:8200 VAULT_SKIP_VERIFY=true \
+          vault kv get -field=content nexus/oltp/mongo/operator-password)
+   sudo mongosh --quiet --tls --tlsCAFile /etc/nexus-mongo/tls/ca.crt \
+        --tlsCertificateKeyFile /etc/nexus-mongo/tls/server.pem \
+        --username nexus-cluster-admin --password "$OPWD" --authenticationDatabase admin \
+        'mongodb://mongo-1:27017,mongo-2:27017,mongo-3:27017/admin?replicaSet=nexus-rs' \
+        --eval 'print(rs.status().ok)'
+   ```
+   If the operator user is missing (`Authentication failed`), re-run the oltp-mongo apply
+   (`pwsh -File nexus-infra-oltp/scripts/oltp-mongo.ps1 apply`) — its `mongo_operator_user` overlay is
+   idempotent (createUser → else converge roles). If Vault KV has no operator-password, apply the
+   nexus-infra-vmware **security** env first (the seed + agent-policy v3 live there).
 
 ### §3.3 Verb behaviour notes + limitations
 - `failover-test cluster redis` — **FIXED v0.6.0**: original primary resolved from the replica's
@@ -234,6 +255,20 @@ The diagnostic ladder (run top-down; each rung names the fix):
   the live cert immediately (new serial + reload); the later revert is an infra coupling, not a CLI bug.
 - `scale-out add redis` — new-VM provisioning rides the IaC growth var (`redis_extra_count`, a
   per-cluster Terraform follow-up); the role-aware join + the remove→re-add cycle are live-verified.
+- **Mongo (`v0.6.1`) — engine gotchas caught only by live-verify:**
+  - **`--eval` is single-quoted by the remote shell**, so every embedded JS literal must use
+    **double** quotes (`print("OK")`). Single-quoted JS mangles the script (`SyntaxError`).
+  - **`mongodump` is scoped by the URI database path** — a `/admin` path dumps only admin system
+    collections; target `/nexus_smoke?…&authSource=admin`. A `readPreference=secondary` dump returned
+    **0 documents** against this RS, so `backup take` reads from the PRIMARY.
+  - **`mongorestore` ns-remap needs `--nsInclude`** to *select* the namespace before `--nsFrom`/
+    `--nsTo` rename it — without it, 0 docs restored. `backup restore` also **discovers which node
+    holds the (node-local) archive** and runs there.
+  - `cert-rotate mongo` — same `pkiCert`-cache caveat as Redis (immediate rotation + reload; persistent
+    rotation needs the Agent cache refreshed). Rolling `systemctl restart nexus-mongo`, one member at
+    a time (RS tolerates a single member down).
+  - `failover-test cluster mongo` runs `rs.stepDown(60)` on the PRIMARY (which holds the old primary
+    down 60s); RTO ≈ 2.8s live. `scale-out remove` refuses the current PRIMARY (step it down first).
 
 ### §3.4 AOT size gate
 ≤30 MB (linux-x64 + win-x64) for the 0.G line (ADR-0024). `pwsh -File scripts/cli.ps1 size-check`.

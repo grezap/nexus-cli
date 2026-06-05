@@ -1,0 +1,22 @@
+{
+  "id": "DEMO-38-mongo-cert-rotate",
+  "title": "Mongo: TLS cert rotation (Vault re-issue + rolling restart)",
+  "description": "Runs `nexus cert-rotate mongo`: per node, issues a fresh leaf via the node's own Vault token (pki_int/issue/mongo-server), writes the combined server.pem + ca.crt, and rolling-restarts nexus-mongo.",
+  "prerequisites": {
+    "vmsAlive": ["mongo-1", "mongo-2", "mongo-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"]
+  },
+  "steps": [
+    {
+      "command": "nexus cert-rotate mongo --yes",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["cert-rotate", "old serial", "new serial"],
+      "observe": [
+        { "where": "stdout", "what": "per-node old serial != new serial, error column empty for all 3 (rolling, ~70s)" },
+        { "where": "ssh mongo node: openssl x509 -in /etc/nexus-mongo/tls/server.pem -noout -serial", "what": "matches the reported new serial" }
+      ]
+    }
+  ],
+  "whatProves": "MongoAdapter.RotateCertAsync performs a genuine Vault re-issue (not a cache replay) and a rolling restart that the RS tolerates (one member down at a time)."
+}
