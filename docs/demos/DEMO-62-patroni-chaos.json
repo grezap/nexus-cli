@@ -1,0 +1,42 @@
+{
+  "id": "DEMO-62-patroni-chaos",
+  "title": "Patroni: process-kill + auto-rejoin",
+  "description": "Runs `nexus chaos postgres process-kill`: kills nexus-patroni on a replica, observes impact, restarts it, and waits for the cluster to return to green.",
+  "prerequisites": {
+    "vmsAlive": [
+      "pg-primary",
+      "pg-replica-1",
+      "pg-replica-2",
+      "etcd-1",
+      "etcd-2",
+      "etcd-3",
+      "haproxy-pg-1",
+      "haproxy-pg-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus chaos postgres process-kill --duration 10 --yes",
+      "waitAfterSeconds": 6,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "chaos",
+        "process-kill",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "nexus-patroni killed on a replica; cluster recovers to GREEN (Patroni rejoin)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "PatroniAdapter.ApplyChaosAsync injects a process-kill via the embedded nexus-chaos.sh and proves Patroni self-heals the replica back to streaming."
+}

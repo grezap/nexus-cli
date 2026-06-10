@@ -1,0 +1,41 @@
+{
+  "id": "DEMO-56-patroni-scale-out-add",
+  "title": "Patroni: re-join a replica",
+  "description": "Runs `nexus scale-out add postgres --role replica`: starts nexus-patroni on a stopped node; Patroni rejoins via pg_rewind/basebackup and reaches streaming.",
+  "prerequisites": {
+    "vmsAlive": [
+      "pg-primary",
+      "pg-replica-1",
+      "pg-replica-2",
+      "etcd-1",
+      "etcd-2",
+      "etcd-3",
+      "haproxy-pg-1",
+      "haproxy-pg-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out add postgres --role replica --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "scale-out add",
+        "streaming"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the stopped pg node rejoins -> streaming. Live: ~4.9s."
+        }
+      ]
+    }
+  ],
+  "whatProves": "PatroniAdapter.ScaleOutAddAsync starts the Patroni agent on an unjoined node and waits for streaming (apply-on-demand for a brand-new VM, ADR-0010)."
+}

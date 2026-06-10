@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.G.3%20v0.6.2%20%E2%9C%85%20Percona%20adapter%20live-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.G.4%20v0.6.3%20%E2%9C%85%20Patroni%20adapter%20live-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,18 +12,20 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.6.2):** Phase 0.G **data-tier adapter expansion** underway — **3 of 11
+> **Current state (v0.6.3):** Phase 0.G **data-tier adapter expansion** underway — **4 of 11
 > adapters live-verified**. **Redis** (v0.6.0, mTLS-only) + **Mongo** (v0.6.1, password-auth) +
-> **Percona XtraDB Cluster + ProxySQL** (v0.6.2, Galera synchronous multi-primary) ship with all
-> data-tier verbs green against their running clusters: Percona — status · health · topology ·
-> failover (ProxySQL writer failover RTO≈2.3s) · scale-out add/remove (Galera SST) · backup
-> take/restore · cert-rotate (5 nodes) · acl list/grant · chaos. The **Vault-KV operator-credential
-> model** (the `nexus-cluster-admin` password lives only in Vault KV, fetched at runtime via the
-> optional `INexusVaultClient`) carries from Mongo to Percona unchanged — the standard for every
-> password-auth engine to come. AOT **24.03 MB / 30 MB** gate. See
+> **Percona XtraDB Cluster + ProxySQL** (v0.6.2, Galera synchronous multi-primary) + **PostgreSQL
+> Patroni HA** (v0.6.3, single-leader streaming replication + etcd DCS + HAProxy VIP) ship with all
+> data-tier verbs green against their running clusters: Patroni — status · health (incl. authed etcd
+> quorum + a TLS+scram round-trip via the VIP) · topology · failover (`patronictl switchover`,
+> RTO≈4.6s measured at the VIP) · scale-out add/remove · backup take/restore (`pg_dump` →
+> operator-owned verify DB) · cert-rotate (8 nodes) · acl list/grant · chaos. The **Vault-KV
+> operator-credential model** (the `nexus-cluster-admin` password lives only in Vault KV, fetched at
+> runtime via the optional `INexusVaultClient`) carries from Mongo to Percona to Patroni unchanged —
+> the standard for every password-auth engine to come. AOT **24.18 MB / 30 MB** gate. See
 > [`docs/handbook.md`](./docs/handbook.md) for the analytical verb reference + troubleshooting
-> runbook, and [`docs/verification/0.G.3-percona.md`](./docs/verification/0.G.3-percona.md)
-> for the live evidence. The 9 remaining cluster adapters land per the canon order (ADR-0010).
+> runbook, and [`docs/verification/0.G.4-postgres.md`](./docs/verification/0.G.4-postgres.md)
+> for the live evidence. The 7 remaining cluster adapters land per the canon order (ADR-0010).
 >
 > **Phase 0.F (v0.5.0) remains closed: all 5 of 5 master-plan verbs ship.** `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), `failover-test {consul-leader, nomad-leader, swarm-manager}` (v0.3.x), `demo {list, run, record}` (v0.4.0), and **`kafka failover {east-to-west, west-to-east}`** (v0.5.0; ADR-0008 — region-loss DR via vmrun-suspend × 3 source brokers + produce/consume round-trip on the target + vmrun-resume). Verified live: consul 1.55s · nomad 2.716s · swarm-manager 21.59s · kafka east→west 13.20s · kafka west→east 13.57s — all RTOs auto-recovered, all under their master-plan budgets.
 

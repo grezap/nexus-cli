@@ -169,7 +169,8 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 | redis | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ gen | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ list |
 | mongo | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ gen | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ list+grant |
 | percona | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ gen | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ list+grant |
-| postgres · clickhouse · starrocks · sql-* · mongo-sharded · vitess · citus | ⏳ per canon order | | | | | | | | | |
+| postgres | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ gen | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ list+grant |
+| clickhouse · starrocks · sql-* · mongo-sharded · vitess · citus | ⏳ per canon order | | | | | | | | | |
 
 ✅ live-verified · ⚠ coded, fix pending · ⏳ pending. Dates = live-verify date.
 
@@ -287,6 +288,34 @@ The diagnostic ladder (run top-down; each rung names the fix):
   - **`failover-test`** = ProxySQL writer failover (stop the hostgroup-10 writer, poll for a promoted
     backup_writer); RTO ≈ 2.3s live. `cert-rotate` rolls all 5 nodes (PXC one at a time; Galera
     tolerates a single member restart). `scale-out remove` refuses the current writer.
+- **Patroni / postgres (`v0.6.3`) — PG + etcd + HAProxy gotchas caught only by live-verify:**
+  - **Three control planes:** Patroni (`patronictl list`/`switchover`), etcd (RBAC — `nexus-etcdctl
+    --user root:<pw>`, password read on-node via the etcd node's own agent token), HAProxy VIP `.60`
+    (routes `:5432` to the current leader via `httpchk GET /leader`). Operator connects as
+    `nexus-cluster-admin` over TLS+scram to a node's **VMnet11 IP** (not 127.0.0.1, which is
+    pg_hba `trust`); writes target the VIP.
+  - **`failover-test` 403 "client certificate required":** Patroni REST `verify_client: optional`
+    **requires** a client cert for POST `/switchover`. The fix is a **`ctl:` block** in patroni.yml
+    (`cacert`/`certfile`/`keyfile` = the node's own TLS; the server cert doubles as the client cert),
+    baked into `role-overlay-patroni-bootstrap.tf`. Also: **patronictl exits 0 even on a refused
+    switchover** — the adapter validates the `"Successfully switched over"` banner. RTO ≈ 4.6s live,
+    measured at the VIP; auto-switches back.
+  - **`backup`:** `pg_dump -t nexus_smoke --no-owner --no-privileges` (the dump's `OWNER TO nexusops`
+    would fail under the non-owner operator). **Restore goes into a fresh DATABASE the operator OWNS**
+    (it has CREATEDB) — NOT a schema-in-postgres: the operator's `pg_*_all_data` grants are DATA, not
+    DDL, so `CREATE SCHEMA` in db postgres is denied. items restored = 3 live.
+  - **`cert-rotate`:** all 8 nodes from the single PKI role `patroni-server` whose only allowed domain
+    is **`patroni.nexus.lab`** (a foreign domain like `etcd.nexus.lab` 500s "common name not allowed
+    by this role"). Per-role apply: PG **reloads** (SIGHUP picks up `ssl_cert_file` — no restart),
+    etcd **restarts**, haproxy **reloads**; the PG **leader rotates last**.
+  - **`scale-out`** start/stop `nexus-patroni` on a replica (rejoin → streaming / graceful leave;
+    refuses the leader). **`chaos process-kill`** kills `nexus-patroni` on a replica + restarts it to
+    rejoin. `status` renders etcd as `dcs`, haproxy as `router` (VIP holder `router*`).
+  - **Cold-rebuild gotcha (HAProxy):** the `nexus-haproxy.service` unit runs `User=haproxy`, which is
+    incompatible with a `chroot` directive in `haproxy.cfg` (chroot needs root/CAP_SYS_CHROOT → a fresh
+    node 500s "Cannot chroot"). Fixed by dropping `chroot` from the rendered cfg
+    (`nexus-infra-oltp` `role-overlay-haproxy-config.tf` v3); `User=haproxy` + `RuntimeDirectory=` are
+    the privilege drop + tmpfs `/run` dir. Surfaced by the v0.6.3 cold-rebuild.
 
 ### §3.4 AOT size gate
 ≤30 MB (linux-x64 + win-x64) for the 0.G line (ADR-0024). `pwsh -File scripts/cli.ps1 size-check`.

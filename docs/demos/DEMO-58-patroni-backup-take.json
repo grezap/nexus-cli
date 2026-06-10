@@ -1,0 +1,41 @@
+{
+  "id": "DEMO-58-patroni-backup-take",
+  "title": "Patroni: pg_dump backup",
+  "description": "Runs `nexus backup take postgres --tag smoke`: pg_dump of nexus_smoke over TLS+scram on a streaming replica (--no-owner --no-privileges), node-local gzip.",
+  "prerequisites": {
+    "vmsAlive": [
+      "pg-primary",
+      "pg-replica-1",
+      "pg-replica-2",
+      "etcd-1",
+      "etcd-2",
+      "etcd-3",
+      "haproxy-pg-1",
+      "haproxy-pg-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup take postgres --tag smoke",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "backup take",
+        "patroni-smoke"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "node-local /var/backups/nexus-patroni/<id>.sql.gz with a non-zero byte size (~650 B)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "PatroniAdapter.BackupTakeAsync dumps as the operator over scram from a replica (offloads the leader); --no-owner/--no-privileges keep the dump replayable under the non-owner operator role (ADR-0013 bug #3)."
+}

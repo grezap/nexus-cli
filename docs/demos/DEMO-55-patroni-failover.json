@@ -1,0 +1,47 @@
+{
+  "id": "DEMO-55-patroni-failover",
+  "title": "Patroni: switchover + RTO via the VIP",
+  "description": "Runs `nexus failover-test cluster postgres`: patronictl switchover to a streaming replica, measures how fast the HAProxy VIP serves the new writable leader, then switches back.",
+  "prerequisites": {
+    "vmsAlive": [
+      "pg-primary",
+      "pg-replica-1",
+      "pg-replica-2",
+      "etcd-1",
+      "etcd-2",
+      "etcd-3",
+      "haproxy-pg-1",
+      "haproxy-pg-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster postgres --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "patroni-switchover",
+        "original primary",
+        "new primary",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "original leader -> new leader; RTO timeline. Live: ~4.6s."
+        },
+        {
+          "where": "VIP .60:5432",
+          "what": "inet_server_addr() flips to the new leader; pg_is_in_recovery()=false"
+        }
+      ]
+    }
+  ],
+  "whatProves": "PatroniAdapter.FailoverAsync demonstrates the real HA primitive: patronictl switchover + HAProxy /leader re-routing; RTO measured at the operator's stable VIP endpoint. Requires the patroni.yml ctl: block (ADR-0013 bug #1)."
+}

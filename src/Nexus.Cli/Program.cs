@@ -87,14 +87,14 @@ internal static class Program
                     .WithDescription("v0.6 generic per-data-cluster failover (Redis | Mongo | Percona | Patroni | ClickHouse | StarRocks | SQL FCI/AG | Kafka). Dispatches via the IClusterAdapter SPI.")
                     .WithExample(["failover-test", "cluster", "redis"])
                     .WithExample(["failover-test", "cluster", "kafka", "--direction", "east-to-west"])
-                    .WithExample(["failover-test", "cluster", "patroni", "--node", "pg-replica-1"]);
+                    .WithExample(["failover-test", "cluster", "postgres", "--node", "pg-replica-1"]);
             });
 
             // ── v0.6 cluster verbs (ADR-0009 IClusterAdapter SPI) ─────────────
             config.AddCommand<ClusterStatusForClusterCommand>("status")
                 .WithDescription("v0.6: per-data-cluster status (members, roles, health). For the infra-tier overview, use `cluster-status`.")
                 .WithExample(["status", "redis"])
-                .WithExample(["status", "patroni", "--json"]);
+                .WithExample(["status", "postgres", "--json"]);
             config.AddCommand<ClusterHealthCommand>("health")
                 .WithDescription("v0.6: per-data-cluster healthcheck (replication lag, disk usage, memory pressure -- per-cluster probe set).")
                 .WithExample(["health", "redis"])
@@ -130,7 +130,7 @@ internal static class Program
                 scaleOut.AddCommand<ClusterScaleOutRemoveCommand>("remove")
                     .WithDescription("Drain + remove a node from the cluster, then destroy its VM.")
                     .WithExample(["scale-out", "remove", "redis", "redis-6"])
-                    .WithExample(["scale-out", "remove", "patroni", "pg-replica-2", "--yes"]);
+                    .WithExample(["scale-out", "remove", "postgres", "pg-replica-2", "--yes"]);
             });
 
             config.AddBranch("backup", backup =>

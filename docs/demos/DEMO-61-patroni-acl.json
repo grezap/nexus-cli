@@ -1,0 +1,42 @@
+{
+  "id": "DEMO-61-patroni-acl",
+  "title": "Patroni: role inspection + grant",
+  "description": "Runs `nexus acl postgres list` then `grant`: lists PG roles with their attribute flags; grant idempotently CREATE ROLEs a LOGIN role + GRANT CONNECT.",
+  "prerequisites": {
+    "vmsAlive": [
+      "pg-primary",
+      "pg-replica-1",
+      "pg-replica-2",
+      "etcd-1",
+      "etcd-2",
+      "etcd-3",
+      "haproxy-pg-1",
+      "haproxy-pg-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus acl postgres list",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "acl postgres",
+        "nexus-cluster-admin",
+        "LOGIN"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "nexus-cluster-admin shows LOGIN CREATEROLE CREATEDB REPLICATION; the bootstrapped postgres/nexusops/replicator/rewind roles are listed"
+        }
+      ]
+    }
+  ],
+  "whatProves": "PatroniAdapter.AclAsync renders a \\du-equivalent from pg_roles attribute flags and (grant) idempotently creates a LOGIN role."
+}

@@ -1,0 +1,42 @@
+{
+  "id": "DEMO-54-patroni-topology",
+  "title": "Patroni: topology snapshot",
+  "description": "Runs `nexus topology postgres`: nodes + roles + replication lag. Shards=null (single-leader streaming replication, not sharded).",
+  "prerequisites": {
+    "vmsAlive": [
+      "pg-primary",
+      "pg-replica-1",
+      "pg-replica-2",
+      "etcd-1",
+      "etcd-2",
+      "etcd-3",
+      "haproxy-pg-1",
+      "haproxy-pg-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus topology postgres",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "topology postgres",
+        "primary",
+        "replica"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "pg leader + 2 replicas with lag; etcd dcs; haproxy router; no shard column populated"
+        }
+      ]
+    }
+  ],
+  "whatProves": "PatroniAdapter.TopologyAsync renders the streaming-replication topology (Shards=null)."
+}

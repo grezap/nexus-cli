@@ -1,0 +1,45 @@
+{
+  "id": "DEMO-57-patroni-scale-out-remove",
+  "title": "Patroni: graceful replica leave",
+  "description": "Runs `nexus scale-out remove postgres pg-replica-2`: stops nexus-patroni so the node leaves the cluster gracefully (refuses the current leader).",
+  "prerequisites": {
+    "vmsAlive": [
+      "pg-primary",
+      "pg-replica-1",
+      "pg-replica-2",
+      "etcd-1",
+      "etcd-2",
+      "etcd-3",
+      "haproxy-pg-1",
+      "haproxy-pg-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out remove postgres pg-replica-2 --yes",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "scale-out remove",
+        "gracefully left"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "pg-replica-2 leaves (service stopped); ready for re-add"
+        },
+        {
+          "where": "patronictl list on a surviving node",
+          "what": "pg-replica-2 no longer streaming"
+        }
+      ]
+    }
+  ],
+  "whatProves": "PatroniAdapter.ScaleOutRemoveAsync gracefully removes a replica and refuses removing the current Patroni leader."
+}

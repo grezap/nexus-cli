@@ -6,6 +6,58 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.3] — 2026-06-11
+
+Phase 0.G.4: the **PostgreSQL Patroni HA + etcd DCS + HAProxy VIP adapter** — the third
+password-auth adapter and the first **single-leader streaming-replication** engine — live-verified
+end-to-end against the running `postgres` cluster (scope `nexus-pg`: 3 PG + 3 etcd + 2 HAProxy, VIP
+`.60`). Reuses the v0.6.1 Vault-KV operator-credential model verbatim (no framework change). AOT
+**24.18 MB / 30 MB** (+0.15 MB over v0.6.2). 71/71 tests.
+
+### Added — Patroni adapter (Phase 0.G.4)
+
+- **`PatroniAdapter`** implements all of `IClusterAdapter` over SSH + on-node `patronictl` / `psql` /
+  `pg_dump` / `etcdctl` (no managed Npgsql driver): `status` (patronictl list + etcd/haproxy liveness
+  + VIP holder) · `health` (single-leader + per-node patroni-state + replication-lag + a TLS+scram
+  `vip-writable` round-trip + **authed etcd quorum** + haproxy) · `topology` · `failover-test cluster
+  postgres` (**patronictl switchover**, RTO ≈ 4.6s measured at the VIP, auto-switch-back) · `scale-out
+  add`/`remove` (start/stop `nexus-patroni`, rejoin streaming / graceful leave, leader-guard) ·
+  `backup take`/`restore` (`pg_dump --no-owner` → operator-owned verify **database** round-trip) ·
+  `cert-rotate` (Vault re-issue → `pki_int/issue/patroni-server`, all 8 nodes, per-role reload/restart,
+  leader-last) · `acl list/grant` (`pg_roles` `\du`-equivalent + idempotent `CREATE ROLE`) · `chaos`
+  (process-kill `nexus-patroni` + Patroni rejoin). Three control planes: Patroni + etcd (RBAC) +
+  HAProxy leader-routing VIP.
+- **Operator-credential model** reused from v0.6.1 (ADR-0011): authenticate as the dedicated
+  `nexus-cluster-admin` role (LOGIN CREATEROLE CREATEDB REPLICATION + pg_monitor/pg_read_all_data/
+  pg_write_all_data — **not** superuser); its password lives only in Vault KV
+  (`nexus/oltp/patroni/operator-password`), fetched at runtime via `INexusVaultClient`. Infra
+  (nexus-infra-vmware security creds-seed v2 + Patroni agent-policy v3; nexus-infra-oltp
+  `role-overlay-patroni-operator-user.tf` + the patroni.yml `ctl:` block).
+- **[ADR-0013]** — PatroniAdapter (Patroni + etcd + HAProxy). **`docs/verification/0.G.4-postgres.md`**
+  — full live evidence + the bugs live-verify caught. **`docs/demos/DEMO-52..62`** (11) — System B demos.
+
+### Fixed (surfaced by live-verify against the running cluster)
+
+- **patronictl switchover 403 "client certificate required"** — Patroni REST `verify_client: optional`
+  requires a client cert for state-changing calls; patroni.yml had no `ctl:` section. Added the `ctl:`
+  block (node's own TLS as the client cert) to the bootstrap overlay.
+- **patronictl exits 0 even on a refused switchover** — validate the `"Successfully switched over"`
+  banner in stdout, not the exit code.
+- **`backup restore` permission denied / "must be owner of table"** — the operator's `pg_*_all_data`
+  grants are DATA, not DDL (can't `CREATE SCHEMA` in db postgres). Restore into a fresh
+  operator-owned **database** (CREATEDB); `pg_dump --no-owner --no-privileges`.
+- **`cert-rotate` vault issue 500** — used domain `etcd.nexus.lab`; the PKI role `patroni-server`
+  only allows `patroni.nexus.lab` (all 8 nodes).
+
+### Verified — cold-rebuild PROVEN
+
+- The Patroni infra (operator-user overlay + patroni.yml `ctl:` block) was proven in a **from-zero
+  cold-rebuild** of the `oltp-patroni` cluster (destroy → apply → `smoke-0.G.4.ps1` ALL GREEN), which
+  also baked the correct non-x86 `vmrun_path` into fresh state. The adapter verb matrix re-ran green
+  against the rebuilt cluster. A 5th, latent infra bug surfaced + fixed in passing: the HAProxy
+  `chroot` directive is incompatible with the unit's `User=haproxy` (cold start 500'd "Cannot chroot")
+  — dropped in `nexus-infra-oltp` `role-overlay-haproxy-config.tf` v3.
+
 ## [0.6.2] — 2026-06-05
 
 Phase 0.G.3: the **Percona XtraDB Cluster (Galera) + ProxySQL adapter** — the second password-auth

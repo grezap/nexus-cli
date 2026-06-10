@@ -1,0 +1,44 @@
+{
+  "id": "DEMO-53-patroni-health",
+  "title": "Patroni: cluster healthcheck",
+  "description": "Runs `nexus health postgres`: single-leader, per-node Patroni state, replication lag, a TLS+scram round-trip via the VIP, authed etcd quorum, and HAProxy liveness.",
+  "prerequisites": {
+    "vmsAlive": [
+      "pg-primary",
+      "pg-replica-1",
+      "pg-replica-2",
+      "etcd-1",
+      "etcd-2",
+      "etcd-3",
+      "haproxy-pg-1",
+      "haproxy-pg-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus health postgres",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "health postgres",
+        "single-leader",
+        "vip-writable",
+        "etcd-quorum",
+        "green"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "single-leader=1; each pg patroni-state green; replication-lag <=10 MB; vip-writable green (operator scram via .60 -> leader, recovery=false); etcd-quorum 3/3 authed; haproxy active"
+        }
+      ]
+    }
+  ],
+  "whatProves": "PatroniAdapter.HealthAsync fuses patronictl, a genuine operator scram round-trip via the VIP, and an authenticated etcd endpoint-health into one health verdict."
+}

@@ -1,0 +1,40 @@
+{
+  "id": "DEMO-60-patroni-cert-rotate",
+  "title": "Patroni: rolling cert rotation (8 nodes)",
+  "description": "Runs `nexus cert-rotate postgres`: Vault re-issues a fresh leaf for every node (pki_int/issue/patroni-server) and reloads/restarts per role, leader last.",
+  "prerequisites": {
+    "vmsAlive": [
+      "pg-primary",
+      "pg-replica-1",
+      "pg-replica-2",
+      "etcd-1",
+      "etcd-2",
+      "etcd-3",
+      "haproxy-pg-1",
+      "haproxy-pg-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus cert-rotate postgres --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "cert-rotate"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "all 8 nodes (3 PG + 3 etcd + 2 haproxy) show a new serial; PG reloads (SIGHUP), etcd restarts, haproxy reloads; leader rotates last. Live: ~55s."
+        }
+      ]
+    }
+  ],
+  "whatProves": "PatroniAdapter.RotateCertAsync re-issues from the single PKI role patroni-server (domain patroni.nexus.lab for all nodes -- ADR-0013 bug #4) and applies per-role reload vs restart."
+}

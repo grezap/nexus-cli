@@ -1,0 +1,41 @@
+{
+  "id": "DEMO-59-patroni-backup-restore",
+  "title": "Patroni: restore round-trip",
+  "description": "Runs `nexus backup restore postgres <id>`: restores the dump into a throwaway database the operator owns (CREATEDB) and counts rows.",
+  "prerequisites": {
+    "vmsAlive": [
+      "pg-primary",
+      "pg-replica-1",
+      "pg-replica-2",
+      "etcd-1",
+      "etcd-2",
+      "etcd-3",
+      "haproxy-pg-1",
+      "haproxy-pg-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup restore postgres <backup-id> --yes",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "backup restore",
+        "items restored"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "items restored = 3 (the nexus_smoke rows) into db nexus_restore_verify"
+        }
+      ]
+    }
+  ],
+  "whatProves": "PatroniAdapter.BackupRestoreAsync proves a non-destructive round-trip into an operator-owned database (not a schema-in-postgres, which the data-only operator grants cannot create -- ADR-0013 bug #3)."
+}

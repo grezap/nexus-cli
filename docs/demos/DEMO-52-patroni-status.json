@@ -1,0 +1,45 @@
+{
+  "id": "DEMO-52-patroni-status",
+  "title": "Patroni: live PG + etcd + HAProxy status",
+  "description": "Runs `nexus status postgres`: 3 Patroni PG nodes (1 leader/primary + 2 replica) + 3 etcd (dcs) + 2 HAProxy (router; the VIP holder is router*).",
+  "prerequisites": {
+    "vmsAlive": [
+      "pg-primary",
+      "pg-replica-1",
+      "pg-replica-2",
+      "etcd-1",
+      "etcd-2",
+      "etcd-3",
+      "haproxy-pg-1",
+      "haproxy-pg-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus status postgres",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "postgres",
+        "primary",
+        "replica",
+        "dcs",
+        "router",
+        "leader"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "exactly 1 pg node role=primary (Patroni Leader) + 2 replica (streaming); 3 etcd=dcs; 2 haproxy=router, the keepalived MASTER shown router*; leader=<pg leader>"
+        }
+      ]
+    }
+  ],
+  "whatProves": "PatroniAdapter.GetStatusAsync parses patronictl list --format json for PG roles + probes etcd/haproxy liveness + the VIP holder."
+}
