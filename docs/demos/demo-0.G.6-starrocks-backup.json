@@ -16,14 +16,14 @@
       "observe": [{ "where": "stdout", "what": "the shared NFS backup repository is mounted from nexus-gateway on the FE + all BE" }]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e 'SHOW REPOSITORIES'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql --skip-ssl -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e 'SHOW REPOSITORIES'\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["nexus_backups"],
       "observe": [{ "where": "stdout", "what": "the nexus_backups repository (file://-on-NFS) is registered" }]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e \\\"BACKUP SNAPSHOT nexus.snap_demo TO nexus_backups ON (events)\\\"; sleep 10; mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e 'SHOW BACKUP FROM nexus\\G'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql --skip-ssl -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e \\\"BACKUP SNAPSHOT nexus.snap_demo TO nexus_backups ON (events)\\\"; sleep 10; mysql --skip-ssl -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e 'SHOW BACKUP FROM nexus\\G'\"",
       "waitAfterSeconds": 12,
       "expectedExitCode": 0,
       "expectedOutputContains": ["State"],

@@ -6,6 +6,46 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.5] — 2026-06-12
+
+Phase 0.G.6: the **StarRocks (3 FE BDB-JE quorum + 3 BE) adapter** — the second **analytics-tier**
+adapter, an MPP MySQL-protocol warehouse — live-verified end-to-end against the running `starrocks`
+cluster (3 FE `sr-fe-leader`/`sr-fe-follower-1/2` + 3 BE `sr-be-1/2/3`). Auth model decided from a
+live probe: **password-auth** (root requires a password over the MySQL wire), so it reuses the v0.6.1
+Vault-KV operator-credential model verbatim. AOT **25.03 MB / 30 MB** (+0.19 MB over v0.6.4). 71/71
+tests.
+
+### Added — StarRocks adapter (Phase 0.G.6)
+
+- **`StarRocksAdapter`** implements all of `IClusterAdapter` over SSH + the on-node `mysql` client
+  against an FE's MySQL-protocol query port (`:9030`) — no managed MySqlConnector/JDBC driver
+  (NetArchTest-enforced): `status`/`topology` (`SHOW FRONTENDS`/`SHOW BACKENDS`, dynamic FE leader,
+  VMnet10-backplane IP mapping; Shards=null — tablet-hash sharded) · `health` (fe-quorum + operator-auth
+  + per-BE TabletNum + distributed-query) · `failover-test cluster starrocks` (**FE leader re-election**,
+  RTO ≈1.5 s) · `scale-out add`/`remove` (start/stop `nexus-starrocks-be`, ≥2-live-BE guard) ·
+  `backup take`/`restore` (genuine async `BACKUP/RESTORE SNAPSHOT` to the file:// NFS repo, polled to
+  FINISHED; 60 rows round-tripped) · `cert-rotate` (Vault re-issue → `pki_int/issue/starrocks-server`,
+  all 6 nodes, PKCS#8, BE-first/FE-leader-last) · `acl list/grant` (`SHOW USERS` + `SHOW GRANTS` +
+  `CREATE USER … ON CLUSTER`) · `chaos` (process-kill `nexus-starrocks-be` + rejoin).
+- **Operator-credential model** reused from v0.6.1 (ADR-0011): authenticate as the dedicated
+  `nexus-cluster-admin` StarRocks user (granted `cluster_admin`+`db_admin`+`user_admin`, `DEFAULT ROLE
+  ALL`, distinct from the built-in `root`); password ONLY in Vault KV
+  (`nexus/analytics/starrocks/operator-password`) via the optional `INexusVaultClient`. Connection via
+  `mysql --skip-ssl` (MariaDB-client TLS requirement) with `MYSQL_PWD` (no argv exposure).
+- **Infra:** nexus-infra-vmware security `role-overlay-vault-starrocks-creds-seed.tf` **v2**
+  (+operator-password; no agent-policy change — existing policy wildcard-reads the starrocks KV subtree)
+  + nexus-infra-analytics `role-overlay-starrocks-operator-user.tf` (CREATE USER + GRANT + DEFAULT ROLE
+  ALL on the FE leader via the agent token).
+- **ADR-0015** + `docs/verification/0.G.6-starrocks.md` (live evidence) + 11 System B demos
+  (`docs/demos/demo-0.G.6-starrocks-*.json`, `--skip-ssl` patched) + handbook §2/§3.
+- **No live-verify bugs** — first-try-green on all 12 verb invocations; the `--skip-ssl` +
+  backplane-IP-mapping contract specifics were caught from the infra read, not a live failure.
+
+### Note
+
+- Cold-rebuild proof of the `analytics-starrocks` env (carries the stale x86 `vmrun_path`, same trap
+  as 0.G.5) is **pending operator consent** — see `docs/verification/0.G.6-starrocks.md`.
+
 ## [0.6.4] — 2026-06-11
 
 Phase 0.G.5: the **ClickHouse (3 shards × 2 replicas) + ClickHouse Keeper RAFT adapter** — the first

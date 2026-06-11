@@ -9,20 +9,20 @@
   },
   "steps": [
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e \\\"SHOW GRANTS FOR 'app'@'%'\\\"\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql --skip-ssl -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e \\\"SHOW GRANTS FOR 'app'@'%'\\\"\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["app_rw"],
       "observe": [{ "where": "stdout", "what": "app has DEFAULT ROLE app_rw (SELECT,INSERT on nexus.*) -- least privilege" }]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u app -p$SR_APP_PW -N -e 'SELECT count(*) FROM nexus.events'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql --skip-ssl -h 127.0.0.1 -P 9030 -u app -p$SR_APP_PW -N -e 'SELECT count(*) FROM nexus.events'\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "observe": [{ "where": "stdout", "what": "the app user CAN SELECT (returns a count) -- app_rw grants read" }]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u app -p$SR_APP_PW -e 'DROP TABLE nexus.events' 2>&1 || echo DENIED_AS_EXPECTED\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql --skip-ssl -h 127.0.0.1 -P 9030 -u app -p$SR_APP_PW -e 'DROP TABLE nexus.events' 2>&1 || echo DENIED_AS_EXPECTED\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["DENIED_AS_EXPECTED"],

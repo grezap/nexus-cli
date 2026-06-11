@@ -9,7 +9,7 @@
   },
   "steps": [
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e 'SHOW FRONTENDS\\G'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql --skip-ssl -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e 'SHOW FRONTENDS\\G'\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["LEADER", "FOLLOWER", "Alive: true"],
@@ -18,7 +18,7 @@
       ]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e 'SHOW BACKENDS\\G'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql --skip-ssl -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -e 'SHOW BACKENDS\\G'\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["Alive: true"],

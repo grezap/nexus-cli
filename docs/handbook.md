@@ -171,7 +171,8 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 | percona | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ gen | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ list+grant |
 | postgres | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ gen | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ list+grant |
 | clickhouse | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ gen | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ list+grant |
-| starrocks · sql-* · mongo-sharded · vitess · citus | ⏳ per canon order | | | | | | | | | |
+| starrocks | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ gen | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ list+grant |
+| sql-* · mongo-sharded · vitess · citus | ⏳ per canon order | | | | | | | | | |
 
 ✅ live-verified · ⚠ coded, fix pending · ⏳ pending. Dates = live-verify date.
 
@@ -355,6 +356,28 @@ The diagnostic ladder (run top-down; each rung names the fix):
     nexus-clickhouse-server` on all 6 nodes killed the operator-user's clickhouse-client mid-DDL
     (rc=138). Fixed: operator-user now `depends_on` backup-repo. A warm cluster hides this (the operator
     is created by hand after restarts settle).
+- **StarRocks / starrocks (`v0.6.5`) — MPP warehouse gotchas (analytics tier):**
+  - **One control surface = the FE query port `:9030`** via `mysql --skip-ssl -h 127.0.0.1 -P 9030 -u
+    nexus-cluster-admin` (the **`--skip-ssl` is required** — the deb13 MariaDB 11.8 client otherwise
+    negotiates a TLS the FE query port doesn't enforce → "SSL is required, but the server does not
+    support it"). The operator password rides **`MYSQL_PWD`** (no argv exposure, no warning). Root is
+    password-auth (Vault KV).
+  - **`SHOW FRONTENDS`/`SHOW BACKENDS` report the VMnet10 backplane IP** (.10.x), not the service IP —
+    map to a node via vms.yaml's vmnet10. The **FE leader is dynamic** (`Role=LEADER`; the bootstrap
+    name `sr-fe-leader` may be a follower). `topology` Shards=null — StarRocks shards by tablet hash
+    (`DISTRIBUTED BY HASH BUCKETS` × `replication_num`); the BE TabletNum is the sharding evidence.
+  - **`failover-test` = FE leader re-election** (BDB-JE). Stop `nexus-starrocks-fe` on the LEADER →
+    poll `SHOW FRONTENDS` *from a surviving FE* for a new LEADER; **RTO ≈ 1.5 s** live; restart →
+    rejoins as follower.
+  - **`backup` = genuine async `BACKUP SNAPSHOT … TO nexus_backups ON (events)`** → poll `SHOW BACKUP`
+    until State=FINISHED. `restore` reads the snapshot `backup_timestamp` (`SHOW SNAPSHOT`), runs
+    `RESTORE SNAPSHOT … AS events_restore_verify PROPERTIES("backup_timestamp"=…, "replication_num"=1)`,
+    polls `SHOW RESTORE` → FINISHED, counts. ~19 s take / ~22 s restore. 60 rows live.
+  - **`cert-rotate`** all 6 from `pki_int/issue/starrocks-server` (one domain `starrocks.nexus.lab`),
+    PKCS#8, `systemctl restart`, **BE first / FE leader last**. **`acl`** = `SHOW USERS` + `SHOW GRANTS
+    FOR` (no `mysql.user`); grant = `CREATE USER … + GRANT … ON nexus.*`. **`scale-out`** stop/start
+    `nexus-starrocks-be` (remove refuses dropping below 2 live BE). **`chaos process-kill`** kills the
+    BE + restarts → rejoin. `CanResizeVm` refuses the FE leader.
 
 ### §3.4 AOT size gate
 ≤30 MB (linux-x64 + win-x64) for the 0.G line (ADR-0024). `pwsh -File scripts/cli.ps1 size-check`.

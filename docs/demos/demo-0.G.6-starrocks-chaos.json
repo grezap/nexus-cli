@@ -9,7 +9,7 @@
   },
   "steps": [
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -N -e 'SELECT count(*) FROM nexus.events'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql --skip-ssl -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -N -e 'SELECT count(*) FROM nexus.events'\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "observe": [
@@ -25,7 +25,7 @@
       ]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -N -e 'SELECT count(*) FROM nexus.events'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql --skip-ssl -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -N -e 'SELECT count(*) FROM nexus.events'\"",
       "waitAfterSeconds": 2,
       "expectedExitCode": 0,
       "observe": [

@@ -27,7 +27,7 @@
       "observe": [{ "where": "stdout", "what": ".vmx memsize rewritten to 8192 MB; VM powered back on" }]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.36 'free -m | awk \"/Mem:/ {print \\$2}\"'; ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -N -e 'SHOW BACKENDS' | grep 192.168.10.36\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.36 'free -m | awk \"/Mem:/ {print \\$2}\"'; ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.31 \"mysql --skip-ssl -h 127.0.0.1 -P 9030 -u root -p$SR_ROOT_PW -N -e 'SHOW BACKENDS' | grep 192.168.10.36\"",
       "waitAfterSeconds": 20,
       "expectedExitCode": 0,
       "observe": [{ "where": "stdout", "what": "RAM now ~8192 MB AND sr-be-3 rejoined Alive=true -- vertical resize complete + cluster healthy" }]
