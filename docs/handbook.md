@@ -346,6 +346,15 @@ The diagnostic ladder (run top-down; each rung names the fix):
     drains its queue via Keeper / graceful leave); `remove` refuses a shard's **last live replica**.
     **`chaos process-kill`** kills the server on a replica + restarts → rejoin. `CanResizeVm` refuses
     the current Keeper leader.
+  - **Cold-rebuild gotchas (analytics-clickhouse, surfaced at the v0.6.4 cold-rebuild):** (1) the env
+    carried the **stale x86 `vmrun_path`** in clone_vm state — fixed the variables.tf default to the
+    non-x86 path; power off the VMs cleanly via the correct path BEFORE `terraform destroy` (the
+    clone_vm destroy-provisioner's `Remove-Item` catch-all only cleans dirs if the VMs aren't holding
+    .vmdk locks). (2) **operator-user ↔ backup-repo IaC race:** both overlays only depended on
+    schema-bootstrap, so they ran in parallel — backup-repo's `systemctl restart
+    nexus-clickhouse-server` on all 6 nodes killed the operator-user's clickhouse-client mid-DDL
+    (rc=138). Fixed: operator-user now `depends_on` backup-repo. A warm cluster hides this (the operator
+    is created by hand after restarts settle).
 
 ### §3.4 AOT size gate
 ≤30 MB (linux-x64 + win-x64) for the 0.G line (ADR-0024). `pwsh -File scripts/cli.ps1 size-check`.

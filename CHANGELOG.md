@@ -45,10 +45,15 @@ verbatim (no framework change). AOT **24.84 MB / 30 MB** (+0.66 MB over v0.6.3).
 - **Live-verify bug:** `access_management` is not a per-user `SETTINGS` value in CH 26.5 (Code 115) —
   the `GRANT ALL` privilege group confers access-management for SQL-created users.
 
-### Note
+### Cold-rebuild — ✅ PROVEN (2026-06-11)
 
-- Cold-rebuild proof of the `analytics-clickhouse` env (which carries the stale x86 `vmrun_path`) is
-  **pending operator consent** — see `docs/verification/0.G.5-clickhouse.md`.
+- From-zero cold-rebuild of the `analytics-clickhouse` env: corrected the stale x86 `vmrun_path`
+  default → non-x86 (baked into fresh state), destroy (50 res) → apply → `smoke-0.G.5.ps1` ALL GREEN
+  → the full verb matrix re-run GREEN against the rebuilt cluster. The operator-user overlay ran
+  in-graph (EXIT GATE GREEN). **Cold-rebuild-surfaced bug:** the operator-user + backup-repo overlays
+  raced (both only depended on schema-bootstrap; backup-repo restarts all 6 servers → killed the
+  operator-user's clickhouse-client, rc=138) — fixed by ordering operator-user after backup-repo
+  (operator_v→2). See `docs/verification/0.G.5-clickhouse.md`.
 
 ## [0.6.3] — 2026-06-11
 
