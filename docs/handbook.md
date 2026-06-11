@@ -170,7 +170,8 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 | mongo | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ gen | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ list+grant |
 | percona | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ gen | ✅ 06-05 | ✅ 06-05 | ✅ 06-05 | ✅ list+grant |
 | postgres | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ gen | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ list+grant |
-| clickhouse · starrocks · sql-* · mongo-sharded · vitess · citus | ⏳ per canon order | | | | | | | | | |
+| clickhouse | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ gen | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ list+grant |
+| starrocks · sql-* · mongo-sharded · vitess · citus | ⏳ per canon order | | | | | | | | | |
 
 ✅ live-verified · ⚠ coded, fix pending · ⏳ pending. Dates = live-verify date.
 
@@ -316,6 +317,35 @@ The diagnostic ladder (run top-down; each rung names the fix):
     node 500s "Cannot chroot"). Fixed by dropping `chroot` from the rendered cfg
     (`nexus-infra-oltp` `role-overlay-haproxy-config.tf` v3); `User=haproxy` + `RuntimeDirectory=` are
     the privilege drop + tmpfs `/run` dir. Surfaced by the v0.6.3 cold-rebuild.
+- **ClickHouse / clickhouse (`v0.6.4`) — sharded + Keeper gotchas (analytics tier):**
+  - **Two control planes + two leaders that aren't the same thing:** the SQL/data plane
+    (`clickhouse-client --secure --accept-invalid-certificate --port 9440` — the `--accept-invalid-certificate`
+    is required; the lab CA's IP-SAN chain fails strict validation) and the **Keeper** coordination
+    plane (`echo mntr | nc 127.0.0.1 9181` → `zk_server_state`). The data plane is **leaderless**
+    (3 shards × 2 replicas, every replica writable); the cluster's only leader is the **Keeper RAFT
+    leader**. `status`/`topology` render that as `keeper-leader`; the CH `remote_servers` cluster name
+    is **`nexus_analytics`** (≠ the adapter ClusterId `clickhouse`).
+  - **`acl` / operator creation — `access_management` is NOT a `SETTINGS` value** (CH 26.5 →
+    `Code 115 UNKNOWN_SETTING`). A SQL-created user gets access-management from the **`GRANT ALL`
+    privilege group**, so the operator `nexus-cluster-admin` is `CREATE USER … ON CLUSTER` (no SETTINGS)
+    + `GRANT ALL ON *.* WITH GRANT OPTION`. Hyphenated identifiers are backtick-quoted.
+  - **`failover-test` = Keeper RAFT leader re-election** (not a data-plane move — there's no single
+    write endpoint). Stop `nexus-clickhouse-keeper` on the leader (3-of-3 → 2-of-3, still quorate),
+    poll the survivors' `mntr` for the new leader; **RTO ≈ 1.1s** live (fastest of the data tier);
+    restart → rejoins as follower.
+  - **`backup`:** native `BACKUP TABLE nexus.events_local TO Disk('analytics_backups', '<id>.zip')`
+    (the shared NFS repo, x-tier ADR-0032) → `RESTORE … AS nexus.events_restore_verify` → count. The
+    `{uuid}` zk path on `events_local` means `RESTORE AS` doesn't collide (no `REPLICA_ALREADY_EXISTS`).
+    items restored = 211 live (shard1's local slice of the 600-row Distributed table).
+  - **`cert-rotate`:** all 9 nodes from the single PKI role `clickhouse-server`, one allowed domain
+    **`clickhouse.nexus.lab`** (no domain-mismatch trap — unlike Patroni's etcd). The key must be
+    **PKCS#8** (Vault issues PKCS#1 → `openssl pkcs8 -topk8`); `ca.crt` = issuing intermediate **+** the
+    Vault-Agent root anchor (OpenSSL needs the self-signed root). `systemctl restart`, **data nodes
+    first / Keeper leader last** (its restart re-elects).
+  - **`scale-out`** start/stop `nexus-clickhouse-server` on a data node (ReplicatedMergeTree rejoins +
+    drains its queue via Keeper / graceful leave); `remove` refuses a shard's **last live replica**.
+    **`chaos process-kill`** kills the server on a replica + restarts → rejoin. `CanResizeVm` refuses
+    the current Keeper leader.
 
 ### §3.4 AOT size gate
 ≤30 MB (linux-x64 + win-x64) for the 0.G line (ADR-0024). `pwsh -File scripts/cli.ps1 size-check`.

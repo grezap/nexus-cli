@@ -9,7 +9,7 @@
   },
   "steps": [
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT cluster, shard_num, replica_num, host_name FROM system.clusters WHERE cluster = ''nexus_analytics'' ORDER BY shard_num, replica_num FORMAT PrettyCompact'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'SELECT cluster, shard_num, replica_num, host_name FROM system.clusters WHERE cluster = ''nexus_analytics'' ORDER BY shard_num, replica_num FORMAT PrettyCompact'\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["nexus_analytics", "ch-shard1-rep1", "ch-shard3-rep2"],
@@ -18,7 +18,7 @@
       ]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT database, table, is_readonly, is_session_expired, future_parts, queue_size FROM system.replicas FORMAT PrettyCompact'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'SELECT database, table, is_readonly, is_session_expired, future_parts, queue_size FROM system.replicas FORMAT PrettyCompact'\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["nexus", "events_local"],

@@ -9,7 +9,7 @@
   },
   "steps": [
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT database, table, absolute_delay, queue_size, inserts_in_queue, merges_in_queue FROM system.replicas FORMAT PrettyCompact'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'SELECT database, table, absolute_delay, queue_size, inserts_in_queue, merges_in_queue FROM system.replicas FORMAT PrettyCompact'\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["events_local"],
@@ -18,7 +18,7 @@
       ]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT name, formatReadableSize(free_space) AS free, formatReadableSize(total_space) AS total FROM system.disks FORMAT PrettyCompact'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'SELECT name, formatReadableSize(free_space) AS free, formatReadableSize(total_space) AS total FROM system.disks FORMAT PrettyCompact'\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["default"],

@@ -65,7 +65,7 @@ public static class ClusterBootstrapper
             new MongoAdapter(catalog, ssh, sshUser, sshKey, vault),
             new PerconaAdapter(catalog, ssh, sshUser, sshKey, vault),
             new PatroniAdapter(catalog, ssh, sshUser, sshKey, vault),
-            // 0.G.5+: new ClickHouseAdapter(catalog, ssh, sshUser, sshKey),
+            new ClickHouseAdapter(catalog, ssh, sshUser, sshKey, vault),
             // 0.G.6+: new StarRocksAdapter(catalog, ssh, sshUser, sshKey),
             // 0.G.7+: new SqlFciAdapter(catalog, ssh, sshUser, sshKey, vault),
             // 0.G.7+: new SqlAgAdapter(catalog, ssh, sshUser, sshKey, vault),

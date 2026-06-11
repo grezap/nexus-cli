@@ -9,7 +9,7 @@
   },
   "steps": [
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT name FROM system.users WHERE name IN (''admin'',''app'') ORDER BY name; SELECT name FROM system.roles ORDER BY name'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'SELECT name FROM system.users WHERE name IN (''admin'',''app'') ORDER BY name; SELECT name FROM system.roles ORDER BY name'\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["admin", "app", "app_ro", "app_rw"],
@@ -18,7 +18,7 @@
       ]
     },
     {
-      "command": "APP_PW=$(ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"sudo VAULT_ADDR=$(ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 'grep -oP \"address\\s*=\\s*\\\"\\K[^\\\"]+\" /etc/vault-agent/00-base.hcl|head -1') VAULT_CACERT=/etc/vault-agent/ca-bundle.crt VAULT_TOKEN=\\$(sudo cat /var/run/nexus-vault-agent/token) /usr/local/bin/vault kv get -field=password nexus/analytics/clickhouse/app-password\"); ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --user app --password '$APP_PW' --query 'SELECT count() FROM nexus.events'\"",
+      "command": "APP_PW=$(ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"sudo VAULT_ADDR=$(ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 'grep -oP \"address\\s*=\\s*\\\"\\K[^\\\"]+\" /etc/vault-agent/00-base.hcl|head -1') VAULT_CACERT=/etc/vault-agent/ca-bundle.crt VAULT_TOKEN=\\$(sudo cat /var/run/nexus-vault-agent/token) /usr/local/bin/vault kv get -field=password nexus/analytics/clickhouse/app-password\"); ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --user app --password '$APP_PW' --query 'SELECT count() FROM nexus.events'\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["600"],
@@ -27,7 +27,7 @@
       ]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --user app --password '$APP_PW' --query 'DROP TABLE nexus.events_local ON CLUSTER nexus_analytics' 2>&1 || echo DENIED_AS_EXPECTED\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --user app --password '$APP_PW' --query 'DROP TABLE nexus.events_local ON CLUSTER nexus_analytics' 2>&1 || echo DENIED_AS_EXPECTED\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["DENIED_AS_EXPECTED"],

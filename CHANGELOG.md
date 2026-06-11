@@ -6,6 +6,50 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.4] — 2026-06-11
+
+Phase 0.G.5: the **ClickHouse (3 shards × 2 replicas) + ClickHouse Keeper RAFT adapter** — the first
+**analytics-tier** and first **genuinely sharded** adapter — live-verified end-to-end against the
+running `clickhouse` cluster (6 data nodes `ch-shard{1,2,3}-rep{1,2}` + 3-node ClickHouse Keeper
+`ch-keeper-1/2/3`). Auth model decided from a live probe: **password-auth** (sha256_password over the
+mTLS wire; `default` loopback-only), so it reuses the v0.6.1 Vault-KV operator-credential model
+verbatim (no framework change). AOT **24.84 MB / 30 MB** (+0.66 MB over v0.6.3). 71/71 tests.
+
+### Added — ClickHouse adapter (Phase 0.G.5)
+
+- **`ClickHouseAdapter`** implements all of `IClusterAdapter` over SSH + on-node `clickhouse-client`
+  (native TLS `:9440`) + the Keeper four-letter-word interface (`echo mntr | nc 127.0.0.1 9181`) — no
+  managed `ClickHouse.Client` driver (NetArchTest-enforced): `status`/`topology` (per-node liveness +
+  shard/replica from the hostname + Keeper leader; **`topology` populates `Shards` — 3 shards × 2
+  replicas** — the first sharded adapter to do so) · `health` (keeper-quorum + per-node server-active +
+  an **operator-auth** round-trip + **distributed-membership** `system.clusters`=6 + **distributed-query**
+  `nexus.events`=600 + per-node replica-health) · `failover-test cluster clickhouse` (**Keeper RAFT
+  leader re-election**, RTO ≈ 1.1s — the fastest of the data tier) · `scale-out add`/`remove`
+  (start/stop `nexus-clickhouse-server`, ReplicatedMergeTree rejoin via Keeper / graceful leave,
+  last-replica guard) · `backup take`/`restore` (native `BACKUP/RESTORE TABLE … TO/FROM
+  Disk('analytics_backups', …)` round-trip on the shared NFS repo) · `cert-rotate` (Vault re-issue →
+  `pki_int/issue/clickhouse-server`, all 9 nodes, PKCS#8 key + intermediate+root ca, rolling restart,
+  data-first/Keeper-leader-last) · `acl list/grant` (`system.users`/`system.grants` + idempotent
+  `CREATE USER … ON CLUSTER`) · `chaos` (process-kill `nexus-clickhouse-server` + ReplicatedMergeTree
+  rejoin). Two control planes: the `clickhouse-client` data plane + the Keeper coordination plane.
+- **Operator-credential model** reused from v0.6.1 (ADR-0011): authenticate as the dedicated
+  `nexus-cluster-admin` ClickHouse user (`sha256_password`, `GRANT ALL WITH GRANT OPTION`, distinct
+  from the engine's built-in `admin`); password ONLY in Vault KV
+  (`nexus/analytics/clickhouse/operator-password`) via the optional `INexusVaultClient`.
+- **Infra:** nexus-infra-vmware security `role-overlay-vault-clickhouse-creds-seed.tf` **v2**
+  (+operator-password, sticky-seeded; no agent-policy change — the existing policy already wildcard-reads
+  the clickhouse KV subtree) + nexus-infra-analytics `role-overlay-clickhouse-operator-user.tf`
+  (idempotent `CREATE USER … ON CLUSTER` reading the password on-node via the agent token).
+- **ADR-0014** + `docs/verification/0.G.5-clickhouse.md` (live evidence) + 11 System B demos
+  (`docs/demos/demo-0.G.5-clickhouse-*.json`) + handbook §2/§3.
+- **Live-verify bug:** `access_management` is not a per-user `SETTINGS` value in CH 26.5 (Code 115) —
+  the `GRANT ALL` privilege group confers access-management for SQL-created users.
+
+### Note
+
+- Cold-rebuild proof of the `analytics-clickhouse` env (which carries the stale x86 `vmrun_path`) is
+  **pending operator consent** — see `docs/verification/0.G.5-clickhouse.md`.
+
 ## [0.6.3] — 2026-06-11
 
 Phase 0.G.4: the **PostgreSQL Patroni HA + etcd DCS + HAProxy VIP adapter** — the third

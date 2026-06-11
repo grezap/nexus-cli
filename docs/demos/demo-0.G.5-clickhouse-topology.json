@@ -9,7 +9,7 @@
   },
   "steps": [
     {
-      "command": "for ip in 192.168.70.44 192.168.70.46 192.168.70.48; do echo \"shard at $ip:\"; ssh -i $NEXUS_SSH_KEY nexusadmin@$ip \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT count() FROM nexus.events_local'\"; done",
+      "command": "for ip in 192.168.70.44 192.168.70.46 192.168.70.48; do echo \"shard at $ip:\"; ssh -i $NEXUS_SSH_KEY nexusadmin@$ip \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'SELECT count() FROM nexus.events_local'\"; done",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "observe": [
@@ -17,7 +17,7 @@
       ]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT hostName() h, count() FROM remote(''192.168.10.44,192.168.10.45,192.168.10.46,192.168.10.47,192.168.10.48,192.168.10.49'', system.one) GROUP BY h FORMAT PrettyCompact' 2>/dev/null || clickhouse-client --secure --host localhost --port 9440 --query 'SELECT shard_num, replica_num, host_name FROM system.clusters WHERE cluster=''nexus_analytics'' FORMAT PrettyCompact'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'SELECT hostName() h, count() FROM remote(''192.168.10.44,192.168.10.45,192.168.10.46,192.168.10.47,192.168.10.48,192.168.10.49'', system.one) GROUP BY h FORMAT PrettyCompact' 2>/dev/null || clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'SELECT shard_num, replica_num, host_name FROM system.clusters WHERE cluster=''nexus_analytics'' FORMAT PrettyCompact'\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["ch-shard"],

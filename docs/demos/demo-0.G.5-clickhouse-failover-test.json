@@ -35,7 +35,7 @@
       ]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'INSERT INTO nexus.events SELECT number+2000000, now(), number%3, ''failover'' FROM numbers(20)'; clickhouse-client --secure --host localhost --port 9440 --query 'SELECT count() FROM nexus.events WHERE payload=''failover'''\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'INSERT INTO nexus.events SELECT number+2000000, now(), number%3, ''failover'' FROM numbers(20)'; clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'SELECT count() FROM nexus.events WHERE payload=''failover'''\"",
       "waitAfterSeconds": 3,
       "expectedExitCode": 0,
       "expectedOutputContains": ["20"],

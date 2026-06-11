@@ -9,7 +9,7 @@
   },
   "steps": [
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT count() FROM nexus.events'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'SELECT count() FROM nexus.events'\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "expectedOutputContains": ["600"],
@@ -26,7 +26,7 @@
       ]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT count() FROM nexus.events SETTINGS skip_unavailable_shards=0'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'SELECT count() FROM nexus.events SETTINGS skip_unavailable_shards=0'\"",
       "waitAfterSeconds": 2,
       "expectedExitCode": 0,
       "expectedOutputContains": ["600"],
@@ -39,7 +39,7 @@
       "waitAfterSeconds": 10,
       "expectedExitCode": 0,
       "observe": [
-        { "where": "ssh nexusadmin@192.168.70.46 \"clickhouse-client --secure --host localhost --port 9440 --query 'SELECT is_readonly, absolute_delay FROM system.replicas'\"", "what": "recovered replica rejoins (is_readonly=0) and catches up via Keeper (absolute_delay returns to ~0)" }
+        { "where": "ssh nexusadmin@192.168.70.46 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'SELECT is_readonly, absolute_delay FROM system.replicas'\"", "what": "recovered replica rejoins (is_readonly=0) and catches up via Keeper (absolute_delay returns to ~0)" }
       ]
     }
   ],

@@ -18,7 +18,7 @@
       ]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --host localhost --port 9440 --query \\\"BACKUP TABLE nexus.events_local TO Disk('analytics_backups', 'demo-backup.zip')\\\"\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.44 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query \\\"BACKUP TABLE nexus.events_local TO Disk('analytics_backups', 'demo-backup.zip')\\\"\"",
       "waitAfterSeconds": 3,
       "expectedExitCode": 0,
       "expectedOutputContains": ["BACKUP_CREATED"],
@@ -27,7 +27,7 @@
       ]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.46 \"clickhouse-client --secure --host localhost --port 9440 --query \\\"RESTORE TABLE nexus.events_local AS nexus.events_demo_restore FROM Disk('analytics_backups', 'demo-backup.zip')\\\"; clickhouse-client --secure --host localhost --port 9440 --query 'SELECT count() FROM nexus.events_demo_restore'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.46 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query \\\"RESTORE TABLE nexus.events_local AS nexus.events_demo_restore FROM Disk('analytics_backups', 'demo-backup.zip')\\\"; clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'SELECT count() FROM nexus.events_demo_restore'\"",
       "waitAfterSeconds": 3,
       "expectedExitCode": 0,
       "expectedOutputContains": ["RESTORED"],
@@ -36,7 +36,7 @@
       ]
     },
     {
-      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.46 \"clickhouse-client --secure --host localhost --port 9440 --query 'DROP TABLE IF EXISTS nexus.events_demo_restore SYNC'\"",
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.46 \"clickhouse-client --secure --accept-invalid-certificate --host localhost --port 9440 --query 'DROP TABLE IF EXISTS nexus.events_demo_restore SYNC'\"",
       "waitAfterSeconds": 1,
       "expectedExitCode": 0,
       "observe": [
