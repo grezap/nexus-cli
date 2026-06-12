@@ -58,5 +58,60 @@ public sealed class VaultClient : INexusVaultClient, IDisposable
         }
     }
 
+    public async Task<Result<PkiIssueData>> IssuePkiCertAsync(
+        string pkiMount,
+        string role,
+        string commonName,
+        string altNames,
+        string ipSans,
+        string ttl,
+        CancellationToken cancellationToken)
+    {
+        var url = $"{_context.Address}/v1/{pkiMount.Trim('/')}/issue/{role.TrimStart('/')}";
+        // Hand-built JSON (4 string fields; values are hostnames/IPs/duration --
+        // no embedded quotes) avoids registering a request DTO for the source-gen
+        // context.
+        var json = "{"
+            + $"\"common_name\":\"{commonName}\","
+            + $"\"alt_names\":\"{altNames}\","
+            + $"\"ip_sans\":\"{ipSans}\","
+            + $"\"ttl\":\"{ttl}\""
+            + "}";
+        try
+        {
+            using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var resp = await _http.PostAsync(url, content, cancellationToken).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var detail = await resp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                return Result.Fail<PkiIssueData>(
+                    $"Vault {(int)resp.StatusCode} issuing {pkiMount}/issue/{role}: {resp.ReasonPhrase} {Trunc(detail, 200)}");
+            }
+
+            var body = await resp.Content.ReadFromJsonAsync(
+                NexusJsonContext.Default.VaultPkiIssueResponse,
+                cancellationToken).ConfigureAwait(false);
+
+            if (body?.Data is null || string.IsNullOrEmpty(body.Data.Certificate))
+                return Result.Fail<PkiIssueData>($"Vault PKI issue {pkiMount}/issue/{role} returned no certificate.");
+
+            var d = body.Data;
+            return Result.Ok(new PkiIssueData(
+                d.Certificate, d.PrivateKey, d.IssuingCa,
+                d.CaChain ?? new List<string>(), d.SerialNumber));
+        }
+        catch (HttpRequestException ex)
+        {
+            return Result.Fail<PkiIssueData>($"Vault transport error: {ex.Message}");
+        }
+        catch (TaskCanceledException)
+        {
+            return Result.Fail<PkiIssueData>($"Vault timeout issuing {pkiMount}/issue/{role}.");
+        }
+    }
+
+    private static string Trunc(string s, int n) =>
+        string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= n ? s : s[..n]);
+
     public void Dispose() => _http.Dispose();
 }

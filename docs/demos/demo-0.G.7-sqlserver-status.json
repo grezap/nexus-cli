@@ -1,0 +1,37 @@
+{
+  "id": "demo-0.G.7-sqlserver-status",
+  "title": "SQL FCI status: active/passive WSFC nodes",
+  "description": "The nexus-cli status verb for the SQL Server FCI: which WSFC node owns the SQL Server cluster role, and does the FCI virtual server answer as the operator.",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus status sqlserver --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "fci-active",
+        "sql-fci-1"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "one node fci-active/online, the other fci-passive/standby; leader = the active owner of the SQL Server (MSSQLSERVER) cluster group"
+        }
+      ]
+    }
+  ],
+  "whatProves": "the FCI presents a single active SQL instance over a 2-node WSFC; status reads the cluster group owner + an operator round-trip to the FCI virtual server sqlfci."
+}

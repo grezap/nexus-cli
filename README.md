@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.G.6%20v0.6.5%20%E2%9C%85%20StarRocks%20adapter%20live-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.G.7%20v0.6.6%20%E2%9C%85%20SQL%20Server%20FCI%2BAG%20adapters%20live-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,22 +12,25 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.6.5):** Phase 0.G **data-tier adapter expansion** underway — **6 of 11
-> adapters live-verified**. **Redis** (v0.6.0, mTLS-only) + **Mongo** (v0.6.1) + **Percona XtraDB
-> Cluster + ProxySQL** (v0.6.2, Galera) + **PostgreSQL Patroni HA** (v0.6.3, streaming replication +
-> etcd + HAProxy VIP) + **ClickHouse** (v0.6.4, sharded — 3 shards × 2 replicas over a ClickHouse
-> Keeper RAFT quorum) + **StarRocks** (v0.6.5, the second analytics-tier engine — an MPP MySQL-protocol
-> warehouse: 3 FE BDB-JE metadata quorum + 3 BE tablet nodes) ship with all data-tier verbs green
-> against their running clusters: StarRocks — status · health (fe-quorum + operator-auth + per-BE
-> tablets + distributed-query) · topology · failover (**FE leader re-election**, RTO≈1.5s) · scale-out
-> add/remove · backup take/restore (genuine async `BACKUP/RESTORE SNAPSHOT` to the file:// NFS repo) ·
-> cert-rotate (6 nodes, PKCS#8) · acl list/grant · chaos. The **Vault-KV operator-credential model**
-> (the `nexus-cluster-admin` password lives only in Vault KV, fetched at runtime via the optional
-> `INexusVaultClient`) carries from Mongo to Percona to Patroni to ClickHouse to StarRocks unchanged —
-> the standard for every password-auth engine. AOT **25.03 MB / 30 MB** gate. See
+> **Current state (v0.6.6):** Phase 0.G **data-tier adapter expansion** underway — **8 of 13
+> adapters live-verified** (the first **Windows** cluster shipped TWO adapters over one vms.yaml
+> cluster). **Redis** (v0.6.0, mTLS-only) + **Mongo** (v0.6.1) + **Percona XtraDB Cluster + ProxySQL**
+> (v0.6.2, Galera) + **PostgreSQL Patroni HA** (v0.6.3) + **ClickHouse** (v0.6.4, sharded + Keeper
+> RAFT) + **StarRocks** (v0.6.5, MPP warehouse) + **SQL Server FCI** (v0.6.6, `sqlserver` — 2-node WSFC
+> + shared iSCSI) + **SQL Server Always On AG** (v0.6.6, `sqlserver-ag` — FCI primary + 2 async replicas
+> + Listener) ship with all verbs green against their running clusters. SQL Server is the **first
+> Windows cluster** — Windows-SSH (`powershell -EncodedCommand`) + on-node `sqlcmd`, **no managed
+> `Microsoft.Data.SqlClient`** (NetArchTest). Two access planes: WSFC/cluster cmdlets over plain SSH;
+> FCI T-SQL as the `nexus-cluster-admin` SQL login (the **Vault-KV operator-credential model**, unchanged
+> from Mongo→…→StarRocks). FCI verbs — status · health (quorum + shared disk + iSCSI + operator-auth) ·
+> topology · failover (**`Move-ClusterGroup`**, RTO≈4.5s) · backup (COPY_ONLY round-trip) · cert-rotate
+> (one shared cert + single cluster checkpoint) · acl · chaos. AG verbs — status · health (**Listener
+> strict-TLS** → `PRIMARY=SQLFCI`) · topology · failover (**`ALTER AVAILABILITY GROUP FAILOVER`**,
+> RTO≈8.2s) · scale-out remove/add (**manual seeding**) · backup · cert-rotate (per-node) · acl · chaos.
+> AOT **25.95 MB / 30 MB** gate; 71/71 tests; smoke-0.G.7 56/56. See
 > [`docs/handbook.md`](./docs/handbook.md) for the analytical verb reference + troubleshooting
-> runbook, and [`docs/verification/0.G.6-starrocks.md`](./docs/verification/0.G.6-starrocks.md)
-> for the live evidence. The 5 remaining cluster adapters land per the canon order (ADR-0010).
+> runbook, and [`docs/verification/0.G.7-sqlserver.md`](./docs/verification/0.G.7-sqlserver.md)
+> for the live evidence. The remaining cluster adapters land per the canon order (ADR-0010).
 >
 > **Phase 0.F (v0.5.0) remains closed: all 5 of 5 master-plan verbs ship.** `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), `failover-test {consul-leader, nomad-leader, swarm-manager}` (v0.3.x), `demo {list, run, record}` (v0.4.0), and **`kafka failover {east-to-west, west-to-east}`** (v0.5.0; ADR-0008 — region-loss DR via vmrun-suspend × 3 source brokers + produce/consume round-trip on the target + vmrun-resume). Verified live: consul 1.55s · nomad 2.716s · swarm-manager 21.59s · kafka east→west 13.20s · kafka west→east 13.57s — all RTOs auto-recovered, all under their master-plan budgets.
 
@@ -60,8 +63,10 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 | `nexus kafka failover west-to-east` | ✅ v0.5.0 | Symmetric: vmrun-suspend the 3 kafka-west brokers; live RTO **13.57 s**. The more demo-worthy direction (ecosystem stays up) |
 
 **Data-tier cluster verbs (v0.6.x — ADR-0009 `IClusterAdapter` SPI)** — one adapter per cluster,
-SSH-shell-out to the on-node CLI, no managed DB drivers. **Redis + Mongo + Percona are live
-(v0.6.0 / v0.6.1 / v0.6.2)**; the 7 remaining adapters land per the canon order.
+SSH-shell-out to the on-node CLI, no managed DB drivers. **Redis + Mongo + Percona + Patroni +
+ClickHouse + StarRocks + SQL Server FCI + SQL Server AG are live (v0.6.0 → v0.6.6)** — the SQL Server
+pair (v0.6.6) is the first **Windows** cluster (Windows-SSH + `sqlcmd`); the remaining adapters land per
+the canon order.
 
 | Verb | Status | What it does |
 |---|---|---|
@@ -77,7 +82,7 @@ SSH-shell-out to the on-node CLI, no managed DB drivers. **Redis + Mongo + Perco
 | `nexus chaos <cluster> <scenario>` | ✅ redis | time-boxed, self-reverting fault injection |
 
 Clusters: `redis` · `mongo` · `percona` · `postgres` · `clickhouse` · `starrocks` ·
-`sql-fci`/`sql-ag` · `mongo-sharded` · `vitess` · `citus` · `kafka`. See
+`sqlserver` (FCI) · `sqlserver-ag` (AG) · `mongo-sharded` · `vitess` · `citus` · `kafka`. See
 [`docs/handbook.md`](./docs/handbook.md) §1 for the analytical per-verb reference.
 
 Run `nexus --help` for the live verb list against the binary you have installed.
@@ -194,7 +199,7 @@ Nexus.Cli.Adapters may depend on Nexus.Cli.Core.
 Nothing depends on Nexus.Cli.
 ```
 
-ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Fifteen ADRs cover framework choice (0001), AOT cadence (0002), layout (0003), auth model (0004), Dapper-on-AOT (0005), hand-rolled vms.yaml reader (0006), SSH.NET over ssh.exe (0007), the v0.5 kafka-failover demo-grade-via-SSH design (0008), the `IClusterAdapter` SPI + extended demo spec (0009), the cross-adapter patterns + Redis exemplar (0010), and the per-adapter records: Mongo + the Vault-KV operator-credential model (0011), Percona Galera/ProxySQL (0012), Patroni PG HA (0013), ClickHouse sharded + Keeper (0014), and StarRocks FE quorum + BE (0015).
+ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Seventeen ADRs cover framework choice (0001), AOT cadence (0002), layout (0003), auth model (0004), Dapper-on-AOT (0005), hand-rolled vms.yaml reader (0006), SSH.NET over ssh.exe (0007), the v0.5 kafka-failover demo-grade-via-SSH design (0008), the `IClusterAdapter` SPI + extended demo spec (0009), the cross-adapter patterns + Redis exemplar (0010), and the per-adapter records: Mongo + the Vault-KV operator-credential model (0011), Percona Galera/ProxySQL (0012), Patroni PG HA (0013), ClickHouse sharded + Keeper (0014), StarRocks FE quorum + BE (0015), SQL Server FCI / WSFC over Windows-SSH (0016), and SQL Server Always On AG + Listener (0017).
 
 ## Roadmap
 
@@ -217,6 +222,7 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Fifteen ADRs cover framew
 | **v0.6.3** | Phase 0.G.4 — the **PostgreSQL Patroni HA adapter** (etcd DCS + HAProxy leader-routing VIP; `patronictl switchover` RTO≈4.6s); all data-tier verbs live-verified; **24.18 MB** |
 | **v0.6.4** | Phase 0.G.5 — the **ClickHouse adapter** (first sharded + analytics-tier; 3 shards × 2 replicas + ClickHouse Keeper RAFT; Keeper-leader failover RTO≈1.1s; `topology` populates Shards); all data-tier verbs live-verified; **24.84 MB** |
 | **v0.6.5** | Phase 0.G.6 — the **StarRocks adapter** (MPP MySQL-protocol warehouse; 3 FE BDB-JE quorum + 3 BE; FE-leader failover RTO≈1.5s; genuine async `BACKUP/RESTORE SNAPSHOT`); all data-tier verbs live-verified; **25.03 MB** |
+| **v0.6.6** | Phase 0.G.7 — the **SQL Server FCI + Always On AG adapters** (the first **Windows** cluster; two adapters over one vms.yaml cluster — `sqlserver` WSFC/FCI + `sqlserver-ag` AG/Listener; Windows-SSH + `sqlcmd`, no managed driver; FCI `Move-ClusterGroup` RTO≈4.5s + AG `ALTER … FAILOVER` RTO≈8.2s; Listener strict-TLS; manual-seed AG scale-out); all verbs live-verified; **25.95 MB** |
 | v0.6.6–v0.8.0 | The 5 remaining adapters in canon order (SQL-FCI/AG → mongo-sharded → Vitess → Citus) |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 

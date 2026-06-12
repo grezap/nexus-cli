@@ -1,0 +1,38 @@
+{
+  "id": "demo-0.G.7-sqlserver-ag-topology",
+  "title": "SQL AG topology: replicas + Listener",
+  "description": "The nexus-cli topology verb for the Always On AG: the 3 replicas + the Listener as the single client-facing shard.",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2",
+      "sql-ag-rep-1",
+      "sql-ag-rep-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus topology sqlserver-ag --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "sql-ag-listener"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "3 replicas (primary + 2 secondary) + the sql-ag-listener shard at .17:1433 mapping the listener to the current primary"
+        }
+      ]
+    }
+  ],
+  "whatProves": "the AG front door is the Listener at .17 -- clients connect there and WSFC migrates the IP across failover; topology maps it to the live primary."
+}

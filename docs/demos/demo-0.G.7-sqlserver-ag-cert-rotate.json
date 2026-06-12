@@ -1,0 +1,38 @@
+{
+  "id": "demo-0.G.7-sqlserver-ag-cert-rotate",
+  "title": "SQL AG cert-rotate: per-node replica certs",
+  "description": "The nexus-cli cert-rotate verb for the Always On AG: per-node rotate of the 2 standalone replicas (each owns its own certificate); the FCI shared cert is rotated by cert-rotate sqlserver.",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2",
+      "sql-ag-rep-1",
+      "sql-ag-rep-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus cert-rotate sqlserver-ag --yes --json",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "newSerial"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "sql-ag-rep-1 + sql-ag-rep-2 each get a DISTINCT new serial (standalone per-node certs); MSSQLSERVER restarts; 0 errors"
+        }
+      ]
+    }
+  ],
+  "whatProves": "the standalone AG replicas rotate independently (distinct certs) -- unlike the FCI shared cert -- because each owns its own SuperSocketNetLib checkpoint."
+}

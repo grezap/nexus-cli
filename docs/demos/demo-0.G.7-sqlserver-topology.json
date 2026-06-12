@@ -1,0 +1,37 @@
+{
+  "id": "demo-0.G.7-sqlserver-topology",
+  "title": "SQL FCI topology: the 4-node WSFC + the shared disk",
+  "description": "The nexus-cli topology verb for the SQL Server FCI: the full 4-node WSFC (2 FCI + 2 AG replicas as voters) + the FCI shared disk as the single shard.",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus topology sqlserver --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "fci-shared-disk",
+        "wsfc-member"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "2 fci-active/passive nodes + 2 wsfc-member (the AG replicas vote in quorum) + the fci-shared-disk shard on S:\\\\ owned by the active node"
+        }
+      ]
+    }
+  ],
+  "whatProves": "the FCI is a single-instance shared-storage cluster: one disk (the iSCSI LUN) owned by the active node, inside a 4-node NodeMajority WSFC."
+}

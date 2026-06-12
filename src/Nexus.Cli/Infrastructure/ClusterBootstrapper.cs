@@ -67,8 +67,8 @@ public static class ClusterBootstrapper
             new PatroniAdapter(catalog, ssh, sshUser, sshKey, vault),
             new ClickHouseAdapter(catalog, ssh, sshUser, sshKey, vault),
             new StarRocksAdapter(catalog, ssh, sshUser, sshKey, vault),
-            // 0.G.7+: new SqlFciAdapter(catalog, ssh, sshUser, sshKey, vault),
-            // 0.G.7+: new SqlAgAdapter(catalog, ssh, sshUser, sshKey, vault),
+            new SqlFciAdapter(catalog, ssh, sshUser, sshKey, vault),     // 0.G.7 (ClusterId sqlserver)
+            new SqlAgAdapter(catalog, ssh, sshUser, sshKey, vault),      // 0.G.7 (ClusterId sqlserver-ag)
         };
         return new ClusterRegistry(adapters);
     }

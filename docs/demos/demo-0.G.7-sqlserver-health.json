@@ -1,0 +1,38 @@
+{
+  "id": "demo-0.G.7-sqlserver-health",
+  "title": "SQL FCI health: quorum + shared disk + iSCSI + operator auth",
+  "description": "The nexus-cli health verb for the SQL Server FCI: WSFC quorum, the clustered Physical Disk, iSCSI sessions on both FCI nodes, and the operator-auth round-trip.",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus health sqlserver --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "wsfc-quorum",
+        "fci-virtual-server",
+        "green"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "wsfc-quorum 4/4 NodeMajority + SQL-role Online + 1 clustered Physical Disk Online + an iSCSI session on each FCI node + the FCI answering as nexus-cluster-admin"
+        }
+      ]
+    }
+  ],
+  "whatProves": "the FCI is healthy end-to-end: WSFC quorum, the shared iSCSI LUN as a clustered Physical Disk, and the operator SQL login authenticating against the FCI virtual server."
+}

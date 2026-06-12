@@ -1,0 +1,54 @@
+{
+  "id": "demo-0.G.7-sqlserver-ag-scale-out",
+  "title": "SQL AG scale-out: remove + MANUAL-seed re-add a replica",
+  "description": "The nexus-cli scale-out verbs for the Always On AG: REMOVE a secondary replica, then re-add it via MANUAL seeding (backup -> SFTP-ferry -> RESTORE WITH MOVE NORECOVERY -> SET HADR). This is also the named recovery command for a drifted/NOT_HEALTHY secondary.",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2",
+      "sql-ag-rep-1",
+      "sql-ag-rep-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out remove sqlserver-ag sql-ag-rep-2 --yes --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "sql-ag-rep-2",
+        "remove"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "sql-ag-rep-2 removed from the AG; the primary + the other secondary keep serving"
+        }
+      ]
+    },
+    {
+      "command": "nexus scale-out add sqlserver-ag --role replica --yes --json",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "MANUAL seeding",
+        "SYNCHRONIZING"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "sql-ag-rep-2 re-added via manual seeding -> CONNECTED + SYNCHRONIZING (automatic seeding fails here: the FCI files live on the shared S:\\\\ which has no path on a local-C:\\\\ replica)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "AG replicas scale out/in via manual seeding (path-agnostic, required because the FCI primary is on shared storage); scale-out add doubles as the zero-touch recovery for a failed secondary."
+}

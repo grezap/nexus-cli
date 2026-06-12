@@ -65,4 +65,71 @@ public sealed class SshNetClient : Nexus.Cli.Core.Abstractions.ISshClient
             return Result.Fail<SshExecResult>($"SSH to {target.Username}@{target.Host}:{target.Port} failed: {ex.Message}");
         }
     }
+
+    public async Task<Result<bool>> UploadBytesAsync(
+        SshTarget target,
+        byte[] content,
+        string remotePath,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(target.PrivateKeyPath))
+            return Result.Fail<bool>($"SSH private key not found at '{target.PrivateKeyPath}'.");
+        try
+        {
+            var keyFile = new PrivateKeyFile(target.PrivateKeyPath);
+            var auth = new PrivateKeyAuthenticationMethod(target.Username, keyFile);
+            var connectionInfo = new ConnectionInfo(target.Host, target.Port, target.Username, auth)
+            {
+                Timeout = timeout
+            };
+            using var sftp = new SftpClient(connectionInfo);
+            await sftp.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            using (var ms = new MemoryStream(content))
+                sftp.UploadFile(ms, remotePath, true);
+            sftp.Disconnect();
+            return Result.Ok(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return Result.Fail<bool>($"SFTP to {target.Host} cancelled.");
+        }
+        catch (Exception ex)
+        {
+            return Result.Fail<bool>($"SFTP upload to {target.Username}@{target.Host}:{remotePath} failed: {ex.Message}");
+        }
+    }
+
+    public async Task<Result<byte[]>> DownloadBytesAsync(
+        SshTarget target,
+        string remotePath,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(target.PrivateKeyPath))
+            return Result.Fail<byte[]>($"SSH private key not found at '{target.PrivateKeyPath}'.");
+        try
+        {
+            var keyFile = new PrivateKeyFile(target.PrivateKeyPath);
+            var auth = new PrivateKeyAuthenticationMethod(target.Username, keyFile);
+            var connectionInfo = new ConnectionInfo(target.Host, target.Port, target.Username, auth)
+            {
+                Timeout = timeout
+            };
+            using var sftp = new SftpClient(connectionInfo);
+            await sftp.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            using var ms = new MemoryStream();
+            sftp.DownloadFile(remotePath, ms);
+            sftp.Disconnect();
+            return Result.Ok(ms.ToArray());
+        }
+        catch (OperationCanceledException)
+        {
+            return Result.Fail<byte[]>($"SFTP from {target.Host} cancelled.");
+        }
+        catch (Exception ex)
+        {
+            return Result.Fail<byte[]>($"SFTP download from {target.Username}@{target.Host}:{remotePath} failed: {ex.Message}");
+        }
+    }
 }

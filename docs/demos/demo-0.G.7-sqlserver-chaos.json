@@ -1,0 +1,36 @@
+{
+  "id": "demo-0.G.7-sqlserver-chaos",
+  "title": "SQL FCI chaos: kill sqlservr -> WSFC recovery",
+  "description": "The nexus-cli chaos verb for the SQL Server FCI: hard-kill sqlservr.exe on the active node; WSFC restarts/fails the SQL resource over; poll to green.",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus chaos sqlserver process-kill --yes --json",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the observed impact during the kill window, then Recovered=true once the FCI virtual server answers again"
+        }
+      ]
+    }
+  ],
+  "whatProves": "WSFC health-monitoring detects the SQL resource failure and auto-recovers the single FCI instance (restart-in-place or failover); the cluster returns to green unattended."
+}

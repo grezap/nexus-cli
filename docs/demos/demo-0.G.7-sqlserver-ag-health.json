@@ -1,0 +1,40 @@
+{
+  "id": "demo-0.G.7-sqlserver-ag-health",
+  "title": "SQL AG health: replicas + Listener strict-TLS",
+  "description": "The nexus-cli health verb for the Always On AG: single primary, every replica CONNECTED+HEALTHY, and the Listener answering under STRICT TLS (Encrypt + chain-validate).",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2",
+      "sql-ag-rep-1",
+      "sql-ag-rep-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus health sqlserver-ag --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "ag-listener",
+        "PRIMARY=SQLFCI",
+        "green"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "1 primary + 3 replicas CONNECTED+HEALTHY + the Listener (sql-ag-listener.nexus.lab, -N strict TLS) returning PRIMARY=SQLFCI"
+        }
+      ]
+    }
+  ],
+  "whatProves": "the AG is healthy AND the Listener (the LB-tier HA primitive, ADR-0025) validates under strict TLS via the unified cert .17 IP-SAN -- the HA-promise-covers-the-LB-tier proof."
+}

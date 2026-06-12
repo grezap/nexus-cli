@@ -1,0 +1,37 @@
+{
+  "id": "demo-0.G.7-sqlserver-backup",
+  "title": "SQL FCI backup: COPY_ONLY to the shared LUN",
+  "description": "The nexus-cli backup take verb for the SQL Server FCI: a COPY_ONLY full backup of nexus_demo to S:\\\\Backups (does not disturb the AG log chain). The matching restore (round-trip verify) is the handbook playbook.",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus backup take sqlserver --tag demo --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        ".bak",
+        "COPY_ONLY"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the backupId (.bak), destination on S:\\\\Backups, size, and duration; pass the backupId to `nexus backup restore sqlserver <id> --yes` for the RESTORE-WITH-MOVE round-trip (8225 rows)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "the FCI can take a consistent COPY_ONLY backup of the AG database to the shared LUN; restore verifies it round-trips into a throwaway verify DB."
+}

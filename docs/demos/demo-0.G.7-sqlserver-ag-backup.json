@@ -1,0 +1,39 @@
+{
+  "id": "demo-0.G.7-sqlserver-ag-backup",
+  "title": "SQL AG backup: COPY_ONLY via the AG primary",
+  "description": "The nexus-cli backup take verb for the Always On AG: a COPY_ONLY backup of nexus_demo via the AG primary (honors backup-preference). The restore round-trip is the handbook playbook.",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2",
+      "sql-ag-rep-1",
+      "sql-ag-rep-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus backup take sqlserver-ag --tag demo --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        ".bak",
+        "COPY_ONLY"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the backupId; pass it to `nexus backup restore sqlserver-ag <id> --yes` for the RESTORE-WITH-MOVE round-trip (8225 rows)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "the AG database backs up via the primary; restore verifies the backup round-trips into a throwaway verify DB."
+}

@@ -1,0 +1,38 @@
+{
+  "id": "demo-0.G.7-sqlserver-ag-chaos",
+  "title": "SQL AG chaos: kill a secondary -> resync",
+  "description": "The nexus-cli chaos verb for the Always On AG: hard-kill sqlservr on a secondary replica; the replica disconnects; SCM auto-restarts it; the AG reconnects + resyncs.",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2",
+      "sql-ag-rep-1",
+      "sql-ag-rep-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus chaos sqlserver-ag process-kill --yes --json",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the secondary disconnects during the kill window, then Recovered=true once it reconnects + resyncs"
+        }
+      ]
+    }
+  ],
+  "whatProves": "an AG secondary tolerates a process kill: the service auto-restarts and the replica resyncs from the primary without operator action."
+}

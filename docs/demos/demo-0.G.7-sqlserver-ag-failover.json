@@ -1,0 +1,43 @@
+{
+  "id": "demo-0.G.7-sqlserver-ag-failover",
+  "title": "SQL AG failover: ALTER AVAILABILITY GROUP FAILOVER",
+  "description": "The nexus-cli failover-test verb for the Always On AG: promote a secondary to SYNCHRONOUS_COMMIT, wait SYNCHRONIZED, ALTER AVAILABILITY GROUP FAILOVER on it, measure RTO, then fail back to the FCI + revert async.",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2",
+      "sql-ag-rep-1",
+      "sql-ag-rep-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster sqlserver-ag --yes --json",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "ag-alter-failover",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "sqlfci -> sql-ag-rep-1 then back; the RTO timeline"
+        },
+        {
+          "where": "a `nexus status sqlserver-ag` during the window",
+          "what": "the Listener now points at the new primary"
+        }
+      ]
+    }
+  ],
+  "whatProves": "a planned AG failover promotes a secondary to primary (the Listener follows) and fails back -- the manual-failover path the AG was built for (RTO ~8.2 s)."
+}

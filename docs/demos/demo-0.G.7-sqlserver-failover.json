@@ -1,0 +1,41 @@
+{
+  "id": "demo-0.G.7-sqlserver-failover",
+  "title": "SQL FCI failover: Move-ClusterGroup between nodes",
+  "description": "The nexus-cli failover-test verb for the SQL Server FCI: Move-ClusterGroup the SQL Server role to the passive node, poll until the FCI virtual server answers, measure RTO, then move back.",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster sqlserver --yes --json",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "fci-move-clustergroup",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "original primary -> new primary + the RTO timeline (pre-flight, failure injected, new primary observed, recovered)"
+        },
+        {
+          "where": "Failover Cluster Manager (sql-fci-cluster)",
+          "what": "the SQL Server (MSSQLSERVER) role moves to the other node then back"
+        }
+      ]
+    }
+  ],
+  "whatProves": "WSFC fails the single FCI instance between sql-fci-1/2 over the shared iSCSI LUN; the FCI virtual server sqlfci @ .16 follows the active node (RTO ~4.5 s)."
+}

@@ -1,0 +1,38 @@
+{
+  "id": "demo-0.G.7-sqlserver-ag-acl",
+  "title": "SQL AG acl: shared instance logins via the primary",
+  "description": "The nexus-cli acl verb for the Always On AG: list server principals via the AG primary (the AG shares the instance security surface).",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2",
+      "sql-ag-rep-1",
+      "sql-ag-rep-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus acl sqlserver-ag list --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "nexus-cluster-admin"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the same server-principal surface as the FCI (the AG primary IS the FCI); grant/revoke manage fixed-server-role membership"
+        }
+      ]
+    }
+  ],
+  "whatProves": "acl on the AG plane reads the instance logins/roles via the primary; the AG and FCI share one security surface."
+}

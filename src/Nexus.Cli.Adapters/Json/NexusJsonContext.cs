@@ -17,6 +17,23 @@ public sealed class VaultKvV2Envelope
     public Dictionary<string, string>? Data { get; set; }
 }
 
+// === Vault PKI issue (cert-rotate, v0.6.6) ==================================
+
+public sealed class VaultPkiIssueResponse
+{
+    [JsonPropertyName("data")]
+    public VaultPkiIssueData? Data { get; set; }
+}
+
+public sealed class VaultPkiIssueData
+{
+    [JsonPropertyName("certificate")] public string Certificate { get; set; } = "";
+    [JsonPropertyName("private_key")] public string PrivateKey { get; set; } = "";
+    [JsonPropertyName("issuing_ca")] public string IssuingCa { get; set; } = "";
+    [JsonPropertyName("ca_chain")] public List<string>? CaChain { get; set; }
+    [JsonPropertyName("serial_number")] public string SerialNumber { get; set; } = "";
+}
+
 // === Consul =================================================================
 
 public sealed class ConsulMemberDto
@@ -481,6 +498,7 @@ public sealed class ClusterAclOutputJson
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     GenerationMode = JsonSourceGenerationMode.Default)]
 [JsonSerializable(typeof(VaultKvV2Response))]
+[JsonSerializable(typeof(VaultPkiIssueResponse))]
 [JsonSerializable(typeof(ConsulAgentSelfDto))]
 [JsonSerializable(typeof(List<ConsulMemberDto>))]
 [JsonSerializable(typeof(NomadServerMembersDto))]

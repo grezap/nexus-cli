@@ -1,0 +1,39 @@
+{
+  "id": "demo-0.G.7-sqlserver-ag-status",
+  "title": "SQL AG status: primary + sync secondaries",
+  "description": "The nexus-cli status verb for the Always On AG: the FCI primary + the two async standalone replicas and their sync state.",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2",
+      "sql-ag-rep-1",
+      "sql-ag-rep-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus status sqlserver-ag --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "sqlfci",
+        "primary"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "sqlfci = primary; sql-ag-rep-1/2 = secondary syncing; leader = sqlfci"
+        }
+      ]
+    }
+  ],
+  "whatProves": "the AG nexus-ag has the FCI as primary and two standalone replicas as secondaries; status reads sys.availability_replicas + the hadr replica-state DMVs from the primary."
+}

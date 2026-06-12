@@ -172,9 +172,13 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 | postgres | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ gen | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ list+grant |
 | clickhouse | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ gen | ✅ 06-11 | ✅ 06-11 | ✅ 06-11 | ✅ list+grant |
 | starrocks | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ gen | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ list+grant |
-| sql-* · mongo-sharded · vitess · citus | ⏳ per canon order | | | | | | | | | |
+| sqlserver (FCI) | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | n/a¹ | ✅ gen | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ list+grant |
+| sqlserver-ag (AG) | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ 06-12² | ✅ gen | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ list+grant |
+| mongo-sharded · vitess · citus | ⏳ per canon order | | | | | | | | | |
 
 ✅ live-verified · ⚠ coded, fix pending · ⏳ pending. Dates = live-verify date.
+¹ an FCI is a fixed 2-node shared-storage instance — `scale-out` returns a skip-with-explanation (grow via `sqlserver-ag` or `scale-up`).
+² AG `scale-out add` re-seeds a replica via **manual seeding** (also the named recovery command for a drifted/NOT_HEALTHY secondary).
 
 ---
 
@@ -247,6 +251,48 @@ The diagnostic ladder (run top-down; each rung names the fix):
    (`pwsh -File nexus-infra-oltp/scripts/oltp-mongo.ps1 apply`) — its `mongo_operator_user` overlay is
    idempotent (createUser → else converge roles). If Vault KV has no operator-password, apply the
    nexus-infra-vmware **security** env first (the seed + agent-policy v3 live there).
+
+   **SQL Server FCI+AG reality (the first WINDOWS cluster; live-verified 2026-06-12).** Two ClusterIds
+   over one vms.yaml cluster `sqlserver`: **`sqlserver`** (FCI) + **`sqlserver-ag`** (AG). The nodes are
+   `ws2025-desktop`, reached over **Windows-SSH** (`nexusadmin`) — every remote command is
+   `powershell -NoProfile -EncodedCommand <base64-UTF16>` (plain multi-token commands get mangled by
+   cmd.exe). **Two access planes:** (a) WSFC/cluster-resource cmdlets (`Get-Cluster*`,
+   `Move-ClusterGroup`, `Get-IscsiSession`) run over **plain SSH** as the local `nexusadmin` (it is
+   cluster-admin on the local node); (b) **T-SQL** runs as the dedicated `nexus-cluster-admin` SQL login
+   (sysadmin), password ONLY in **Vault KV** `nexus/oltp/sqlserver/operator-password` — so the verbs
+   need `VAULT_ADDR`/`VAULT_TOKEN`/`VAULT_CACERT`. The FCI is mixed-mode (SQL-login auth); the standalone
+   AG replicas are Windows-auth-only (`-E`, local nexusadmin IS sysadmin there). Contract: FCI virtual
+   server `sqlfci` @ .16, WSFC CNO `sql-fci-cluster` @ .15, AG `nexus-ag`, Listener `sql-ag-listener`
+   @ .17, demo DB `nexus_demo`, backups on `S:\Backups`. On-node probe (run a scheduled-task or use the
+   adapter — local `sqlcmd -E` on the FCI is NOT sysadmin):
+   ```pwsh
+   # cluster plane (plain SSH, local nexusadmin):
+   ssh -i ~/.ssh/nexus_gateway_ed25519 nexusadmin@192.168.70.11 "powershell -NoProfile -Command (Get-ClusterGroup -Name 'SQL Server (MSSQLSERVER)').State"
+   # operator auth (from the build host, via the CLI — exercises Vault KV + the SQL login):
+   nexus health sqlserver ; nexus health sqlserver-ag
+   ```
+   - **`health sqlserver-ag` shows a replica `CONNECTED NOT SYNCHRONIZING / NOT_HEALTHY`** (and
+     `nexus_demo` absent on that replica) ⇒ a **failed automatic seed** (`sys.dm_hadr_automatic_seeding`
+     → `failure_state=Seeding`). Root cause: automatic seeding can't work here — the FCI primary's
+     `nexus_demo` files live on the shared iSCSI `S:\`, and seeding tries to recreate `S:\SQLData\*.mdf`
+     on a replica that has only local `C:\`. **→ Named recovery (zero-touch, idempotent):**
+     ```pwsh
+     nexus scale-out remove sqlserver-ag <rep> --yes    # e.g. sql-ag-rep-2
+     nexus scale-out add    sqlserver-ag --role replica --yes
+     ```
+     `scale-out add` re-seeds via **manual seeding** (backup → SFTP-ferry the .bak/.trn build-host-
+     mediated → `RESTORE WITH MOVE … NORECOVERY` → `SET HADR AVAILABILITY GROUP`) → CONNECTED +
+     SYNCHRONIZING. If the operator login is missing (`Login failed for user 'nexus-cluster-admin'`),
+     apply `nexus-infra-oltp/envs/oltp-sqlserver` (the `role-overlay-sqlserver-operator-login.tf` is
+     idempotent); if Vault KV has no operator-password, apply the nexus-infra-vmware **security** env
+     first (the `…-sqlserver-cluster-creds-seed` v2 seed).
+   - **`Move-ClusterGroup` hangs / `Login failed`** — you're in the wrong plane. Cluster cmdlets need
+     **plain SSH** (NOT the schtasks domain-task context, where cluster-resource cmdlets hang); T-SQL
+     needs the **SQL login** (NOT plain `sqlcmd -E` on the FCI = local nexusadmin = not sysadmin).
+   - **cert-rotate:** `cert-rotate sqlserver` rotates the **one shared FCI cert** (both nodes, single
+     cluster checkpoint — a per-node rotate would break failover); `cert-rotate sqlserver-ag` rotates
+     the **two standalone replicas** per-node. ws2025 has no openssl — certs are issued via the build-
+     host Vault HTTP API and shipped as a PFX over SFTP (`SqlServerCert`).
 
 ### §3.3 Verb behaviour notes + limitations
 - `failover-test cluster redis` — **FIXED v0.6.0**: original primary resolved from the replica's

@@ -1,0 +1,37 @@
+{
+  "id": "demo-0.G.7-sqlserver-acl",
+  "title": "SQL FCI acl: server logins + roles + AD groups",
+  "description": "The nexus-cli acl verb for the SQL Server FCI: list server principals (SQL logins, Windows logins, AD groups) + their fixed-server-role memberships.",
+  "prerequisites": {
+    "vmsAlive": [
+      "sql-fci-1",
+      "sql-fci-2"
+    ],
+    "envVars": [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.G.7.ps1 ALL GREEN"
+  },
+  "steps": [
+    {
+      "command": "nexus acl sqlserver list --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "nexus-cluster-admin",
+        "sysadmin"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the operator nexus-cluster-admin (SQL_LOGIN, sysadmin), sa, NEXUS\\\\Domain Admins (sysadmin), and the NT SERVICE\\\\* logins"
+        }
+      ]
+    }
+  ],
+  "whatProves": "acl surfaces the instance security: SQL logins + Windows logins + AD-group principals and their server-role grants; grant/revoke manage fixed-server-role membership."
+}

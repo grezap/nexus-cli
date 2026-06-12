@@ -6,6 +6,56 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.6] — 2026-06-12
+
+Phase 0.G.7: the **first Windows cluster** — SQL Server **FCI** + **Always On AG** — shipped as **two
+adapters** over the single vms.yaml cluster `sqlserver` (`SqlFciAdapter` = ClusterId `sqlserver`,
+`SqlAgAdapter` = ClusterId `sqlserver-ag`; per nexus-platform-plan ADR-0024). Live-verified end-to-end
+against the running 4-node cluster (`sql-fci-1`/`sql-fci-2` + `sql-ag-rep-1`/`sql-ag-rep-2`, ws2025).
+The access pattern differs fundamentally from the six Linux adapters: Windows-SSH (`powershell
+-EncodedCommand`) + on-node `sqlcmd` (ODBC Driver 18) — **no managed `Microsoft.Data.SqlClient`**
+(NetArchTest-enforced). AOT **25.95 MB / 30 MB** (+0.92 over v0.6.5). 71/71 tests. smoke-0.G.7 56/56.
+
+### Added — SQL Server FCI + AG adapters (Phase 0.G.7)
+
+- **`SqlFciAdapter`** (ClusterId `sqlserver`, ADR-0016) — the WSFC + shared-iSCSI plane: `status`/
+  `topology` (`Get-ClusterGroup`/`Get-ClusterNode` + the 4-node WSFC + the FCI shared disk) · `health`
+  (NodeMajority quorum + clustered Physical Disk + iSCSI sessions + operator-auth round-trip) ·
+  `failover-test cluster sqlserver` (**`Move-ClusterGroup`** between sql-fci-1/2, RTO ≈ 4.5 s) ·
+  `backup take`/`restore` (`BACKUP DATABASE … WITH COPY_ONLY` to `S:\Backups` + RESTORE-WITH-MOVE
+  round-trip, 8225 rows) · `cert-rotate` (**one shared cert on both nodes + a single cluster
+  checkpoint** — a per-node rotate would break failover) · `acl list/grant` (`sys.server_principals`
+  + fixed-server-roles) · `chaos` (kill `sqlservr` on the active node → WSFC recovery) · `scale-out`
+  skip-with-explanation (fixed 2-node FCI).
+- **`SqlAgAdapter`** (ClusterId `sqlserver-ag`, ADR-0017) — the Always On AG + Listener plane: `status`/
+  `topology`/`health` (`sys.dm_hadr_*` + the **Listener strict-TLS** probe `-S sql-ag-listener.nexus.lab
+  -N` → `PRIMARY=SQLFCI`) · `failover-test cluster sqlserver-ag` (promote-to-sync → `ALTER AVAILABILITY
+  GROUP FAILOVER` → fail back, RTO ≈ 8.2 s) · `scale-out remove`/`add` (the add re-seeds via **manual
+  seeding**) · `backup`/`restore` (via the AG primary) · `cert-rotate` (per-node replica certs) ·
+  `acl` · `chaos` (kill a secondary → SCM restart → resync).
+- **Auth model** (decided from a live probe): two planes — WSFC/cluster cmdlets over **plain SSH** as
+  local `nexusadmin`; FCI T-SQL as the dedicated **`nexus-cluster-admin`** SQL login (the ADR-0011
+  Vault-KV operator-credential model; password in `nexus/oltp/sqlserver/operator-password`,
+  `$env:SQLCMDPASSWORD`). Standalone AG replicas are Windows-auth-only (`-E`).
+- **`SqlServerControl`** (shared Windows-SSH + sqlcmd primitives) + **`SqlServerCert`** (Vault-PKI → PFX
+  build-host issue → SFTP ship → `Import-PfxCertificate`; ws2025 has no openssl).
+- **`ISshClient.DownloadBytesAsync`** (SFTP download) — for the AG manual-seed ferry (active FCI node →
+  build host → replica). Plus `IssuePkiCertAsync`/`ReadKvFieldAsync` on the Vault client + the
+  `PkiIssue` model.
+- 17 System B demos (`docs/demos/demo-0.G.7-sqlserver*-*.json`) + ADR-0016 + ADR-0017 +
+  `docs/verification/0.G.7-sqlserver.md` + handbook §2 matrix & §3 SQL troubleshooting ladder.
+
+### Fixed — AG scale-out automatic-seeding bug (live-caught)
+
+- `SqlAgAdapter.ScaleOutAddAsync` used `SEEDING_MODE = AUTOMATIC`, which **cannot work** in this hybrid
+  FCI+AG topology (the FCI primary's `nexus_demo` files live on the shared iSCSI `S:\`; automatic
+  seeding preserves the primary's paths and tries to create `S:\SQLData\*.mdf` on a standalone replica
+  that has only local `C:\` → `failure_state=Seeding`). Found live as a drifted `sql-ag-rep-2`
+  (CONNECTED but NOT_HEALTHY). Rewrote to **manual seeding** (`SEEDING_MODE=MANUAL` → `JOIN` → backup →
+  SFTP-ferry → `RESTORE WITH MOVE … NORECOVERY` → `SET HADR AVAILABILITY GROUP`), mirroring
+  `role-overlay-ag-bootstrap`. `scale-out add` is now the named operator recovery command for a drifted
+  secondary.
+
 ## [0.6.5] — 2026-06-12
 
 Phase 0.G.6: the **StarRocks (3 FE BDB-JE quorum + 3 BE) adapter** — the second **analytics-tier**
