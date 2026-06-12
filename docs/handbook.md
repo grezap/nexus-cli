@@ -378,6 +378,15 @@ The diagnostic ladder (run top-down; each rung names the fix):
     FOR` (no `mysql.user`); grant = `CREATE USER … + GRANT … ON nexus.*`. **`scale-out`** stop/start
     `nexus-starrocks-be` (remove refuses dropping below 2 live BE). **`chaos process-kill`** kills the
     BE + restarts → rejoin. `CanResizeVm` refuses the FE leader.
+  - **Cold-rebuild gotchas (analytics-starrocks, surfaced at the v0.6.5 cold-rebuild):** same stale-x86
+    `vmrun_path` trap as ClickHouse — fix the variables.tf default to the non-x86 path + power off the
+    VMs cleanly before `terraform destroy`. Two **operator-recovered VMware transients** on the fresh
+    clones: (1) the sporadic vmrun "Unknown error" power-on (re-run the apply — tainted retries clean);
+    (2) **a fresh FE clone booting with no service-NIC IP** (running per vmrun, but unreachable via
+    SSH/ping — the known StarRocks transient, analytics handbook §3.B S7) → `vmrun connectNamedDevice
+    <vmx> ethernet0/ethernet1` + `vmrun reset <vmx> hard`; it rejoins in ~85 s and the parked
+    nftables-backplane overlay (waiting on all 6 within its 25-min window) proceeds. The operator-user
+    overlay's `depends_on backup-repo` (added from the ClickHouse lesson) means no operator/backup race.
 
 ### §3.4 AOT size gate
 ≤30 MB (linux-x64 + win-x64) for the 0.G line (ADR-0024). `pwsh -File scripts/cli.ps1 size-check`.

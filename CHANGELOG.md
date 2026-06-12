@@ -41,10 +41,16 @@ tests.
 - **No live-verify bugs** — first-try-green on all 12 verb invocations; the `--skip-ssl` +
   backplane-IP-mapping contract specifics were caught from the infra read, not a live failure.
 
-### Note
+### Cold-rebuild — ✅ PROVEN (2026-06-12)
 
-- Cold-rebuild proof of the `analytics-starrocks` env (carries the stale x86 `vmrun_path`, same trap
-  as 0.G.5) is **pending operator consent** — see `docs/verification/0.G.6-starrocks.md`.
+- From-zero cold-rebuild of the `analytics-starrocks` env: corrected the stale x86 `vmrun_path`,
+  destroy (35 res) → apply → `smoke-0.G.6.ps1` ALL GREEN → the full verb matrix re-run GREEN against
+  the rebuilt cluster. The FE bootstrap + BE join + schema-bootstrap + **operator-user** all ran
+  in-graph (EXIT GATE GREEN) — the preemptive `depends_on backup-repo` ordering (from the 0.G.5
+  lesson) avoided any operator/backup race. **Cold-rebuild-surfaced transient (VMware, recovered):** a
+  fresh FE clone (`sr-fe-follower-2`) booted with no service-NIC IP (the known StarRocks 0.G.6
+  transient) → `vmrun connectNamedDevice` + `vmrun reset` → rejoined in ~85 s, apply proceeded. See
+  `docs/verification/0.G.6-starrocks.md`.
 
 ## [0.6.4] — 2026-06-11
 
