@@ -1,0 +1,35 @@
+{
+  "id": "demo-0.6.7-kafka-east-topology",
+  "title": "Kafka east topology: topics x partitions/RF/ISR",
+  "description": "Lists each topic as a shard (Np RFm) with its partition-0 leader and replica set.",
+  "prerequisites": {
+    "vmsAlive": [
+      "kafka-east-1",
+      "kafka-east-2",
+      "kafka-east-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "nexus-infra-kafka smoke-0.H.2 + smoke-0.H.5 ALL GREEN; role-overlay-kafka-acl-authorizer applied"
+  },
+  "steps": [
+    {
+      "command": "nexus topology kafka-east --json",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "shards",
+        "RF3"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "one shard per topic with partition count + RF + replica brokers"
+        }
+      ]
+    }
+  ],
+  "whatProves": "topology maps Kafka topics/partitions to the SPI shard model."
+}

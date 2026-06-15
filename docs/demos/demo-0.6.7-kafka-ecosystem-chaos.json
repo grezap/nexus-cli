@@ -1,0 +1,41 @@
+{
+  "id": "demo-0.6.7-kafka-ecosystem-chaos",
+  "title": "Kafka ecosystem chaos: process-kill ksqldb",
+  "description": "SIGSTOPs ksqldb-server.service via nexus-chaos.sh, observes, lifts, confirms the service recovers.",
+  "prerequisites": {
+    "vmsAlive": [
+      "schema-registry-1",
+      "schema-registry-2",
+      "kafka-connect-1",
+      "kafka-connect-2",
+      "ksqldb-1",
+      "ksqldb-2",
+      "mm2-1",
+      "mm2-2",
+      "kafka-rest-1"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "nexus-infra-kafka smoke-0.H.2 + smoke-0.H.5 ALL GREEN; role-overlay-kafka-acl-authorizer applied"
+  },
+  "steps": [
+    {
+      "command": "nexus chaos kafka-ecosystem process-kill --target ksqldb-1 --yes --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "scenarioApplied",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "ksqldb-1 stopped then recovered=true"
+        }
+      ]
+    }
+  ],
+  "whatProves": "chaos targets an individual ecosystem service + proves self-heal."
+}

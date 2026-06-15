@@ -1,0 +1,35 @@
+{
+  "id": "demo-0.6.7-kafka-east-cert-rotate",
+  "title": "Kafka east cert-rotate: rolling reissue",
+  "description": "Re-issues each broker Vault-PKI leaf from its own agent token (pki_int/issue/kafka-broker) + kafka-tls-split.sh + rolling restart (one at a time).",
+  "prerequisites": {
+    "vmsAlive": [
+      "kafka-east-1",
+      "kafka-east-2",
+      "kafka-east-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "nexus-infra-kafka smoke-0.H.2 + smoke-0.H.5 ALL GREEN; role-overlay-kafka-acl-authorizer applied"
+  },
+  "steps": [
+    {
+      "command": "nexus cert-rotate kafka-east --yes --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "oldSerial",
+        "newSerial"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "3 brokers each show a new serial, rolling, no error"
+        }
+      ]
+    }
+  ],
+  "whatProves": "cert-rotate reissues mTLS leaves with zero quorum loss (KRaft tolerates 1 down)."
+}

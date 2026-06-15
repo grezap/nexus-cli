@@ -1,0 +1,35 @@
+{
+  "id": "demo-0.6.7-kafka-east-chaos",
+  "title": "Kafka east chaos: process-kill + recover",
+  "description": "SIGSTOPs kafka.service on a follower via the embedded nexus-chaos.sh, observes ISR/leader churn, lifts, and confirms recovery.",
+  "prerequisites": {
+    "vmsAlive": [
+      "kafka-east-1",
+      "kafka-east-2",
+      "kafka-east-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "nexus-infra-kafka smoke-0.H.2 + smoke-0.H.5 ALL GREEN; role-overlay-kafka-acl-authorizer applied"
+  },
+  "steps": [
+    {
+      "command": "nexus chaos kafka-east process-kill --yes --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "scenarioApplied",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "mid-window impact (under-replicated partitions) then cluster recovered=true"
+        }
+      ]
+    }
+  ],
+  "whatProves": "chaos injects a time-boxed self-healing fault + proves recovery."
+}

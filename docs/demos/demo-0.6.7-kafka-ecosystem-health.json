@@ -1,0 +1,42 @@
+{
+  "id": "demo-0.6.7-kafka-ecosystem-health",
+  "title": "Kafka ecosystem health: endpoints + MM2",
+  "description": "systemctl + each service HTTPS health endpoint (SR :8081, REST :8082, Connect :8083, ksqlDB :8088) + MM2 Mirror*Connector liveness.",
+  "prerequisites": {
+    "vmsAlive": [
+      "schema-registry-1",
+      "schema-registry-2",
+      "kafka-connect-1",
+      "kafka-connect-2",
+      "ksqldb-1",
+      "ksqldb-2",
+      "mm2-1",
+      "mm2-2",
+      "kafka-rest-1"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "nexus-infra-kafka smoke-0.H.2 + smoke-0.H.5 ALL GREEN; role-overlay-kafka-acl-authorizer applied"
+  },
+  "steps": [
+    {
+      "command": "nexus health kafka-ecosystem --json",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "overallHealth",
+        "green",
+        "endpoint"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "every service: service active + HTTPS 200 (or MM2 connector active)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "health proves each ecosystem service is up AND serving over its mTLS HTTPS endpoint."
+}

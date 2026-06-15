@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.G.7%20v0.6.6%20%E2%9C%85%20SQL%20Server%20FCI%2BAG%20adapters%20live-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.H.7%20v0.6.7%20%E2%9C%85%20Kafka%20adapters%20live-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,25 +12,25 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.6.6):** Phase 0.G **data-tier adapter expansion** underway — **8 of 13
-> adapters live-verified** (the first **Windows** cluster shipped TWO adapters over one vms.yaml
-> cluster). **Redis** (v0.6.0, mTLS-only) + **Mongo** (v0.6.1) + **Percona XtraDB Cluster + ProxySQL**
-> (v0.6.2, Galera) + **PostgreSQL Patroni HA** (v0.6.3) + **ClickHouse** (v0.6.4, sharded + Keeper
-> RAFT) + **StarRocks** (v0.6.5, MPP warehouse) + **SQL Server FCI** (v0.6.6, `sqlserver` — 2-node WSFC
-> + shared iSCSI) + **SQL Server Always On AG** (v0.6.6, `sqlserver-ag` — FCI primary + 2 async replicas
-> + Listener) ship with all verbs green against their running clusters. SQL Server is the **first
-> Windows cluster** — Windows-SSH (`powershell -EncodedCommand`) + on-node `sqlcmd`, **no managed
-> `Microsoft.Data.SqlClient`** (NetArchTest). Two access planes: WSFC/cluster cmdlets over plain SSH;
-> FCI T-SQL as the `nexus-cluster-admin` SQL login (the **Vault-KV operator-credential model**, unchanged
-> from Mongo→…→StarRocks). FCI verbs — status · health (quorum + shared disk + iSCSI + operator-auth) ·
-> topology · failover (**`Move-ClusterGroup`**, RTO≈4.5s) · backup (COPY_ONLY round-trip) · cert-rotate
-> (one shared cert + single cluster checkpoint) · acl · chaos. AG verbs — status · health (**Listener
-> strict-TLS** → `PRIMARY=SQLFCI`) · topology · failover (**`ALTER AVAILABILITY GROUP FAILOVER`**,
-> RTO≈8.2s) · scale-out remove/add (**manual seeding**) · backup · cert-rotate (per-node) · acl · chaos.
-> AOT **25.95 MB / 30 MB** gate; 71/71 tests; smoke-0.G.7 56/56. See
-> [`docs/handbook.md`](./docs/handbook.md) for the analytical verb reference + troubleshooting
-> runbook, and [`docs/verification/0.G.7-sqlserver.md`](./docs/verification/0.G.7-sqlserver.md)
-> for the live evidence. The remaining cluster adapters land per the canon order (ADR-0010).
+> **Current state (v0.6.7):** Phase 0.G/0.H **data-tier adapter expansion** — the last data tier,
+> **Kafka**, is now full-verb. **Redis** (v0.6.0, mTLS-only) + **Mongo** (v0.6.1) + **Percona XtraDB
+> Cluster + ProxySQL** (v0.6.2, Galera) + **PostgreSQL Patroni HA** (v0.6.3) + **ClickHouse** (v0.6.4,
+> sharded + Keeper RAFT) + **StarRocks** (v0.6.5, MPP warehouse) + **SQL Server FCI/AG** (v0.6.6, first
+> Windows cluster) + **Kafka** (v0.6.7) all ship with every verb green against their running clusters.
+> **Kafka (v0.6.7)** promotes the v0.5 failover-only retrofit to the full surface: one parameterized
+> `KafkaClusterAdapter` registered twice — **`kafka-east`** + **`kafka-west`** (3 combined
+> broker+controller KRaft nodes each) — plus a `KafkaEcosystemAdapter` (**`kafka-ecosystem`**: Schema
+> Registry, REST, Connect, ksqlDB, MirrorMaker 2); the v0.5 **`kafka`** adapter stays as the cross-region
+> MM2 DR meta-cluster. **mTLS-only — no operator password, no `INexusVaultClient`** (like Redis): the
+> operator identity is the broker's own Vault-PKI keystore via `sudo kafka-*.sh --command-config`; **no
+> managed `Confluent.Kafka`** (NetArchTest). Kafka verbs — status · health (quorum + voter lag + ISR) ·
+> topology (topics×partitions/RF) · failover (**controller-leader move**, RTO≈4.5s; complements the MM2
+> DR) · scale-out (broker drain/rejoin) · backup (topic round-trip) · cert-rotate (rolling reissue) ·
+> **acl** (the KRaft `StandardAuthorizer`, enabled by a new cold-rebuild-proven overlay) · chaos. AOT
+> **26.18 MB / 30 MB** gate; 86/86 tests; live-verified zero-bug against both clusters + the ecosystem.
+> See [`docs/handbook.md`](./docs/handbook.md) for the verb reference + troubleshooting runbook, and
+> [`docs/verification/0.6.7-kafka.md`](./docs/verification/0.6.7-kafka.md) for the live evidence. The
+> remaining adapters (mongo-sharded → Vitess → Citus → the 5 non-data tiers) land per the canon order.
 >
 > **Phase 0.F (v0.5.0) remains closed: all 5 of 5 master-plan verbs ship.** `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), `failover-test {consul-leader, nomad-leader, swarm-manager}` (v0.3.x), `demo {list, run, record}` (v0.4.0), and **`kafka failover {east-to-west, west-to-east}`** (v0.5.0; ADR-0008 — region-loss DR via vmrun-suspend × 3 source brokers + produce/consume round-trip on the target + vmrun-resume). Verified live: consul 1.55s · nomad 2.716s · swarm-manager 21.59s · kafka east→west 13.20s · kafka west→east 13.57s — all RTOs auto-recovered, all under their master-plan budgets.
 
@@ -223,7 +223,8 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Seventeen ADRs cover fram
 | **v0.6.4** | Phase 0.G.5 — the **ClickHouse adapter** (first sharded + analytics-tier; 3 shards × 2 replicas + ClickHouse Keeper RAFT; Keeper-leader failover RTO≈1.1s; `topology` populates Shards); all data-tier verbs live-verified; **24.84 MB** |
 | **v0.6.5** | Phase 0.G.6 — the **StarRocks adapter** (MPP MySQL-protocol warehouse; 3 FE BDB-JE quorum + 3 BE; FE-leader failover RTO≈1.5s; genuine async `BACKUP/RESTORE SNAPSHOT`); all data-tier verbs live-verified; **25.03 MB** |
 | **v0.6.6** | Phase 0.G.7 — the **SQL Server FCI + Always On AG adapters** (the first **Windows** cluster; two adapters over one vms.yaml cluster — `sqlserver` WSFC/FCI + `sqlserver-ag` AG/Listener; Windows-SSH + `sqlcmd`, no managed driver; FCI `Move-ClusterGroup` RTO≈4.5s + AG `ALTER … FAILOVER` RTO≈8.2s; Listener strict-TLS; manual-seed AG scale-out); all verbs live-verified; **25.95 MB** |
-| v0.6.6–v0.8.0 | The 5 remaining adapters in canon order (SQL-FCI/AG → mongo-sharded → Vitess → Citus) |
+| **v0.6.7** | Phase 0.H.7 — the **Kafka adapters** (`KafkaClusterAdapter` registered twice → `kafka-east` + `kafka-west`, the v0.5 `kafka` stays as the MM2 DR meta-cluster; `KafkaEcosystemAdapter` observes SR/REST/Connect/ksqlDB/MM2; mTLS-only, no managed `Confluent.Kafka`; controller-leader failover RTO≈4.5s; topic round-trip backup; enabled the KRaft `StandardAuthorizer` so `acl` enforces); zero live bugs; **26.18 MB** |
+| v0.7.0–v0.8.0 | base roll-up → mongo-sharded → Vitess → Citus → full-fleet, then the 5 non-data-tier adapters |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing

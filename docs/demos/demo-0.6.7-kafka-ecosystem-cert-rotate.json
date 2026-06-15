@@ -1,0 +1,41 @@
+{
+  "id": "demo-0.6.7-kafka-ecosystem-cert-rotate",
+  "title": "Kafka ecosystem cert-rotate: 9 nodes",
+  "description": "Re-issues each node Vault-PKI leaf + kafka-tls-split.sh (rebuilds PEM + PKCS#12 for Connect/ksqlDB) + restarts the node service.",
+  "prerequisites": {
+    "vmsAlive": [
+      "schema-registry-1",
+      "schema-registry-2",
+      "kafka-connect-1",
+      "kafka-connect-2",
+      "ksqldb-1",
+      "ksqldb-2",
+      "mm2-1",
+      "mm2-2",
+      "kafka-rest-1"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "nexus-infra-kafka smoke-0.H.2 + smoke-0.H.5 ALL GREEN; role-overlay-kafka-acl-authorizer applied"
+  },
+  "steps": [
+    {
+      "command": "nexus cert-rotate kafka-ecosystem --yes --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "oldSerial",
+        "newSerial"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "all 9 nodes show a new serial, no error"
+        }
+      ]
+    }
+  ],
+  "whatProves": "cert-rotate reissues mTLS leaves for every ecosystem service incl. the PKCS#12 keystores."
+}

@@ -1,0 +1,36 @@
+{
+  "id": "demo-0.6.7-kafka-east-cluster-status",
+  "title": "Kafka east cluster-status: KRaft quorum",
+  "description": "Reports the kafka-east KRaft controller quorum (leader + 3 voters) via kafka-metadata-quorum over each broker own mTLS keystore.",
+  "prerequisites": {
+    "vmsAlive": [
+      "kafka-east-1",
+      "kafka-east-2",
+      "kafka-east-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "nexus-infra-kafka smoke-0.H.2 + smoke-0.H.5 ALL GREEN; role-overlay-kafka-acl-authorizer applied"
+  },
+  "steps": [
+    {
+      "command": "nexus status kafka-east --json",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "kafka-east-1",
+        "controller-leader",
+        "alive"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "3 brokers, one controller-leader, all alive -- the live quorum view"
+        }
+      ]
+    }
+  ],
+  "whatProves": "status reports the genuine KRaft controller quorum over mTLS (no managed driver)."
+}

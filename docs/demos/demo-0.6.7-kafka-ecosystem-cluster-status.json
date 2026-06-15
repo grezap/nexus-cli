@@ -1,0 +1,43 @@
+{
+  "id": "demo-0.6.7-kafka-ecosystem-cluster-status",
+  "title": "Kafka ecosystem status: 9 services",
+  "description": "systemctl liveness across Schema Registry, REST, Connect, ksqlDB, and the MirrorMaker 2 pair.",
+  "prerequisites": {
+    "vmsAlive": [
+      "schema-registry-1",
+      "schema-registry-2",
+      "kafka-connect-1",
+      "kafka-connect-2",
+      "ksqldb-1",
+      "ksqldb-2",
+      "mm2-1",
+      "mm2-2",
+      "kafka-rest-1"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "nexus-infra-kafka smoke-0.H.2 + smoke-0.H.5 ALL GREEN; role-overlay-kafka-acl-authorizer applied"
+  },
+  "steps": [
+    {
+      "command": "nexus status kafka-ecosystem --json",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "schema-registry",
+        "ksqldb",
+        "mirrormaker2",
+        "alive"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "9 service nodes, each tagged by kind, all alive"
+        }
+      ]
+    }
+  ],
+  "whatProves": "status enumerates the ecosystem services from vms.yaml + systemctl."
+}

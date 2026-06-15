@@ -1,0 +1,36 @@
+{
+  "id": "demo-0.6.7-kafka-east-failover-test",
+  "title": "Kafka east failover: controller-leader move",
+  "description": "Stops kafka.service on the controller-quorum leader, polls a survivor for re-election (RTO), then restarts + rejoins. Complements the cross-region MM2 DR.",
+  "prerequisites": {
+    "vmsAlive": [
+      "kafka-east-1",
+      "kafka-east-2",
+      "kafka-east-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "nexus-infra-kafka smoke-0.H.2 + smoke-0.H.5 ALL GREEN; role-overlay-kafka-acl-authorizer applied"
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster kafka-east --yes --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "originalPrimary",
+        "newPrimary",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "leader moves to a new broker, RTO ~4.5s, old leader rejoins"
+        }
+      ]
+    }
+  ],
+  "whatProves": "failover proves a controlled KRaft controller-leader election + recovery."
+}

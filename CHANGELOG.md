@@ -6,6 +6,40 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.7] — 2026-06-15
+
+Phase 0.H.7: promoted **Kafka** from the thin v0.5 retrofit (failover-only) to the full verb surface.
+A single parameterized **`KafkaClusterAdapter`** is registered **twice** — ClusterId `kafka-east` +
+`kafka-west` (matching the vms.yaml keys + the ClusterId-convention) — each driving all of
+`IClusterAdapter` against its 3 combined broker+controller nodes; the v0.5 `KafkaAdapter` (ClusterId
+`kafka`) stays as the cross-region MirrorMaker-2 DR meta-cluster. A lighter **`KafkaEcosystemAdapter`**
+(ClusterId `kafka-ecosystem`) observes the 9 ecosystem nodes (Schema Registry, REST, Connect, ksqlDB,
+MM2). **mTLS-only — no operator password, no `INexusVaultClient`** (like Redis): the operator identity
+is the broker's own Vault-PKI keystore via `sudo kafka-*.sh --command-config`. **No managed
+`Confluent.Kafka`** (NetArchTest-enforced). Live-verified end-to-end against both running KRaft clusters
++ the ecosystem — **zero live-caught bugs** (thorough up-front contract probe). AOT **26.18 MB / 30**
+(+0.23 over v0.6.6). **86/86** tests (+15 Kafka parser tests). See ADR-0018 +
+`docs/verification/0.6.7-kafka.md`.
+
+### Added — per-cluster Kafka adapters + ecosystem observe (Phase 0.H.7)
+
+- `KafkaClusterAdapter` (ClusterId `kafka-east` + `kafka-west`): status/health/topology via
+  `kafka-metadata-quorum` + `kafka-topics`; **failover** = controlled controller-leader move (RTO ≈ 4.5 s);
+  **scale-out** = broker drain/rejoin (`--role broker`); **backup** = topic→`.jsonl`→verify-topic
+  produce/consume round-trip; **cert-rotate** = node-token `pki_int/issue/kafka-broker` + `kafka-tls-split.sh`
+  rolling restart; **acl** = `kafka-acls` (needs the authorizer); **chaos** = `nexus-chaos.sh` process-kill.
+- `KafkaEcosystemAdapter` (ClusterId `kafka-ecosystem`): status/health (systemctl + HTTPS endpoints
+  SR :8081 / REST :8082 / Connect :8083 / ksqlDB :8088 + MM2 journal) / topology / cert-rotate (rebuilds
+  PEM + PKCS#12) / chaos; failover/scale-out/backup/acl defer with a pointer.
+- 25 System B demos (`docs/demos/demo-0.6.7-kafka-*.json`); ADR-0018; `docs/verification/0.6.7-kafka.md`;
+  handbook §2 matrix + §3 Kafka troubleshooting ladder.
+
+### Infra (cross-repo)
+
+- `nexus-infra-kafka`: new `role-overlay-kafka-acl-authorizer.tf` (+ `var.enable_kafka_acl_authorizer`)
+  enables the KRaft `StandardAuthorizer` on both clusters (rolling restart) with `super.users` = all 15
+  platform principals, so the `acl` verb enforces while ordinary app principals stay deny-by-default.
+
 ## [0.6.6] — 2026-06-12
 
 Phase 0.G.7: the **first Windows cluster** — SQL Server **FCI** + **Always On AG** — shipped as **two

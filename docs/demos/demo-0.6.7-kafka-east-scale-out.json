@@ -1,0 +1,35 @@
+{
+  "id": "demo-0.6.7-kafka-east-scale-out",
+  "title": "Kafka east scale-out: drain + rejoin a broker",
+  "description": "scale-out remove drains a broker (quorum-majority guarded); scale-out add --role broker rejoins it (lag 0).",
+  "prerequisites": {
+    "vmsAlive": [
+      "kafka-east-1",
+      "kafka-east-2",
+      "kafka-east-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "nexus-infra-kafka smoke-0.H.2 + smoke-0.H.5 ALL GREEN; role-overlay-kafka-acl-authorizer applied"
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out remove kafka-east kafka-east-3 --yes --json",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "remove",
+        "kafka-east-3"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the broker is drained; a paired scale-out add rejoins it caught-up"
+        }
+      ]
+    }
+  ],
+  "whatProves": "scale-out covers broker drain/rejoin against the fixed 3-node combined quorum."
+}

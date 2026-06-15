@@ -1,0 +1,36 @@
+{
+  "id": "demo-0.6.7-kafka-west-health",
+  "title": "Kafka west health: quorum + ISR",
+  "description": "Per-broker kafka.service + quorum-has-leader + 3 voters + voter fetch-lag + 0 under-replicated + 0 offline partitions.",
+  "prerequisites": {
+    "vmsAlive": [
+      "kafka-west-1",
+      "kafka-west-2",
+      "kafka-west-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "nexus-infra-kafka smoke-0.H.2 + smoke-0.H.5 ALL GREEN; role-overlay-kafka-acl-authorizer applied"
+  },
+  "steps": [
+    {
+      "command": "nexus health kafka-west --json",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "overallHealth",
+        "green",
+        "quorum-has-leader"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "overall green; every probe green incl. 0 under-replicated/offline"
+        }
+      ]
+    }
+  ],
+  "whatProves": "health surfaces controller-quorum + ISR health from kafka-metadata-quorum + kafka-topics."
+}

@@ -61,7 +61,10 @@ public static class ClusterBootstrapper
         var adapters = new IClusterAdapter[]
         {
             new RedisAdapter(catalog, ssh, sshUser, sshKey),
-            new KafkaAdapter(kafkaFailover),
+            new KafkaAdapter(kafkaFailover),                                  // 0.5 DR meta-cluster (ClusterId kafka; east<->west MM2 failover)
+            new KafkaClusterAdapter("kafka-east", catalog, ssh, sshUser, sshKey), // 0.6.7 (full per-cluster verb surface)
+            new KafkaClusterAdapter("kafka-west", catalog, ssh, sshUser, sshKey), // 0.6.7
+            new KafkaEcosystemAdapter(catalog, ssh, sshUser, sshKey),         // 0.6.7 (ClusterId kafka-ecosystem; observe)
             new MongoAdapter(catalog, ssh, sshUser, sshKey, vault),
             new PerconaAdapter(catalog, ssh, sshUser, sshKey, vault),
             new PatroniAdapter(catalog, ssh, sshUser, sshKey, vault),

@@ -1,0 +1,35 @@
+{
+  "id": "demo-0.6.7-kafka-east-acl",
+  "title": "Kafka east acl: grant then revoke",
+  "description": "Grants READ/WRITE/DESCRIBE on topic * to a demo principal (StandardAuthorizer), lists it, then revokes -- proving enforcement is live.",
+  "prerequisites": {
+    "vmsAlive": [
+      "kafka-east-1",
+      "kafka-east-2",
+      "kafka-east-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "nexus-infra-kafka smoke-0.H.2 + smoke-0.H.5 ALL GREEN; role-overlay-kafka-acl-authorizer applied"
+  },
+  "steps": [
+    {
+      "command": "nexus acl kafka-east grant --user nexus-demo-east --yes --json",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "nexus-demo-east",
+        "ALLOW"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the principal appears with ALLOW READ/WRITE/DESCRIBE; a follow-up revoke clears it"
+        }
+      ]
+    }
+  ],
+  "whatProves": "acl enforces via the KRaft StandardAuthorizer enabled in role-overlay-kafka-acl-authorizer.tf."
+}

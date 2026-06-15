@@ -1,0 +1,35 @@
+{
+  "id": "demo-0.6.7-kafka-west-backup",
+  "title": "Kafka west backup: topic round-trip",
+  "description": "Captures a topic to a node-local .jsonl, then replays it into a verify topic and counts the produce->consume round-trip.",
+  "prerequisites": {
+    "vmsAlive": [
+      "kafka-west-1",
+      "kafka-west-2",
+      "kafka-west-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "nexus-infra-kafka smoke-0.H.2 + smoke-0.H.5 ALL GREEN; role-overlay-kafka-acl-authorizer applied"
+  },
+  "steps": [
+    {
+      "command": "nexus backup take kafka-west --yes --json",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "backupId",
+        "records"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "BackupId + record count + node-local destination; restore replays into a verify topic and matches the count"
+        }
+      ]
+    }
+  ],
+  "whatProves": "backup/restore is a genuine produce->consume round-trip over mTLS."
+}

@@ -174,11 +174,22 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 | starrocks | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ gen | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ list+grant |
 | sqlserver (FCI) | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | n/a¹ | ✅ gen | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ list+grant |
 | sqlserver-ag (AG) | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ 06-12² | ✅ gen | ✅ 06-12 | ✅ 06-12 | ✅ 06-12 | ✅ list+grant |
+| kafka-east | ✅ 06-15 | ✅ 06-15 | ✅ 06-15 | ✅ 06-15³ | ✅ 06-15⁴ | ✅ gen | ✅ 06-15⁵ | ✅ 06-15 | ✅ 06-15 | ✅ list+grant+revoke⁶ |
+| kafka-west | ✅ 06-15 | ✅ 06-15 | ✅ 06-15 | ✅ 06-15³ | ✅ 06-15⁴ | ✅ gen | ✅ 06-15⁵ | ✅ 06-15 | ✅ 06-15 | ✅ list+grant+revoke⁶ |
+| kafka-ecosystem | ✅ 06-15 | ✅ 06-15⁷ | ✅ 06-15 | n/a⁸ | n/a⁸ | ✅ gen | n/a⁸ | ✅ 06-15⁹ | ✅ 06-15 | n/a⁸ |
+| kafka (DR meta) | — | — | — | ✅ v0.5 MM2 | — | — | — | — | — | — |
 | mongo-sharded · vitess · citus | ⏳ per canon order | | | | | | | | | |
 
 ✅ live-verified · ⚠ coded, fix pending · ⏳ pending. Dates = live-verify date.
 ¹ an FCI is a fixed 2-node shared-storage instance — `scale-out` returns a skip-with-explanation (grow via `sqlserver-ag` or `scale-up`).
 ² AG `scale-out add` re-seeds a replica via **manual seeding** (also the named recovery command for a drifted/NOT_HEALTHY secondary).
+³ kafka failover = a controlled **controller-leader move** (`kafka-metadata-quorum`, RTO ≈ 4.5 s) — complements the cross-region `failover-test cluster kafka` MM2 DR drill (the `kafka` meta-cluster row).
+⁴ kafka scale-out = broker **drain/rejoin** (`scale-out add … --role broker`); the combined controller quorum is fixed at 3 at format time, so a genuine 4th broker is an apply-on-demand IaC op.
+⁵ kafka backup = a topic→`.jsonl`→verify-topic **produce/consume round-trip** (not a binary snapshot); the topic defaults to `dr-gate-test`, override with `--tag <topic>`.
+⁶ requires the KRaft `StandardAuthorizer` (enabled by `nexus-infra-kafka/.../role-overlay-kafka-acl-authorizer.tf`); without it `acl` returns `SecurityDisabledException`.
+⁷ ecosystem health = systemctl + each service's HTTPS health endpoint (SR :8081, REST :8082, Connect :8083, ksqlDB :8088) + the MM2 journal.
+⁸ failover/scale-out/backup/acl on `kafka-ecosystem` return a clear pointer (ecosystem state lives on the brokers; ACLs are enforced there).
+⁹ ecosystem cert-rotate rebuilds both the PEM and the PKCS#12 keystores (Connect/ksqlDB REST listeners need P12).
 
 ---
 
@@ -433,6 +444,38 @@ The diagnostic ladder (run top-down; each rung names the fix):
     <vmx> ethernet0/ethernet1` + `vmrun reset <vmx> hard`; it rejoins in ~85 s and the parked
     nftables-backplane overlay (waiting on all 6 within its 25-min window) proceeds. The operator-user
     overlay's `depends_on backup-repo` (added from the ClickHouse lesson) means no operator/backup race.
+- **Kafka / kafka-east · kafka-west · kafka-ecosystem (`v0.6.7`) — KRaft mTLS gotchas:**
+  - **mTLS-only, no password.** Every CLI runs ON a broker as `sudo /opt/kafka/bin/kafka-*.sh
+    --bootstrap-server SSL://<vmnet10>:9092 --command-config /etc/nexus-kafka/client-ssl.properties`.
+    **Bootstrap with the broker's own VMnet10 backplane IP** — `ssl.endpoint.identification.algorithm=
+    https` requires the bootstrap host to be a cert SAN (the VMnet10 IP is; a random IP/hostname fails the
+    handshake). `sudo` is mandatory (`/etc/nexus-kafka` is `0750 root:kafka`).
+  - **CLI-flag trap:** the admin tools (`kafka-topics`/`kafka-acls`/`kafka-metadata-quorum`/`kafka-configs`)
+    take **`--command-config`**, but `kafka-console-producer` takes **`--producer.config`** and
+    `kafka-console-consumer` takes **`--consumer.config`**. Passing `--command-config` to a console tool
+    silently prints usage + processes nothing (looked like "MM2 stopped mirroring" until diagnosed).
+  - **`acl` needs the authorizer.** If `acl <cluster> list` errors `SecurityDisabledException: No
+    Authorizer is configured`, the StandardAuthorizer overlay hasn't been applied — run
+    `nexus-infra-kafka`'s `kafka.ps1 apply` (it carries `role-overlay-kafka-acl-authorizer.tf`,
+    `var.enable_kafka_acl_authorizer=true`). **`super.users` = all 15 platform principals** (6 brokers +
+    9 ecosystem); never trim it to just brokers or the ecosystem services lose broker access.
+  - **`failover-test cluster kafka-east|kafka-west` = controller-leader move** (`kafka-metadata-quorum`):
+    stop `kafka.service` on the leader → poll a survivor for a new `LeaderId` → **RTO ≈ 4.5 s** → restart
+    + wait rejoin (lag 0). This is the per-cluster drill; **`failover-test cluster kafka`** is the
+    unchanged cross-region MM2 east↔west DR.
+  - **`cert-rotate` is rolling** (one broker at a time, KRaft tolerates 1 down): re-issue from the node's
+    own agent token `pki_int/issue/kafka-broker` → write `bundle.pem` → `/usr/local/sbin/kafka-tls-split.sh`
+    (PKCS#1→PKCS#8 + assembles keystore.pem; on ecosystem nodes also rebuilds the `.p12`) → restart.
+  - **`scale-out add … --role broker`** rejoins a stopped broker (drained by `scale-out remove`, the
+    failover leader, or a chaos victim). All 3 up → it explains the fixed-quorum apply-on-demand path.
+  - **Live ports (corrected from the scoping note):** Kafka Connect REST = **:8083** (not 8088), ksqlDB
+    REST = **:8088** (not 8090); Schema Registry :8081, REST Proxy :8082. `kafka-ecosystem health` probes
+    these over HTTPS with `--cacert /etc/ssl/certs/kafka-ca.pem`.
+  - **Cold-rebuild gotchas (kafka env):** same stale-x86 `vmrun_path` trap in
+    `nexus-infra-kafka/terraform/envs/kafka/variables.tf` (line ~35) — fix the default to the non-x86 path
+    before a from-zero apply; the `role-overlay-kafka-acl-authorizer.tf` overlay runs after `kafka_tls`
+    (depends_on) and rolling-restarts; watch the standard VMware power-on transients (vmrun "Unknown
+    error" → re-run; fresh-clone no-NIC-IP → `vmrun connectNamedDevice` + `reset`).
 
 ### §3.4 AOT size gate
 ≤30 MB (linux-x64 + win-x64) for the 0.G line (ADR-0024). `pwsh -File scripts/cli.ps1 size-check`.
