@@ -1,0 +1,49 @@
+{
+  "id": "DEMO-73-mongo-sharded-chaos",
+  "title": "Mongo-sharded: chaos process-kill a shard mongod + RS rejoin",
+  "description": "Runs `nexus chaos mongo-sharded process-kill`: kills nexus-mongo on a shard SECONDARY (the safer target), observes the shard drop to 2/3 (still majority), then auto-lifts + confirms the cluster recovers to green.",
+  "prerequisites": {
+    "vmsAlive": [
+      "mongo-cfg-1",
+      "mongo-cfg-2",
+      "mongo-cfg-3",
+      "mongo-shard-1-1",
+      "mongo-shard-1-2",
+      "mongo-shard-1-3",
+      "mongo-shard-2-1",
+      "mongo-shard-2-2",
+      "mongo-shard-2-3",
+      "mongo-mongos-1",
+      "mongo-mongos-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus chaos mongo-sharded process-kill --yes",
+      "waitAfterSeconds": 35,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "chaos",
+        "process-kill",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "observed impact: the victim shard shows quorum 2/3 up during the kill (still majority, no data loss); cluster recovered=true after lift"
+        },
+        {
+          "where": "ssh victim node: systemctl status nexus-mongo",
+          "what": "service killed then restarted; member rejoins the RS as SECONDARY"
+        }
+      ]
+    }
+  ],
+  "whatProves": "MongoShardedAdapter.ApplyChaosAsync pushes the embedded nexus-chaos.sh, process-kills a shard secondary, captures the degraded-but-available impact, and verifies self-healing back to green."
+}

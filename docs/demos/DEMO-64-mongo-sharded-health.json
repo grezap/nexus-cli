@@ -1,0 +1,63 @@
+{
+  "id": "DEMO-64-mongo-sharded-health",
+  "title": "Mongo-sharded: per-RS quorum + balancer + shard registration health",
+  "description": "Runs `nexus health mongo-sharded`: per-RS quorum (majority of 3) + single-primary + per-secondary replication lag, both mongos reachable, shards-registered count, and balancer state.",
+  "prerequisites": {
+    "vmsAlive": [
+      "mongo-cfg-1",
+      "mongo-cfg-2",
+      "mongo-cfg-3",
+      "mongo-shard-1-1",
+      "mongo-shard-1-2",
+      "mongo-shard-1-3",
+      "mongo-shard-2-1",
+      "mongo-shard-2-2",
+      "mongo-shard-2-3",
+      "mongo-mongos-1",
+      "mongo-mongos-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus health mongo-sharded",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "quorum",
+        "primary",
+        "replication-lag",
+        "router",
+        "shards-registered",
+        "balancer"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "all probes green: 3x quorum 3/3, 3x single-primary, per-secondary lag <10s, 2 routers alive, shards-registered=2, balancer=enabled"
+        }
+      ]
+    },
+    {
+      "command": "nexus health mongo-sharded --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "overallHealth",
+        "probes"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON HealthReport overallHealth=green; probe array covers all 3 RSes + routers + cluster-level shards/balancer"
+        }
+      ]
+    }
+  ],
+  "whatProves": "MongoShardedAdapter.HealthAsync proves liveness at three layers: per-replica-set quorum/election, the mongos routing tier, and the config-server metadata (shard count + balancer) read through mongos."
+}

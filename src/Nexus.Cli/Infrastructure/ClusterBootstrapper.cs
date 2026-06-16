@@ -23,6 +23,8 @@ namespace Nexus.Cli.Infrastructure;
 ///     <item>0.G.5 -- ClickHouseAdapter</item>
 ///     <item>0.G.6 -- StarRocksAdapter</item>
 ///     <item>0.G.7 -- SqlFciAdapter + SqlAgAdapter</item>
+///     <item>0.H.7 -- KafkaClusterAdapter x2 + KafkaEcosystemAdapter</item>
+///     <item>0.7.1 -- MongoShardedAdapter (Phase 0.N sharded cluster)</item>
 ///   </list>
 /// </para>
 /// </summary>
@@ -66,6 +68,7 @@ public static class ClusterBootstrapper
             new KafkaClusterAdapter("kafka-west", catalog, ssh, sshUser, sshKey), // 0.6.7
             new KafkaEcosystemAdapter(catalog, ssh, sshUser, sshKey),         // 0.6.7 (ClusterId kafka-ecosystem; observe)
             new MongoAdapter(catalog, ssh, sshUser, sshKey, vault),
+            new MongoShardedAdapter(catalog, ssh, sshUser, sshKey, vault), // 0.7.1 (ClusterId mongo-sharded; Phase 0.N)
             new PerconaAdapter(catalog, ssh, sshUser, sshKey, vault),
             new PatroniAdapter(catalog, ssh, sshUser, sshKey, vault),
             new ClickHouseAdapter(catalog, ssh, sshUser, sshKey, vault),

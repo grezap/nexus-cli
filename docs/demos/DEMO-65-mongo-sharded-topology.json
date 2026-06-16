@@ -1,0 +1,62 @@
+{
+  "id": "DEMO-65-mongo-sharded-topology",
+  "title": "Mongo-sharded: sharded topology (Shards populated)",
+  "description": "Runs `nexus topology mongo-sharded`. Unlike the 0.G.2 replica set, this populates the Shards table: one row per data shard with its primary + replica members.",
+  "prerequisites": {
+    "vmsAlive": [
+      "mongo-cfg-1",
+      "mongo-cfg-2",
+      "mongo-cfg-3",
+      "mongo-shard-1-1",
+      "mongo-shard-1-2",
+      "mongo-shard-1-3",
+      "mongo-shard-2-1",
+      "mongo-shard-2-2",
+      "mongo-shard-2-3",
+      "mongo-mongos-1",
+      "mongo-mongos-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus topology mongo-sharded",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "shard-1",
+        "shard-2",
+        "hashed shard key",
+        "primary"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "Nodes table (config/shard/router roles) + Shards table: shard-1 + shard-2, each primary + 2 replicas, slot range = hashed shard key"
+        }
+      ]
+    },
+    {
+      "command": "nexus topology mongo-sharded --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "nodes",
+        "shards",
+        "shardId"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON TopologySnapshot with shards[] non-null (2 TopologyShard entries) — the genuinely-sharded showcase"
+        }
+      ]
+    }
+  ],
+  "whatProves": "MongoShardedAdapter.TopologyAsync emits a populated Shards array (one TopologyShard per data shard RS), distinguishing this sharded cluster from the non-sharded mongo RS (whose Shards is null)."
+}

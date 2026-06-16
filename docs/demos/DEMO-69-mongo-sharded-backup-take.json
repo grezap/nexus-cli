@@ -1,0 +1,45 @@
+{
+  "id": "DEMO-69-mongo-sharded-backup-take",
+  "title": "Mongo-sharded: backup take (mongodump through mongos)",
+  "description": "Runs `nexus backup take mongo-sharded`: mongodump --archive --gzip of the sharded DB nexus_n_smoke, connecting THROUGH a mongos router (collects the routed data of the sharded collection). Archive written node-local on the mongos.",
+  "prerequisites": {
+    "vmsAlive": [
+      "mongo-cfg-1",
+      "mongo-cfg-2",
+      "mongo-cfg-3",
+      "mongo-shard-1-1",
+      "mongo-shard-1-2",
+      "mongo-shard-1-3",
+      "mongo-shard-2-1",
+      "mongo-shard-2-2",
+      "mongo-shard-2-3",
+      "mongo-mongos-1",
+      "mongo-mongos-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup take mongo-sharded --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "backup take",
+        "mongo-sharded-backup-",
+        "archive.gz"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "GREEN; destination = /var/backups/nexus-mongo-sharded/<id>.archive.gz on mongo-mongos-1; non-zero size"
+        }
+      ]
+    }
+  ],
+  "whatProves": "MongoShardedAdapter.BackupTakeAsync dumps the sharded database through mongos as nexus-sharded-admin — the standard sharded-cluster backup path — writing a single gzip archive node-local on the router."
+}

@@ -1,0 +1,51 @@
+{
+  "id": "DEMO-66-mongo-sharded-failover",
+  "title": "Mongo-sharded: shard-primary failover (rs.stepDown) + per-shard RTO",
+  "description": "Runs `nexus failover-test cluster mongo-sharded`: steps down the first data shard primary, measures the election RTO until a new primary appears in THAT shard, confirms the shard healed. --target picks a specific node or RS.",
+  "prerequisites": {
+    "vmsAlive": [
+      "mongo-cfg-1",
+      "mongo-cfg-2",
+      "mongo-cfg-3",
+      "mongo-shard-1-1",
+      "mongo-shard-1-2",
+      "mongo-shard-1-3",
+      "mongo-shard-2-1",
+      "mongo-shard-2-2",
+      "mongo-shard-2-3",
+      "mongo-mongos-1",
+      "mongo-mongos-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster mongo-sharded --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "mongo-sharded-stepdown",
+        "shard-1",
+        "original primary",
+        "new primary",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "original primary shard-1/<nodeA> -> new primary shard-1/<nodeB>; RTO timeline; recovery=recovered. Live: ~2.8s."
+        },
+        {
+          "where": "ssh shard-1 member: rs.status() (port 27018, __system auth)",
+          "what": "a different shard-1 member is PRIMARY; the stepped-down node is SECONDARY"
+        }
+      ]
+    }
+  ],
+  "whatProves": "MongoShardedAdapter.FailoverAsync runs rs.stepDown(60) on the targeted shard primary (via __system on 127.0.0.1:27018) and measures a real per-shard election RTO; the other shards + config RS are unaffected."
+}

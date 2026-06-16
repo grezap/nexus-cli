@@ -178,9 +178,10 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 | kafka-west | ✅ 06-15 | ✅ 06-15 | ✅ 06-15 | ✅ 06-15³ | ✅ 06-15⁴ | ✅ gen | ✅ 06-15⁵ | ✅ 06-15 | ✅ 06-15 | ✅ list+grant+revoke⁶ |
 | kafka-ecosystem | ✅ 06-15 | ✅ 06-15⁷ | ✅ 06-15 | n/a⁸ | n/a⁸ | ✅ gen | n/a⁸ | ✅ 06-15⁹ | ✅ 06-15 | n/a⁸ |
 | kafka (DR meta) | — | — | — | ✅ v0.5 MM2 | — | — | — | — | — | — |
-| mongo-sharded · vitess · citus | ⏳ per canon order | | | | | | | | | |
+| mongo-sharded | ✅ 06-16 | ✅ 06-16 | ✅ 06-16¹⁰ | ✅ 06-16¹¹ | ✅ 06-16¹² | ✅ gen | ✅ 06-16¹³ | n/a¹⁴ | ✅ 06-16 | ✅ list+grant+revoke¹⁵ |
+| vitess · citus | ⏳ per canon order | | | | | | | | | |
 
-✅ live-verified · ⚠ coded, fix pending · ⏳ pending. Dates = live-verify date.
+✅ live-verified · ⚠ coded, fix pending · ⏳ pending · n/a not-applicable (graceful). Dates = live-verify date.
 ¹ an FCI is a fixed 2-node shared-storage instance — `scale-out` returns a skip-with-explanation (grow via `sqlserver-ag` or `scale-up`).
 ² AG `scale-out add` re-seeds a replica via **manual seeding** (also the named recovery command for a drifted/NOT_HEALTHY secondary).
 ³ kafka failover = a controlled **controller-leader move** (`kafka-metadata-quorum`, RTO ≈ 4.5 s) — complements the cross-region `failover-test cluster kafka` MM2 DR drill (the `kafka` meta-cluster row).
@@ -190,6 +191,12 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 ⁷ ecosystem health = systemctl + each service's HTTPS health endpoint (SR :8081, REST :8082, Connect :8083, ksqlDB :8088) + the MM2 journal.
 ⁸ failover/scale-out/backup/acl on `kafka-ecosystem` return a clear pointer (ecosystem state lives on the brokers; ACLs are enforced there).
 ⁹ ecosystem cert-rotate rebuilds both the PEM and the PKCS#12 keystores (Connect/ksqlDB REST listeners need P12).
+¹⁰ mongo-sharded `topology` **populates the Shards table** (one row per data shard RS) — the sharded showcase the 0.G.2 `mongo` RS (Shards=null) doesn't demonstrate.
+¹¹ mongo-sharded failover = a **shard-primary** `rs.stepDown` (default the first data shard; `--node`/`--target` selects a node or RS) measured to a per-shard election RTO (≈ 2.8 s). The config RS + other shards are unaffected.
+¹² mongo-sharded scale-out = RS-**member** add/remove within a shard (`--shard-id shard-1`; PRIMARY guarded); apply-on-demand for `add`. (Adding/removing a whole shard via `sh.addShard`/`removeShard` is an IaC op, not this verb.)
+¹³ mongo-sharded backup = `mongodump`/`mongorestore` **through a mongos** (the standard sharded-cluster path) of `nexus_n_smoke`, round-tripped into a verify namespace (200 docs). `backup restore` takes the backup-id as a **positional** argument.
+¹⁴ mongo-sharded `cert-rotate` = **graceful not-applicable**: the 0.N v1 cluster authenticates with a shared keyFile and runs WITHOUT TLS (mTLS is the deferred 0.N.1 hardening, ADR-0040). Graduates to a real per-node rotation when 0.N.1 lands.
+¹⁵ mongo-sharded `acl` = config-server admin users (where sharded-cluster client users live) read+mutated **through mongos** as `nexus-sharded-admin` (`local` can't be used through mongos).
 
 ---
 
@@ -203,8 +210,13 @@ $vmrun = 'C:/Program Files/VMware/VMware Workstation/vmrun.exe'
 '01-foundation\vault-2','01-foundation\vault-3','01-foundation\dc-nexus' |
   % { & $vmrun start "H:\VMS\NexusPlatform\$_\$(Split-Path $_ -Leaf).vmx" nogui; Start-Sleep 4 }
 1..6 | % { & $vmrun start "H:\VMS\NexusPlatform\05-oltp\redis-$_\redis-$_.vmx" nogui; Start-Sleep 4 }
+# mongo-sharded (11 VMs) — power on in batches to avoid the vmrun power-on storm:
+'mongo-cfg-1','mongo-cfg-2','mongo-cfg-3','mongo-shard-1-1','mongo-shard-1-2','mongo-shard-1-3',
+'mongo-shard-2-1','mongo-shard-2-2','mongo-shard-2-3','mongo-mongos-1','mongo-mongos-2' |
+  % { & $vmrun start "H:\VMS\NexusPlatform\05-oltp\$_\$_.vmx" nogui; Start-Sleep 4 }
 ```
-Then **always** run §3.2 (the boot-race recovery) before expecting Vault-backed services.
+Then **always** run §3.2 (the boot-race recovery) before expecting Vault-backed services. (mongo-sharded
+needs `VAULT_*` set — the keyFile / operator password is read from Vault KV `nexus/oltp/mongo/keyfile`.)
 
 ### §3.2 TROUBLESHOOTING — "cluster verb returns nothing / cluster-status empty"
 The diagnostic ladder (run top-down; each rung names the fix):
@@ -262,6 +274,34 @@ The diagnostic ladder (run top-down; each rung names the fix):
    (`pwsh -File nexus-infra-oltp/scripts/oltp-mongo.ps1 apply`) — its `mongo_operator_user` overlay is
    idempotent (createUser → else converge roles). If Vault KV has no operator-password, apply the
    nexus-infra-vmware **security** env first (the seed + agent-policy v3 live there).
+
+   **mongo-sharded reality (the SHARDED cluster; live-verified 2026-06-16; ClusterId `mongo-sharded`,
+   distinct from `mongo`).** 11 nodes: config-server RS `config` (mongo-cfg-1/2/3 @ 27019, unit
+   `nexus-mongo`) + shard RSes `shard-1`/`shard-2` (×3 @ 27018, `nexus-mongo`) + 2 `mongos` routers
+   (mongo-mongos-1/2 @ 27017, unit **`nexus-mongos`**). **keyFile-only, NO TLS** in 0.N v1 (mTLS is the
+   deferred 0.N.1 hardening, ADR-0040). **Two-headed auth — both use the keyFile content as the password**
+   (Vault KV `nexus/oltp/mongo/keyfile` field `content`, so `VAULT_*` must be set):
+   - **Direct mongod RS ops** (config + shards): `__system`@`local` (SCRAM-SHA-256). This is the ONLY
+     principal the **shard** mongods accept (`nexus-sharded-admin` exists only on the config RS).
+   - **Cluster-level ops** (sh.status, balancer, acl, backup): `nexus-sharded-admin`@`admin` **through a
+     mongos** (`local` is rejected through mongos — *"Can't use 'local' database through mongos"*).
+
+   On-node probes:
+   ```bash
+   KF=$(sudo cat /etc/nexus-mongo/keyfile)
+   # shard RS member (direct mongod, __system):
+   sudo mongosh --quiet --host 127.0.0.1:27018 --username __system --password "$KF" \
+        --authenticationDatabase local --authenticationMechanism SCRAM-SHA-256 \
+        --eval 'print(rs.status().set)'                       # -> shard-1 / shard-2
+   # cluster view (through mongos, nexus-sharded-admin):
+   sudo mongosh --quiet --host 127.0.0.1:27017 --username nexus-sharded-admin --password "$KF" \
+        --authenticationDatabase admin \
+        --eval 'printjson(db.getSiblingDB("config").shards.find().toArray()); print(sh.getBalancerState())'
+   ```
+   **Gotcha (live-caught):** mongosh `--eval` is wrapped in `--eval '...'`, so JS string literals MUST be
+   **double-quoted** (`"config"`); single quotes terminate the shell quoting early (this bit the health
+   query's `shards-registered` probe before the fix). `cert-rotate` is a graceful N/A (no TLS in v1).
+   Cluster bring-up + cold-rebuild live in `nexus-infra-oltp` (handbook §1n/§3.N; `scripts/mongo-sharded.ps1`).
 
    **SQL Server FCI+AG reality (the first WINDOWS cluster; live-verified 2026-06-12).** Two ClusterIds
    over one vms.yaml cluster `sqlserver`: **`sqlserver`** (FCI) + **`sqlserver-ag`** (AG). The nodes are

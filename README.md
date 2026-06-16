@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.H.7%20v0.6.7%20%E2%9C%85%20Kafka%20adapters%20live-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.N%20v0.7.1%20%E2%9C%85%20mongo--sharded%20adapter%20live-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,7 +12,26 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.6.7):** Phase 0.G/0.H **data-tier adapter expansion** — the last data tier,
+> **Current state (v0.7.1):** **v0.7.0** sealed the Phase 0.G data-tier `IClusterAdapter` expansion (the
+> 0.G exit gate — 9 adapter families: Redis · Mongo · Percona · Patroni · ClickHouse · StarRocks · SQL
+> Server FCI+AG · Kafka ×2 + ecosystem — each live-verified + cold-rebuild-proven; aggregate AOT validated
+> ≤30 MB). The **0.7.x line** now adds the **sharded** adapters. **v0.7.1 = `MongoShardedAdapter`**
+> (ClusterId **`mongo-sharded`**, Phase 0.N): the genuinely-sharded MongoDB cluster — 3 config-server RS
+> (27019) + 2 shard RSes ×3 (27018) + 2 `mongos` routers (27017), distinct from the 0.G.2 `mongo` RS.
+> **Two-headed keyFile auth** (both using the shared keyFile content as the password): `__system`@`local`
+> for direct mongod RS ops (config + shards — the only principal the shard mongods accept) and
+> `nexus-sharded-admin`@`admin` **through a mongos** for cluster-level ops (`local` can't be used through
+> mongos). Verbs — status · health (per-RS quorum + mongos tier + shard-registration/balancer) · **topology
+> (Shards populated — the sharded showcase)** · failover (**shard-primary stepdown**, per-shard RTO≈2.8s) ·
+> scale-out (shard RS member add/remove) · backup (`mongodump`/`mongorestore` **through mongos** round-trip,
+> 200 docs) · acl (config-server admin users via mongos) · chaos (kill a shard secondary) · **cert-rotate =
+> graceful N/A** (no TLS in 0.N v1; mTLS is the deferred 0.N.1 hardening). AOT **26.30 MB / 30**; 97/97
+> tests; 1 live-caught bug (fixed). See [`docs/verification/0.7.1-mongo-sharded.md`](./docs/verification/0.7.1-mongo-sharded.md)
+> + ADR-0019. Remaining: Vitess → Citus → the 5 non-data tiers, per the canon order.
+>
+> <details><summary>v0.6.x data-tier adapters (sealed)</summary>
+>
+> Phase 0.G/0.H **data-tier adapter expansion** — the last data tier,
 > **Kafka**, is now full-verb. **Redis** (v0.6.0, mTLS-only) + **Mongo** (v0.6.1) + **Percona XtraDB
 > Cluster + ProxySQL** (v0.6.2, Galera) + **PostgreSQL Patroni HA** (v0.6.3) + **ClickHouse** (v0.6.4,
 > sharded + Keeper RAFT) + **StarRocks** (v0.6.5, MPP warehouse) + **SQL Server FCI/AG** (v0.6.6, first
@@ -31,6 +50,8 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 > See [`docs/handbook.md`](./docs/handbook.md) for the verb reference + troubleshooting runbook, and
 > [`docs/verification/0.6.7-kafka.md`](./docs/verification/0.6.7-kafka.md) for the live evidence. The
 > remaining adapters (mongo-sharded → Vitess → Citus → the 5 non-data tiers) land per the canon order.
+>
+> </details>
 >
 > **Phase 0.F (v0.5.0) remains closed: all 5 of 5 master-plan verbs ship.** `cluster-status` (v0.1), `infrastructure {list, status, suspend, resume}` (v0.2.x), `failover-test {consul-leader, nomad-leader, swarm-manager}` (v0.3.x), `demo {list, run, record}` (v0.4.0), and **`kafka failover {east-to-west, west-to-east}`** (v0.5.0; ADR-0008 — region-loss DR via vmrun-suspend × 3 source brokers + produce/consume round-trip on the target + vmrun-resume). Verified live: consul 1.55s · nomad 2.716s · swarm-manager 21.59s · kafka east→west 13.20s · kafka west→east 13.57s — all RTOs auto-recovered, all under their master-plan budgets.
 
@@ -199,7 +220,7 @@ Nexus.Cli.Adapters may depend on Nexus.Cli.Core.
 Nothing depends on Nexus.Cli.
 ```
 
-ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Seventeen ADRs cover framework choice (0001), AOT cadence (0002), layout (0003), auth model (0004), Dapper-on-AOT (0005), hand-rolled vms.yaml reader (0006), SSH.NET over ssh.exe (0007), the v0.5 kafka-failover demo-grade-via-SSH design (0008), the `IClusterAdapter` SPI + extended demo spec (0009), the cross-adapter patterns + Redis exemplar (0010), and the per-adapter records: Mongo + the Vault-KV operator-credential model (0011), Percona Galera/ProxySQL (0012), Patroni PG HA (0013), ClickHouse sharded + Keeper (0014), StarRocks FE quorum + BE (0015), SQL Server FCI / WSFC over Windows-SSH (0016), and SQL Server Always On AG + Listener (0017).
+ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Nineteen ADRs cover framework choice (0001), AOT cadence (0002), layout (0003), auth model (0004), Dapper-on-AOT (0005), hand-rolled vms.yaml reader (0006), SSH.NET over ssh.exe (0007), the v0.5 kafka-failover demo-grade-via-SSH design (0008), the `IClusterAdapter` SPI + extended demo spec (0009), the cross-adapter patterns + Redis exemplar (0010), and the per-adapter records: Mongo + the Vault-KV operator-credential model (0011), Percona Galera/ProxySQL (0012), Patroni PG HA (0013), ClickHouse sharded + Keeper (0014), StarRocks FE quorum + BE (0015), SQL Server FCI / WSFC over Windows-SSH (0016), SQL Server Always On AG + Listener (0017), the per-cluster Kafka adapters + KRaft `StandardAuthorizer` (0018), and the **MongoSharded adapter** + its two-headed keyFile auth (0019).
 
 ## Roadmap
 
@@ -224,7 +245,9 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Seventeen ADRs cover fram
 | **v0.6.5** | Phase 0.G.6 — the **StarRocks adapter** (MPP MySQL-protocol warehouse; 3 FE BDB-JE quorum + 3 BE; FE-leader failover RTO≈1.5s; genuine async `BACKUP/RESTORE SNAPSHOT`); all data-tier verbs live-verified; **25.03 MB** |
 | **v0.6.6** | Phase 0.G.7 — the **SQL Server FCI + Always On AG adapters** (the first **Windows** cluster; two adapters over one vms.yaml cluster — `sqlserver` WSFC/FCI + `sqlserver-ag` AG/Listener; Windows-SSH + `sqlcmd`, no managed driver; FCI `Move-ClusterGroup` RTO≈4.5s + AG `ALTER … FAILOVER` RTO≈8.2s; Listener strict-TLS; manual-seed AG scale-out); all verbs live-verified; **25.95 MB** |
 | **v0.6.7** | Phase 0.H.7 — the **Kafka adapters** (`KafkaClusterAdapter` registered twice → `kafka-east` + `kafka-west`, the v0.5 `kafka` stays as the MM2 DR meta-cluster; `KafkaEcosystemAdapter` observes SR/REST/Connect/ksqlDB/MM2; mTLS-only, no managed `Confluent.Kafka`; controller-leader failover RTO≈4.5s; topic round-trip backup; enabled the KRaft `StandardAuthorizer` so `acl` enforces); zero live bugs; **26.18 MB** |
-| v0.7.0–v0.8.0 | base roll-up → mongo-sharded → Vitess → Citus → full-fleet, then the 5 non-data-tier adapters |
+| **v0.7.0** | Phase 0.G **base roll-up** — the 0.G exit-gate milestone: the 9 data-tier adapter families sealed + the aggregate AOT validated ≤30 MB (no new adapter); **26.18 MB**, 86/86 tests |
+| **v0.7.1** | Phase 0.N — the **MongoSharded adapter** (ClusterId `mongo-sharded`; 3 config-server RS + 2 shard RSes ×3 + 2 mongos; two-headed keyFile auth — `__system`@local for mongods + `nexus-sharded-admin`@admin through mongos; `topology` populates Shards; shard-primary stepdown RTO≈2.8s; mongodump-through-mongos backup; cert-rotate graceful N/A — no TLS in v1); all verbs live-verified (1 bug fixed); **26.30 MB** |
+| v0.7.2–v0.8.0 | Vitess → Citus → full-fleet, then the 5 non-data-tier adapters |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing

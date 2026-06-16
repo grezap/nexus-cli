@@ -1,0 +1,44 @@
+{
+  "id": "DEMO-70-mongo-sharded-backup-restore",
+  "title": "Mongo-sharded: backup restore round-trip (mongorestore through mongos)",
+  "description": "Runs `nexus backup restore mongo-sharded <backup-id>`: mongorestore the archive into a verify namespace (nexus_n_restore_verify) through mongos + counts the restored docs. Non-destructive to live data.",
+  "prerequisites": {
+    "vmsAlive": [
+      "mongo-cfg-1",
+      "mongo-cfg-2",
+      "mongo-cfg-3",
+      "mongo-shard-1-1",
+      "mongo-shard-1-2",
+      "mongo-shard-1-3",
+      "mongo-shard-2-1",
+      "mongo-shard-2-2",
+      "mongo-shard-2-3",
+      "mongo-mongos-1",
+      "mongo-mongos-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup restore mongo-sharded <BACKUP_ID> --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "backup restore",
+        "items restored"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "GREEN; items restored = 200 (the seeded sharded collection nexus_n_smoke.samples), restored into nexus_n_restore_verify"
+        }
+      ]
+    }
+  ],
+  "whatProves": "MongoShardedAdapter.BackupRestoreAsync finds the archive on a mongos, restores it through mongos with ns-remap into a verify namespace, and confirms the document count — proving the archive is valid + restorable end-to-end. (backup-id is a positional argument.)"
+}

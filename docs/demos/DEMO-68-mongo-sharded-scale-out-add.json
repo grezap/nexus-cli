@@ -1,0 +1,45 @@
+{
+  "id": "DEMO-68-mongo-sharded-scale-out-add",
+  "title": "Mongo-sharded: scale-out add (rs.add a shard member)",
+  "description": "Runs `nexus scale-out add mongo-sharded --role replica --shard-id shard-1`: discovers a provisioned-but-unjoined reachable mongod for that shard and rs.add's it as a SECONDARY (initial-sync follows). Apply-on-demand: if none exists, returns actionable provisioning guidance.",
+  "prerequisites": {
+    "vmsAlive": [
+      "mongo-cfg-1",
+      "mongo-cfg-2",
+      "mongo-cfg-3",
+      "mongo-shard-1-1",
+      "mongo-shard-1-2",
+      "mongo-shard-1-3",
+      "mongo-shard-2-1",
+      "mongo-shard-2-2",
+      "mongo-shard-2-3",
+      "mongo-mongos-1",
+      "mongo-mongos-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out add mongo-sharded --role replica --shard-id shard-1 --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "scale-out add",
+        "shard-1",
+        "SECONDARY"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "added the unjoined node (e.g. a previously-removed mongo-shard-1-3) back to shard-1 as a SECONDARY; affected-node table"
+        }
+      ]
+    }
+  ],
+  "whatProves": "MongoShardedAdapter.ScaleOutAddAsync finds an unjoined active mongod in the target shard and rs.add's it via the shard primary (__system); doubles as the named recovery for a removed member."
+}

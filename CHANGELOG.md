@@ -6,6 +6,51 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-06-16
+
+Phase 0.N: **`MongoShardedAdapter`** (ClusterId `mongo-sharded`) — the first adapter on the 0.7.x line and
+the genuinely-**sharded** MongoDB cluster, distinct from the 0.G.2 `mongo` replica set. Drives the full
+`IClusterAdapter` surface over the 11-node topology (3 config-server RS @ 27019 + 2 shard RSes ×3 @ 27018
++ 2 `mongos` routers @ 27017) via SSH-shell-out to on-node `mongosh`/`mongodump`/`mongorestore` — **no
+managed driver** (NetArchTest). Live-verified end-to-end against the running cluster — **1 live-caught bug**
+(a single-quote/`--eval` collision in the health mongos query, fixed). AOT **26.30 MB / 30** (+0.12 over
+v0.7.0); **97/97** tests (+11 MongoSharded parser tests). See ADR-0019 +
+`docs/verification/0.7.1-mongo-sharded.md`.
+
+### Added — MongoShardedAdapter (Phase 0.N)
+
+- ClusterId `mongo-sharded`, registered next to `MongoAdapter`. **Two-headed auth**, both using the shared
+  keyFile content as the password (Vault KV `nexus/oltp/mongo/keyfile`, field `content`, via
+  `INexusVaultClient`): `__system`@`local` (SCRAM-SHA-256) for direct mongod RS ops (config + shards — the
+  only principal the shard mongods accept), and `nexus-sharded-admin`@`admin` **through a mongos** for
+  cluster-level ops (`local` can't be used through mongos). Nodes classified by name prefix
+  (`mongo-cfg-*`/`mongo-shard-K-*`/`mongo-mongos-*` → role/RS/port).
+- **status / health / topology** roll up all 3 RSes + the 2 routers; `topology` **populates the Shards
+  array** (one `TopologyShard` per data shard — the sharded showcase); `health` proves per-RS quorum +
+  the mongos tier + the config-server shard-registration/balancer state.
+- **failover** = shard-primary `rs.stepDown` + per-shard re-election (RTO ≈ 2.8 s); **scale-out** add/remove
+  a shard RS member (PRIMARY guarded, apply-on-demand); **backup** take/restore = `mongodump`/`mongorestore`
+  **through mongos** round-trip (200 docs); **acl** = config-server admin users via mongos; **chaos** =
+  process-kill a shard secondary + rejoin.
+- **cert-rotate** returns a **graceful not-applicable** result — the 0.N v1 cluster has no TLS (mTLS is the
+  deferred 0.N.1 hardening, ADR-0040); it never fails silently.
+- 11 System B demos `docs/demos/DEMO-63..73-mongo-sharded-*.json`.
+
+## [0.7.0] — 2026-06-16
+
+**Phase 0.G data-tier base roll-up** — the milestone tag for the 0.G exit gate (*"nexus-cli tagged
+`v0.7.0`, ≤30 MB AOT validated"*). No new adapter: this seals the data-tier `IClusterAdapter` expansion
+(Redis · Mongo · Percona · Patroni · ClickHouse · StarRocks · SQL Server FCI+AG · Kafka ×2 + ecosystem —
+9 adapter families across ClusterIds, each shipped + live-verified + cold-rebuild-proven in its own v0.6.x
+slice) and validates the aggregate AOT artifact against the ≤30 MB gate before the 0.7.x line begins adding
+the sharded adapters (0.N mongo-sharded → 0.O Vitess → 0.P Citus).
+
+### Validated
+
+- AOT win-x64 **26.18 MB / 30** [OK]; **86/86** tests; NetArchTest no-managed-driver green; `dotnet build`
+  0 warnings / 0 errors. The historical v0.5.0 ≤25 MB gate stays sealed (22.75 MB); the 0.G line uses the
+  ≤30 MB gate (ADR-0024 / ADR-0009).
+
 ## [0.6.7] — 2026-06-15
 
 Phase 0.H.7: promoted **Kafka** from the thin v0.5 retrofit (failover-only) to the full verb surface.

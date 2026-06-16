@@ -1,0 +1,76 @@
+{
+  "id": "DEMO-71-mongo-sharded-acl",
+  "title": "Mongo-sharded: ACL list + grant + revoke (config-server admin users via mongos)",
+  "description": "Runs `nexus acl mongo-sharded list|grant|revoke`. Sharded-cluster client users live in the admin DB on the config servers; the adapter reads + mutates them THROUGH mongos as nexus-sharded-admin.",
+  "prerequisites": {
+    "vmsAlive": [
+      "mongo-cfg-1",
+      "mongo-cfg-2",
+      "mongo-cfg-3",
+      "mongo-shard-1-1",
+      "mongo-shard-1-2",
+      "mongo-shard-1-3",
+      "mongo-shard-2-1",
+      "mongo-shard-2-2",
+      "mongo-shard-2-3",
+      "mongo-mongos-1",
+      "mongo-mongos-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus acl mongo-sharded list",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "acl mongo-sharded",
+        "nexus-sharded-admin",
+        "root@admin"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "lists the config-server admin users; nexus-sharded-admin shows role root@admin"
+        }
+      ]
+    },
+    {
+      "command": "nexus acl mongo-sharded grant --user nexus-acl-probe --yes",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "verb=describe",
+        "nexus-acl-probe",
+        "read@admin"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "nexus-acl-probe created with read@admin (re-read confirms)"
+        }
+      ]
+    },
+    {
+      "command": "nexus acl mongo-sharded revoke --user nexus-acl-probe --yes",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "verb=describe",
+        "nexus-acl-probe"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "nexus-acl-probe permissions now empty (role revoked)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "MongoShardedAdapter.AclAsync proves user management routes through mongos (admin DB) to the config servers — the correct plane for sharded-cluster client users (local cannot be used through mongos)."
+}

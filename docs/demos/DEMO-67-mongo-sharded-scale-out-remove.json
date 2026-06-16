@@ -1,0 +1,45 @@
+{
+  "id": "DEMO-67-mongo-sharded-scale-out-remove",
+  "title": "Mongo-sharded: scale-out remove (rs.remove a shard member)",
+  "description": "Runs `nexus scale-out remove mongo-sharded <node>`: removes a shard secondary from its replica set (PRIMARY is guarded — step it down first). The mongod keeps running, ready for re-add or deprovision.",
+  "prerequisites": {
+    "vmsAlive": [
+      "mongo-cfg-1",
+      "mongo-cfg-2",
+      "mongo-cfg-3",
+      "mongo-shard-1-1",
+      "mongo-shard-1-2",
+      "mongo-shard-1-3",
+      "mongo-shard-2-1",
+      "mongo-shard-2-2",
+      "mongo-shard-2-3",
+      "mongo-mongos-1",
+      "mongo-mongos-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out remove mongo-sharded mongo-shard-1-3 --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "scale-out remove",
+        "mongo-shard-1-3",
+        "shard-1"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "removed mongo-shard-1-3 from shard-1 (node still running); affected-node table"
+        }
+      ]
+    }
+  ],
+  "whatProves": "MongoShardedAdapter.ScaleOutRemoveAsync resolves the node's shard RS from its name, runs rs.remove on that RS's primary via __system, and refuses to remove a current PRIMARY (would force an unplanned election)."
+}

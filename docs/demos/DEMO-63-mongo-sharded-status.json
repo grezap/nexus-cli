@@ -1,0 +1,66 @@
+{
+  "id": "DEMO-63-mongo-sharded-status",
+  "title": "Mongo-sharded: full cluster status (config RS + 2 shards + 2 mongos)",
+  "description": "Runs `nexus status mongo-sharded` across all 11 nodes. One table rolls up the config-server RS, both shard RSes (ShardId column), and the 2 stateless mongos routers.",
+  "prerequisites": {
+    "vmsAlive": [
+      "mongo-cfg-1",
+      "mongo-cfg-2",
+      "mongo-cfg-3",
+      "mongo-shard-1-1",
+      "mongo-shard-1-2",
+      "mongo-shard-1-3",
+      "mongo-shard-2-1",
+      "mongo-shard-2-2",
+      "mongo-shard-2-3",
+      "mongo-mongos-1",
+      "mongo-mongos-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus status mongo-sharded",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "mongo-sharded",
+        "primary",
+        "secondary",
+        "router",
+        "config",
+        "shard-1",
+        "shard-2"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "11-row table: config 1 primary + 2 secondary; shard-1 + shard-2 each 1 primary + 2 secondary (ShardId set); 2 routers alive"
+        }
+      ]
+    },
+    {
+      "command": "nexus status mongo-sharded --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "clusterId",
+        "overallHealth",
+        "members",
+        "shardId"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON ClusterStatusOutputJson: 11 members, overallHealth=green, shardId populated per RS member, router members shardId=null"
+        }
+      ]
+    }
+  ],
+  "whatProves": "MongoShardedAdapter.GetStatusAsync queries each RS via __system (direct mongod) + each mongos via nexus-sharded-admin, classifying nodes by name prefix into config/shard-1/shard-2/router."
+}
