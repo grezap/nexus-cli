@@ -193,7 +193,7 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 ⁹ ecosystem cert-rotate rebuilds both the PEM and the PKCS#12 keystores (Connect/ksqlDB REST listeners need P12).
 ¹⁰ mongo-sharded `topology` **populates the Shards table** (one row per data shard RS) — the sharded showcase the 0.G.2 `mongo` RS (Shards=null) doesn't demonstrate.
 ¹¹ mongo-sharded failover = a **shard-primary** `rs.stepDown` (default the first data shard; `--node`/`--target` selects a node or RS) measured to a per-shard election RTO (≈ 2.8 s). The config RS + other shards are unaffected.
-¹² mongo-sharded scale-out = RS-**member** add/remove within a shard (`--shard-id shard-1`; PRIMARY guarded); apply-on-demand for `add`. (Adding/removing a whole shard via `sh.addShard`/`removeShard` is an IaC op, not this verb.)
+¹² mongo-sharded scale-out = RS-**member** add/remove within a shard (`--shard shard-1`; PRIMARY guarded); apply-on-demand for `add`. (Adding/removing a whole shard via `sh.addShard`/`removeShard` is an IaC op, not this verb.)
 ¹³ mongo-sharded backup = `mongodump`/`mongorestore` **through a mongos** (the standard sharded-cluster path) of `nexus_n_smoke`, round-tripped into a verify namespace (200 docs). `backup restore` takes the backup-id as a **positional** argument.
 ¹⁴ mongo-sharded `cert-rotate` = **graceful not-applicable**: the 0.N v1 cluster authenticates with a shared keyFile and runs WITHOUT TLS (mTLS is the deferred 0.N.1 hardening, ADR-0040). Graduates to a real per-node rotation when 0.N.1 lands.
 ¹⁵ mongo-sharded `acl` = config-server admin users (where sharded-cluster client users live) read+mutated **through mongos** as `nexus-sharded-admin` (`local` can't be used through mongos).

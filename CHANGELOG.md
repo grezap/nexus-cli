@@ -13,8 +13,9 @@ the genuinely-**sharded** MongoDB cluster, distinct from the 0.G.2 `mongo` repli
 `IClusterAdapter` surface over the 11-node topology (3 config-server RS @ 27019 + 2 shard RSes ×3 @ 27018
 + 2 `mongos` routers @ 27017) via SSH-shell-out to on-node `mongosh`/`mongodump`/`mongorestore` — **no
 managed driver** (NetArchTest). Live-verified end-to-end against the running cluster — **1 live-caught bug**
-(a single-quote/`--eval` collision in the health mongos query, fixed). AOT **26.30 MB / 30** (+0.12 over
-v0.7.0); **97/97** tests (+11 MongoSharded parser tests). See ADR-0019 +
+(a single-quote/`--eval` collision in the health mongos query, fixed) — and **cold-rebuild-proven** (destroy →
+from-zero `apply -parallelism=3`, zero transients → smoke 61/61 → full verb matrix re-ran green). AOT
+**26.30 MB / 30** (+0.12 over v0.7.0); **97/97** tests (+11 MongoSharded parser tests). See ADR-0019 +
 `docs/verification/0.7.1-mongo-sharded.md`.
 
 ### Added — MongoShardedAdapter (Phase 0.N)

@@ -1,7 +1,7 @@
 {
   "id": "DEMO-68-mongo-sharded-scale-out-add",
   "title": "Mongo-sharded: scale-out add (rs.add a shard member)",
-  "description": "Runs `nexus scale-out add mongo-sharded --role replica --shard-id shard-1`: discovers a provisioned-but-unjoined reachable mongod for that shard and rs.add's it as a SECONDARY (initial-sync follows). Apply-on-demand: if none exists, returns actionable provisioning guidance.",
+  "description": "Runs `nexus scale-out add mongo-sharded --role replica --shard shard-1`: discovers a provisioned-but-unjoined reachable mongod for that shard and rs.add's it as a SECONDARY (initial-sync follows). Apply-on-demand: if none exists, returns actionable provisioning guidance.",
   "prerequisites": {
     "vmsAlive": [
       "mongo-cfg-1",
@@ -25,7 +25,7 @@
   },
   "steps": [
     {
-      "command": "nexus scale-out add mongo-sharded --role replica --shard-id shard-1 --yes",
+      "command": "nexus scale-out add mongo-sharded --role replica --shard shard-1 --yes",
       "waitAfterSeconds": 4,
       "expectedExitCode": 0,
       "expectedOutputContains": [
