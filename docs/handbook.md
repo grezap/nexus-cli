@@ -179,7 +179,8 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 | kafka-ecosystem | ✅ 06-15 | ✅ 06-15⁷ | ✅ 06-15 | n/a⁸ | n/a⁸ | ✅ gen | n/a⁸ | ✅ 06-15⁹ | ✅ 06-15 | n/a⁸ |
 | kafka (DR meta) | — | — | — | ✅ v0.5 MM2 | — | — | — | — | — | — |
 | mongo-sharded | ✅ 06-16 | ✅ 06-16 | ✅ 06-16¹⁰ | ✅ 06-16¹¹ | ✅ 06-16¹² | ✅ gen | ✅ 06-16¹³ | n/a¹⁴ | ✅ 06-16 | ✅ list+grant+revoke¹⁵ |
-| vitess · citus | ⏳ per canon order | | | | | | | | | |
+| vitess | ✅ 06-17 | ✅ 06-17¹⁶ | ✅ 06-17¹⁷ | ✅ 06-17¹⁸ | ✅ 06-17¹⁹ | ✅ gen | ✅ 06-17²⁰ | ✅ 06-17²¹ | ✅ 06-17²² | ✅ list+grant+revoke²³ |
+| citus | ⏳ per canon order (v0.7.3) | | | | | | | | | |
 
 ✅ live-verified · ⚠ coded, fix pending · ⏳ pending · n/a not-applicable (graceful). Dates = live-verify date.
 ¹ an FCI is a fixed 2-node shared-storage instance — `scale-out` returns a skip-with-explanation (grow via `sqlserver-ag` or `scale-up`).
@@ -197,6 +198,14 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 ¹³ mongo-sharded backup = `mongodump`/`mongorestore` **through a mongos** (the standard sharded-cluster path) of `nexus_n_smoke`, round-tripped into a verify namespace (200 docs). `backup restore` takes the backup-id as a **positional** argument.
 ¹⁴ mongo-sharded `cert-rotate` = **graceful not-applicable**: the 0.N v1 cluster authenticates with a shared keyFile and runs WITHOUT TLS (mTLS is the deferred 0.N.1 hardening, ADR-0040). Graduates to a real per-node rotation when 0.N.1 lands.
 ¹⁵ mongo-sharded `acl` = config-server admin users (where sharded-cluster client users live) read+mutated **through mongos** as `nexus-sharded-admin` (`local` can't be used through mongos).
+¹⁶ vitess `health` proves every layer: etcd quorum (one `nexus-etcdctl endpoint health` reports all 3), vtctld active, VTOrc `/debug/health` + no `/api/problems`, both vtgate `:15306` listeners, per-shard 1 PRIMARY + 2 REPLICA, the operator mTLS round-trip via vtgate, and the **sharding proof** (each shard non-empty: 54 / 47 rows).
+¹⁷ vitess `topology` **populates the Shards table** (one row per keyspace shard `-80` / `80-`, slot range = the hash-vindex key range). Tablets register in the topo by their **VMnet10** IP (mapped back via vms.yaml); primaries are read from the topo (`GetShard.primary_alias`), never assumed — they drift off the lowest uid.
+¹⁸ vitess failover = a graceful **`PlannedReparentShard`** to a healthy replica of the targeted shard (`--node`/`--target` selects a shard or a tablet node; default the first shard), measured to the shard-record primary change (RTO ≈ 0.17 s). The old PRIMARY is demoted to REPLICA in place. The VTOrc auto-reparent-on-kill path is exercised by `chaos` against a primary.
+¹⁹ vitess scale-out = **tablet membership**: `remove` stops `nexus-vttablet`+`nexus-mysqlctld` and `DeleteTablets` from the topo (PRIMARY guarded + a ≥2-survivor floor); `add --shard <range>` restarts a previously-removed tablet so vttablet re-registers it as a REPLICA. Genuine growth = apply-on-demand IaC.
+²⁰ vitess backup = a sharding-aware **logical `mysqldump`** of `vt_commerce.customer` (the keyspace maps to the `vt_`-prefixed mysqld db) from each shard PRIMARY socket as `vt_dba` → `/var/backups/nexus-vitess/<id>/<shard>.sql.gz`; `restore` reloads each into a throwaway `commerce_restore_verify` DB (`sql_log_bin=0`), counts (101 rows), drops. **No Vitess BackupStorage is configured in 0.O** (`GetBackups` → "no registered implementation"); engine-native `vtctldclient Backup` is the 0.O.1 enhancement. `backup restore` takes the id **positionally**.
+²¹ vitess `cert-rotate` = per-node Vault PKI (`pki_int/issue/vitess-server` via the node's own Agent token `/run/nexus-vault-agent/token` → `nexus-vitess-tls-split.sh`), order etcd → tablet-replicas → tablet-primaries → vtgate → control. Tablet restarts are **`nexus-vttablet`-only** (gRPC + db-client certs reload; mysqld stays up so the PRIMARY is never demoted — the mysqld-wire cert reload is deferred to a mysqld restart window).
+²² vitess `chaos` process-kill SIGSTOPs a single unit (`nexus-chaos.sh`): a replica freezes `nexus-vttablet`; a PRIMARY target freezes `nexus-mysqlctld` (mysqld) → **VTOrc auto-reparents** the shard to a replica (proven live: VTOrc promoted shard2-tablet-2 when the `80-` primary froze) → lift + recover to green.
+²³ vitess `acl` = the **vtgate static-auth file** `/etc/nexus-vitess/vtgate_creds.json` (the real MySQL credentials at the `:15306` front door) — `list` parses it; `grant`/`revoke` edit it on **both** vtgate nodes + restart `nexus-vtgate` to apply. vtgate does NOT proxy `CREATE USER` DDL; the built-in `nexus` operator user is revoke-protected.
 
 ---
 
@@ -214,6 +223,11 @@ $vmrun = 'C:/Program Files/VMware/VMware Workstation/vmrun.exe'
 'mongo-cfg-1','mongo-cfg-2','mongo-cfg-3','mongo-shard-1-1','mongo-shard-1-2','mongo-shard-1-3',
 'mongo-shard-2-1','mongo-shard-2-2','mongo-shard-2-3','mongo-mongos-1','mongo-mongos-2' |
   % { & $vmrun start "H:\VMS\NexusPlatform\05-oltp\$_\$_.vmx" nogui; Start-Sleep 4 }
+# vitess (12 VMs, tier 07-vitess) — etcd first, then control/vtgate, then tablets:
+'vitess-etcd-1','vitess-etcd-2','vitess-etcd-3','vitess-control-1','vitess-vtgate-1','vitess-vtgate-2',
+'vitess-shard1-tablet-1','vitess-shard1-tablet-2','vitess-shard1-tablet-3',
+'vitess-shard2-tablet-1','vitess-shard2-tablet-2','vitess-shard2-tablet-3' |
+  % { & $vmrun start "H:\VMS\NexusPlatform\07-vitess\$_\$_.vmx" nogui; Start-Sleep 4 }
 ```
 Then **always** run §3.2 (the boot-race recovery) before expecting Vault-backed services. (mongo-sharded
 needs `VAULT_*` set — the keyFile / operator password is read from Vault KV `nexus/oltp/mongo/keyfile`.)
@@ -302,6 +316,40 @@ The diagnostic ladder (run top-down; each rung names the fix):
    **double-quoted** (`"config"`); single quotes terminate the shell quoting early (this bit the health
    query's `shards-registered` probe before the fix). `cert-rotate` is a graceful N/A (no TLS in v1).
    Cluster bring-up + cold-rebuild live in `nexus-infra-oltp` (handbook §1n/§3.N; `scripts/mongo-sharded.ps1`).
+
+   **vitess reality (the Vitess-SHARDED MySQL cluster; live-verified 2026-06-17; ClusterId `vitess`).**
+   12 nodes (tier 07-vitess): 3 etcd topo (vitess-etcd-1/2/3 @ .190-.192, unit `nexus-etcd`, cell `nexus`) +
+   1 control (vitess-control-1 @ .193, `nexus-vtctld` + `nexus-vtorc`) + 2 vtgate (vitess-vtgate-1/2 @
+   .194/.195, `nexus-vtgate`, MySQL `:15306`) + 2 shards ×3 tablets (vitess-shard1-tablet-1/2/3 @ .196-.198
+   shard `-80`; vitess-shard2-tablet-1/2/3 @ .199-.201 shard `80-`; each `nexus-vttablet` + a Percona 8.4
+   under `nexus-mysqlctld`). Keyspace `commerce`, table `customer`, hash vindex on `customer_id`; durability
+   `none`. **Hybrid auth:** the control plane is mTLS-only (no password) via the preloaded wrapper
+   `sudo /usr/local/sbin/nexus-vtctldclient`; the SQL plane uses the vtgate `:15306` mTLS listener as
+   static-auth user `nexus` (password = Vault KV `nexus/vitess/mysql-app-password` field `content`, so
+   `VAULT_*` must be set). Tablets report their **VMnet10** IP in the topo; primaries **drift off the lowest
+   uid** — read them from `GetShard.primary_alias`.
+   On-node probes:
+   ```bash
+   # control: topology (mTLS gRPC, no password) — the underlying mysqld db is vt_commerce:
+   sudo /usr/local/sbin/nexus-vtctldclient GetTablets --keyspace commerce --format json
+   sudo /usr/local/sbin/nexus-vtctldclient GetShard commerce/-80      # .shard.primary_alias.uid
+   # etcd quorum (one call reports all 3 — count "is healthy" NOT bare "healthy"):
+   sudo /usr/local/sbin/nexus-etcdctl endpoint health
+   # SQL via vtgate from a TABLET node (mysql client + TLS leaf), mTLS as nexus:
+   APP=$(sudo cat /etc/nexus-vitess/mysql-app-password)
+   sudo env MYSQL_PWD="$APP" mysql --host=192.168.70.194 --port=15306 --user=nexus \
+     --ssl-mode=REQUIRED --ssl-cert=/etc/nexus-vitess/tls/server-cert.pem \
+     --ssl-key=/etc/nexus-vitess/tls/server-key.pem --ssl-ca=/etc/nexus-vitess/tls/ca.pem \
+     --batch --skip-column-names 'commerce/80-' -e 'SELECT COUNT(*) FROM customer'   # -> 47
+   ```
+   **Gotchas (live-caught):** (1) `nexus-etcdctl endpoint health` reports ALL 3 endpoints from any one node
+   (count `"is healthy"`, not bare `healthy` — that matches `unhealthy` too). (2) `mysqldump` must target
+   **`vt_commerce`** (the `vt_`-prefixed mysqld db), NOT `commerce` (the keyspace name vtgate translates).
+   (3) `nexus-chaos.sh process-kill` SIGSTOPs ONE unit — freeze `nexus-mysqlctld` on a primary (→ VTOrc
+   auto-reparent), `nexus-vttablet` on a replica; never a space-separated pair. (4) `CREATE USER` via vtgate
+   fails ("syntax error near 'USER'") → `acl` manages `vtgate_creds.json`, not SQL DDL. `cert-rotate` restarts
+   vttablet-only on tablets (mysqld stays up → no reparent). Cluster bring-up + cold-rebuild live in
+   `nexus-infra-vitess` (handbook §0-§3.1; `scripts/vitess.ps1`).
 
    **SQL Server FCI+AG reality (the first WINDOWS cluster; live-verified 2026-06-12).** Two ClusterIds
    over one vms.yaml cluster `sqlserver`: **`sqlserver`** (FCI) + **`sqlserver-ag`** (AG). The nodes are

@@ -25,6 +25,7 @@ namespace Nexus.Cli.Infrastructure;
 ///     <item>0.G.7 -- SqlFciAdapter + SqlAgAdapter</item>
 ///     <item>0.H.7 -- KafkaClusterAdapter x2 + KafkaEcosystemAdapter</item>
 ///     <item>0.7.1 -- MongoShardedAdapter (Phase 0.N sharded cluster)</item>
+///     <item>0.7.2 -- VitessAdapter (Phase 0.O Vitess-sharded MySQL)</item>
 ///   </list>
 /// </para>
 /// </summary>
@@ -75,6 +76,7 @@ public static class ClusterBootstrapper
             new StarRocksAdapter(catalog, ssh, sshUser, sshKey, vault),
             new SqlFciAdapter(catalog, ssh, sshUser, sshKey, vault),     // 0.G.7 (ClusterId sqlserver)
             new SqlAgAdapter(catalog, ssh, sshUser, sshKey, vault),      // 0.G.7 (ClusterId sqlserver-ag)
+            new VitessAdapter(catalog, ssh, sshUser, sshKey, vault),     // 0.7.2 (ClusterId vitess; Phase 0.O sharded MySQL)
         };
         return new ClusterRegistry(adapters);
     }

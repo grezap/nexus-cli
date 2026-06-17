@@ -1,0 +1,62 @@
+{
+  "id": "DEMO-82-vitess-cert-rotate",
+  "title": "Vitess: per-node Vault PKI cert rotation",
+  "description": "Runs `nexus cert-rotate vitess`: re-issues a fresh leaf from pki_int/issue/vitess-server on every node via its own Vault Agent token, splits the bundle, and restarts the serving unit. Order etcd -> tablet-replicas -> tablet-primaries -> vtgate -> control; tablet restarts are vttablet-only (mysqld stays up, no reparent).",
+  "prerequisites": {
+    "vmsAlive": [
+      "vitess-etcd-1",
+      "vitess-etcd-2",
+      "vitess-etcd-3",
+      "vitess-control-1",
+      "vitess-vtgate-1",
+      "vitess-vtgate-2",
+      "vitess-shard1-tablet-1",
+      "vitess-shard1-tablet-2",
+      "vitess-shard1-tablet-3",
+      "vitess-shard2-tablet-1",
+      "vitess-shard2-tablet-2",
+      "vitess-shard2-tablet-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus cert-rotate vitess --yes",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "cert",
+        "serial",
+        "vitess-etcd-1",
+        "vitess-control-1"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "12 rows old->new serial, 0 errors; cluster stays green (rolling, non-disruptive)"
+        }
+      ]
+    },
+    {
+      "command": "nexus cert-rotate vitess --yes --json",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "rotatedNodes",
+        "newSerial"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON CertRotationResult: 12 rotatedNodes, each with a new serial_number, error=null"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VitessAdapter.RotateCertAsync re-issues per-host certs via the node Agent token + nexus-vitess-tls-split.sh, restarting only the gRPC-serving unit per role so the cluster never loses a primary."
+}

@@ -1,0 +1,64 @@
+{
+  "id": "DEMO-84-vitess-chaos",
+  "title": "Vitess: process-kill chaos + VTOrc auto-reparent",
+  "description": "Runs `nexus chaos vitess process-kill`: SIGSTOPs a tablet via the embedded nexus-chaos.sh. A replica freezes vttablet; targeting a PRIMARY freezes its mysqld (nexus-mysqlctld) -> VTOrc auto-reparents the shard to a replica -> lift + recover to green.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vitess-etcd-1",
+      "vitess-etcd-2",
+      "vitess-etcd-3",
+      "vitess-control-1",
+      "vitess-vtgate-1",
+      "vitess-vtgate-2",
+      "vitess-shard1-tablet-1",
+      "vitess-shard1-tablet-2",
+      "vitess-shard1-tablet-3",
+      "vitess-shard2-tablet-1",
+      "vitess-shard2-tablet-2",
+      "vitess-shard2-tablet-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus chaos vitess process-kill --yes",
+      "waitAfterSeconds": 25,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "process-kill",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "froze a replica vttablet, captured impact, lifted + recovered -> all probes green"
+        }
+      ]
+    },
+    {
+      "command": "nexus chaos vitess process-kill --target vitess-shard2-tablet-1 --yes",
+      "waitAfterSeconds": 30,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "process-kill",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "froze the 80- primary mysqld; cluster recovered green"
+        },
+        {
+          "where": "ssh control: nexus-vtctldclient GetShard commerce/80-",
+          "what": "VTOrc promoted a different tablet to PRIMARY; the frozen node rejoined as REPLICA"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VitessAdapter.ApplyChaosAsync SIGSTOPs a single unit per nexus-chaos.sh: a replica vttablet, or a primary mysqld whose freeze triggers VTOrc auto-reparent — the headline HA feature — then lifts and confirms recovery to green."
+}

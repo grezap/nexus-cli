@@ -1,0 +1,68 @@
+{
+  "id": "DEMO-74-vitess-status",
+  "title": "Vitess: full cluster status (etcd topo + control + 2 vtgate + 2 shards x 3 tablets)",
+  "description": "Runs `nexus status vitess` across all 12 nodes. One table rolls up the 3 etcd topo servers, the vtctld/VTOrc control node, the 2 vtgate routers, and the 6 tablets (Shard column, primary/replica per shard read from the topo).",
+  "prerequisites": {
+    "vmsAlive": [
+      "vitess-etcd-1",
+      "vitess-etcd-2",
+      "vitess-etcd-3",
+      "vitess-control-1",
+      "vitess-vtgate-1",
+      "vitess-vtgate-2",
+      "vitess-shard1-tablet-1",
+      "vitess-shard1-tablet-2",
+      "vitess-shard1-tablet-3",
+      "vitess-shard2-tablet-1",
+      "vitess-shard2-tablet-2",
+      "vitess-shard2-tablet-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus status vitess",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "vitess",
+        "etcd",
+        "control",
+        "router",
+        "primary",
+        "replica",
+        "-80",
+        "80-"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "12-row table: 3 etcd alive, control alive, 2 routers alive, shard -80 + 80- each 1 primary + 2 replica (Shard set); overall green"
+        }
+      ]
+    },
+    {
+      "command": "nexus status vitess --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "clusterId",
+        "overallHealth",
+        "members",
+        "shardId"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON ClusterStatus: 12 members, overallHealth=green, shardId set per tablet, etcd/control/router shardId=null"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VitessAdapter.GetStatusAsync classifies nodes by name (etcd/control/vtgate/tablet), reads tablet roles from GetTablets (topo), and maps the reported VMnet10 IP back to the vms.yaml node."
+}

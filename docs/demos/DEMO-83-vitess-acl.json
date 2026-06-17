@@ -1,0 +1,75 @@
+{
+  "id": "DEMO-83-vitess-acl",
+  "title": "Vitess: vtgate static-auth users (the MySQL :15306 front door)",
+  "description": "Runs `nexus acl vitess {list,grant,revoke}` against the vtgate static-auth file (vtgate_creds.json) on both vtgate nodes. vtgate does not proxy CREATE USER DDL, so the front-door credentials are managed in the static file + a vtgate reload.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vitess-etcd-1",
+      "vitess-etcd-2",
+      "vitess-etcd-3",
+      "vitess-control-1",
+      "vitess-vtgate-1",
+      "vitess-vtgate-2",
+      "vitess-shard1-tablet-1",
+      "vitess-shard1-tablet-2",
+      "vitess-shard1-tablet-3",
+      "vitess-shard2-tablet-1",
+      "vitess-shard2-tablet-2",
+      "vitess-shard2-tablet-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus acl vitess list",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "vitess",
+        "nexus",
+        "vtgate MySQL listener login"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "lists the static-auth users; nexus = the app/operator login at :15306"
+        }
+      ]
+    },
+    {
+      "command": "nexus acl vitess grant --user reporting --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "reporting",
+        "nexus"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "reporting added to vtgate_creds.json on BOTH vtgate nodes (+ restart); nexus preserved"
+        }
+      ]
+    },
+    {
+      "command": "nexus acl vitess revoke --user reporting --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "nexus"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "reporting removed; only nexus remains (round-trip clean)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VitessAdapter.AclAsync manages the vtgate static-auth users (the real MySQL credentials at :15306): list parses vtgate_creds.json; grant/revoke edit it on both vtgate nodes + restart nexus-vtgate, protecting the built-in nexus user."
+}

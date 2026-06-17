@@ -6,6 +6,41 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-06-17
+
+Phase 0.O: **`VitessAdapter`** (ClusterId `vitess`) — the second adapter on the 0.7.x sharded line: the
+Vitess-sharded MySQL/Percona cluster (3 etcd topo + vtctld/VTOrc control + 2 vtgate routers + 2 shards ×3
+tablets; keyspace `commerce` split `-80`/`80-` by a **hash vindex on `customer_id`**; Percona Server 8.4
+under `mysqlctld`). Drives the full `IClusterAdapter` surface over a **hybrid operator identity** — the
+mTLS gRPC control plane via `sudo nexus-vtctldclient` (no password) + the SQL plane via the vtgate `:15306`
+mTLS listener as the static-auth user `nexus` (password in Vault KV `nexus/vitess/mysql-app-password`, the
+ADR-0011 model) — by SSH-shell-out to on-node `vtctldclient`/`mysql`/`mysqldump`, **no managed driver**
+(NetArchTest). Live-verified end-to-end against the running 12-VM cluster — **3 live-caught bugs** (the
+etcd-quorum line count, the `vt_commerce` dump db name, the single-unit chaos freeze), fixed. AOT
+**26.52 MB / 30** (+0.22 over v0.7.1); **114/114** tests (+17 Vitess parser tests). Cold-rebuild PENDING
+consent. See ADR-0020 + `docs/verification/0.7.2-vitess.md`.
+
+### Added — VitessAdapter (Phase 0.O)
+
+- ClusterId `vitess`, registered next to `MongoShardedAdapter`. Nodes classified by name
+  (`vitess-etcd-*`/`vitess-control-*`/`vitess-vtgate-*`/`vitess-shard<K>-tablet-*`); tablets register in the
+  topo by their **VMnet10** IP, mapped back via vms.yaml; **primaries read from the topo**
+  (`GetShard.primary_alias` / the tablet `type`), never assumed (they drift off the lowest uid).
+- **status / health / topology** roll up all 12 nodes; `topology` **populates the Shards array** (one
+  `TopologyShard` per keyspace shard, slot range = the hash-vindex key range — the sharded showcase);
+  `health` proves etcd quorum + vtctld + VTOrc + both vtgate listeners + per-shard 1P+2R + the operator
+  mTLS round-trip + the **sharding proof** (both shards non-empty: 54 / 47 rows).
+- **failover** = graceful `PlannedReparentShard` to a healthy replica (RTO ≈ 0.17 s; old primary demoted in
+  place). **scale-out** add/remove = tablet membership (`DeleteTablets` + service start; PRIMARY-guarded,
+  ≥2-survivor floor). **backup** take/restore = **logical `mysqldump` per shard** (no Vitess BackupStorage
+  configured in 0.O → engine-native Backup is the 0.O.1 enhancement) reloaded into a `commerce_restore_verify`
+  DB (101 rows round-tripped). **cert-rotate** = per-node Vault PKI (`pki_int/issue/vitess-server` via the
+  node Agent token + `nexus-vitess-tls-split.sh`), vttablet-only tablet restart (mysqld stays up → no
+  reparent). **acl** = the **vtgate static-auth file** (`vtgate_creds.json` on both vtgate nodes + reload;
+  vtgate doesn't proxy `CREATE USER`). **chaos** = SIGSTOP a tablet — a primary freeze (`nexus-mysqlctld`)
+  triggers **VTOrc auto-reparent** (proven live: VTOrc promoted shard2-tablet-2 when the `80-` primary froze).
+- 11 System B demos `docs/demos/DEMO-74..84-vitess-*.json` (one per verb).
+
 ## [0.7.1] — 2026-06-16
 
 Phase 0.N: **`MongoShardedAdapter`** (ClusterId `mongo-sharded`) — the first adapter on the 0.7.x line and

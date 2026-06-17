@@ -1,0 +1,46 @@
+{
+  "id": "DEMO-80-vitess-backup-take",
+  "title": "Vitess: logical mysqldump backup per shard",
+  "description": "Runs `nexus backup take vitess`: a logical mysqldump of vt_commerce.customer from each shard PRIMARY socket (as vt_dba) -> a gzip archive node-local on each primary. (No Vitess BackupStorage is configured in 0.O; engine-native Backup is the 0.O.1 enhancement.)",
+  "prerequisites": {
+    "vmsAlive": [
+      "vitess-etcd-1",
+      "vitess-etcd-2",
+      "vitess-etcd-3",
+      "vitess-control-1",
+      "vitess-vtgate-1",
+      "vitess-vtgate-2",
+      "vitess-shard1-tablet-1",
+      "vitess-shard1-tablet-2",
+      "vitess-shard1-tablet-3",
+      "vitess-shard2-tablet-1",
+      "vitess-shard2-tablet-2",
+      "vitess-shard2-tablet-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup take vitess --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "vitess-backup",
+        "sql.gz",
+        "shard"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "per-shard dumps: -80@<primary> + 80-@<primary> under /var/backups/nexus-vitess/<id>/; ~2.5 KiB total"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VitessAdapter.BackupTakeAsync runs mysqldump --single-transaction of vt_commerce.customer from each shard primary mysqld socket, validating the dump (CREATE TABLE marker) before sealing the gzip archive."
+}

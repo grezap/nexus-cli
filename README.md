@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.N%20v0.7.1%20%E2%9C%85%20mongo--sharded%20adapter%20live-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.O%20v0.7.2%20%E2%9C%85%20vitess%20adapter%20live-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,7 +12,24 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.7.1):** **v0.7.0** sealed the Phase 0.G data-tier `IClusterAdapter` expansion (the
+> **Current state (v0.7.2):** **v0.7.2 = `VitessAdapter`** (ClusterId **`vitess`**, Phase 0.O): the
+> Vitess-sharded MySQL/Percona cluster — 3 etcd topo + vtctld/VTOrc control + 2 vtgate routers + 2 shards ×3
+> tablets (keyspace `commerce` split `-80`/`80-` by a **hash vindex on `customer_id`**; Percona Server 8.4
+> under `mysqlctld`). **Hybrid operator identity:** the mTLS gRPC control plane via `sudo nexus-vtctldclient`
+> (no password) + the SQL plane via the vtgate `:15306` mTLS listener as the static-auth user `nexus`
+> (password in Vault KV `nexus/vitess/mysql-app-password`). Verbs — status · health (etcd quorum + vtctld +
+> VTOrc + vtgate + per-shard 1P+2R + the **sharding proof** 54/47) · **topology (Shards populated — hash-vindex
+> key ranges)** · failover (graceful **PlannedReparentShard**, RTO≈0.17s) · scale-out (tablet membership via
+> `DeleteTablets` + restart) · backup (**logical `mysqldump` per shard** round-trip, 101 rows — no BackupStorage
+> in 0.O; engine-native Backup is the 0.O.1 enhancement) · cert-rotate (per-node Vault PKI, vttablet-only
+> restart) · acl (the **vtgate static-auth file** — vtgate doesn't proxy `CREATE USER`) · chaos (SIGSTOP a
+> tablet; a primary freeze triggers **VTOrc auto-reparent**). AOT **26.52 MB / 30**; 114/114 tests; 3
+> live-caught bugs (fixed). See [`docs/verification/0.7.2-vitess.md`](./docs/verification/0.7.2-vitess.md) +
+> ADR-0020. Remaining: Citus → the 5 non-data tiers, per the canon order.
+>
+> <details><summary>v0.7.0 base + v0.7.1 MongoSharded (sealed)</summary>
+>
+> **v0.7.0** sealed the Phase 0.G data-tier `IClusterAdapter` expansion (the
 > 0.G exit gate — 9 adapter families: Redis · Mongo · Percona · Patroni · ClickHouse · StarRocks · SQL
 > Server FCI+AG · Kafka ×2 + ecosystem — each live-verified + cold-rebuild-proven; aggregate AOT validated
 > ≤30 MB). The **0.7.x line** now adds the **sharded** adapters. **v0.7.1 = `MongoShardedAdapter`**
@@ -27,7 +44,9 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 > 200 docs) · acl (config-server admin users via mongos) · chaos (kill a shard secondary) · **cert-rotate =
 > graceful N/A** (no TLS in 0.N v1; mTLS is the deferred 0.N.1 hardening). AOT **26.30 MB / 30**; 97/97
 > tests; 1 live-caught bug (fixed). See [`docs/verification/0.7.1-mongo-sharded.md`](./docs/verification/0.7.1-mongo-sharded.md)
-> + ADR-0019. Remaining: Vitess → Citus → the 5 non-data tiers, per the canon order.
+> + ADR-0019.
+>
+> </details>
 >
 > <details><summary>v0.6.x data-tier adapters (sealed)</summary>
 >
@@ -220,7 +239,7 @@ Nexus.Cli.Adapters may depend on Nexus.Cli.Core.
 Nothing depends on Nexus.Cli.
 ```
 
-ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Nineteen ADRs cover framework choice (0001), AOT cadence (0002), layout (0003), auth model (0004), Dapper-on-AOT (0005), hand-rolled vms.yaml reader (0006), SSH.NET over ssh.exe (0007), the v0.5 kafka-failover demo-grade-via-SSH design (0008), the `IClusterAdapter` SPI + extended demo spec (0009), the cross-adapter patterns + Redis exemplar (0010), and the per-adapter records: Mongo + the Vault-KV operator-credential model (0011), Percona Galera/ProxySQL (0012), Patroni PG HA (0013), ClickHouse sharded + Keeper (0014), StarRocks FE quorum + BE (0015), SQL Server FCI / WSFC over Windows-SSH (0016), SQL Server Always On AG + Listener (0017), the per-cluster Kafka adapters + KRaft `StandardAuthorizer` (0018), and the **MongoSharded adapter** + its two-headed keyFile auth (0019).
+ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Twenty ADRs cover framework choice (0001), AOT cadence (0002), layout (0003), auth model (0004), Dapper-on-AOT (0005), hand-rolled vms.yaml reader (0006), SSH.NET over ssh.exe (0007), the v0.5 kafka-failover demo-grade-via-SSH design (0008), the `IClusterAdapter` SPI + extended demo spec (0009), the cross-adapter patterns + Redis exemplar (0010), and the per-adapter records: Mongo + the Vault-KV operator-credential model (0011), Percona Galera/ProxySQL (0012), Patroni PG HA (0013), ClickHouse sharded + Keeper (0014), StarRocks FE quorum + BE (0015), SQL Server FCI / WSFC over Windows-SSH (0016), SQL Server Always On AG + Listener (0017), the per-cluster Kafka adapters + KRaft `StandardAuthorizer` (0018), the **MongoSharded adapter** + its two-headed keyFile auth (0019), and the **Vitess adapter** + its hybrid mTLS-control-plane / vtgate-SQL-plane identity (0020).
 
 ## Roadmap
 
@@ -247,7 +266,8 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Nineteen ADRs cover frame
 | **v0.6.7** | Phase 0.H.7 — the **Kafka adapters** (`KafkaClusterAdapter` registered twice → `kafka-east` + `kafka-west`, the v0.5 `kafka` stays as the MM2 DR meta-cluster; `KafkaEcosystemAdapter` observes SR/REST/Connect/ksqlDB/MM2; mTLS-only, no managed `Confluent.Kafka`; controller-leader failover RTO≈4.5s; topic round-trip backup; enabled the KRaft `StandardAuthorizer` so `acl` enforces); zero live bugs; **26.18 MB** |
 | **v0.7.0** | Phase 0.G **base roll-up** — the 0.G exit-gate milestone: the 9 data-tier adapter families sealed + the aggregate AOT validated ≤30 MB (no new adapter); **26.18 MB**, 86/86 tests |
 | **v0.7.1** | Phase 0.N — the **MongoSharded adapter** (ClusterId `mongo-sharded`; 3 config-server RS + 2 shard RSes ×3 + 2 mongos; two-headed keyFile auth — `__system`@local for mongods + `nexus-sharded-admin`@admin through mongos; `topology` populates Shards; shard-primary stepdown RTO≈2.8s; mongodump-through-mongos backup; cert-rotate graceful N/A — no TLS in v1); all verbs live-verified (1 bug fixed); **26.30 MB** |
-| v0.7.2–v0.8.0 | Vitess → Citus → full-fleet, then the 5 non-data-tier adapters |
+| **v0.7.2** | Phase 0.O — the **Vitess adapter** (ClusterId `vitess`; 3 etcd topo + vtctld/VTOrc + 2 vtgate + 2 shards ×3 tablets; keyspace `commerce` hash-vindex on `customer_id`; hybrid mTLS-control-plane `nexus-vtctldclient` + vtgate `:15306` SQL plane as `nexus`; `topology` populates Shards; graceful `PlannedReparentShard` RTO≈0.17s; logical `mysqldump`-per-shard backup round-trip 101 rows; cert-rotate vttablet-only; acl = vtgate static-auth file; chaos primary-freeze → VTOrc auto-reparent); all verbs live-verified (3 bugs fixed); **26.52 MB**, 114/114 tests |
+| v0.7.3–v0.8.0 | Citus → full-fleet, then the 5 non-data-tier adapters |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing

@@ -1,0 +1,52 @@
+{
+  "id": "DEMO-77-vitess-failover",
+  "title": "Vitess: graceful shard failover (PlannedReparentShard) + RTO",
+  "description": "Runs `nexus failover-test cluster vitess`: PlannedReparentShard on the first shard to a healthy replica, measures the RTO until the new primary is authoritative in the shard record, confirms the old primary demoted to REPLICA in place. --target picks a shard or tablet node.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vitess-etcd-1",
+      "vitess-etcd-2",
+      "vitess-etcd-3",
+      "vitess-control-1",
+      "vitess-vtgate-1",
+      "vitess-vtgate-2",
+      "vitess-shard1-tablet-1",
+      "vitess-shard1-tablet-2",
+      "vitess-shard1-tablet-3",
+      "vitess-shard2-tablet-1",
+      "vitess-shard2-tablet-2",
+      "vitess-shard2-tablet-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster vitess --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "vitess-planned-reparent",
+        "-80",
+        "original primary",
+        "new primary",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "original primary -80/<tabletA> -> new primary -80/<tabletB>; RTO timeline; recovery=recovered. Live: ~0.17s."
+        },
+        {
+          "where": "ssh control: sudo nexus-vtctldclient GetShard commerce/-80",
+          "what": "primary_alias.uid is the promoted tablet; old primary is now a REPLICA"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VitessAdapter.FailoverAsync runs a graceful PlannedReparentShard on the targeted shard via nexus-vtctldclient and measures the RTO to the GetShard primary_alias change; other shards are unaffected."
+}

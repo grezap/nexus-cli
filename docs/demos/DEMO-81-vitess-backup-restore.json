@@ -1,0 +1,45 @@
+{
+  "id": "DEMO-81-vitess-backup-restore",
+  "title": "Vitess: backup restore round-trip (reload + count + drop)",
+  "description": "Runs `nexus backup restore vitess <id>`: reloads each shard dump into a throwaway commerce_restore_verify DB (sql_log_bin=0 so it never replicates), counts rows, drops it. Proves the logical backup is loadable.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vitess-etcd-1",
+      "vitess-etcd-2",
+      "vitess-etcd-3",
+      "vitess-control-1",
+      "vitess-vtgate-1",
+      "vitess-vtgate-2",
+      "vitess-shard1-tablet-1",
+      "vitess-shard1-tablet-2",
+      "vitess-shard1-tablet-3",
+      "vitess-shard2-tablet-1",
+      "vitess-shard2-tablet-2",
+      "vitess-shard2-tablet-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup restore vitess <backup-id> --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "items restored",
+        "101"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "items restored = 101 (54 from -80 + 47 from 80-); each verify DB created, counted, and dropped"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VitessAdapter.BackupRestoreAsync reloads each shard dump into a scratch DB on the shard primary, sums the row counts (the round-trip proof), and drops the scratch DB."
+}

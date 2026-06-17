@@ -1,0 +1,47 @@
+{
+  "id": "DEMO-79-vitess-scale-out-add",
+  "title": "Vitess: re-join a removed tablet to its shard",
+  "description": "Runs `nexus scale-out add vitess --role replica --shard 80-`: finds a provisioned-but-stopped tablet in the shard, restarts mysqlctld+vttablet, waits for it to re-register in the topo as a REPLICA.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vitess-etcd-1",
+      "vitess-etcd-2",
+      "vitess-etcd-3",
+      "vitess-control-1",
+      "vitess-vtgate-1",
+      "vitess-vtgate-2",
+      "vitess-shard1-tablet-1",
+      "vitess-shard1-tablet-2",
+      "vitess-shard1-tablet-3",
+      "vitess-shard2-tablet-1",
+      "vitess-shard2-tablet-2",
+      "vitess-shard2-tablet-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out add vitess --role replica --shard 80- --yes",
+      "waitAfterSeconds": 6,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "add",
+        "vitess-shard2-tablet-3",
+        "80-",
+        "REPLICA"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "vitess-shard2-tablet-3 re-joined shard 80- as a REPLICA in ~8s (vttablet re-registered; mysqld resumes replication)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VitessAdapter.ScaleOutAddAsync brings a stopped tablet of the target shard back up so vttablet re-registers it in the topo (apply-on-demand for genuine growth, ADR-0010)."
+}

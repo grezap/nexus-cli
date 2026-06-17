@@ -1,0 +1,47 @@
+{
+  "id": "DEMO-78-vitess-scale-out-remove",
+  "title": "Vitess: remove a tablet from a shard (DeleteTablets + stop services)",
+  "description": "Runs `nexus scale-out remove vitess vitess-shard2-tablet-3`: stops vttablet+mysqld and DeleteTablets from the topo. PRIMARY-guarded + a >=2-surviving-tablet floor.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vitess-etcd-1",
+      "vitess-etcd-2",
+      "vitess-etcd-3",
+      "vitess-control-1",
+      "vitess-vtgate-1",
+      "vitess-vtgate-2",
+      "vitess-shard1-tablet-1",
+      "vitess-shard1-tablet-2",
+      "vitess-shard1-tablet-3",
+      "vitess-shard2-tablet-1",
+      "vitess-shard2-tablet-2",
+      "vitess-shard2-tablet-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out remove vitess vitess-shard2-tablet-3 --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "remove",
+        "vitess-shard2-tablet-3",
+        "80-",
+        "deleted"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "removed vitess-shard2-tablet-3 (nexus-202) from commerce/80- in ~12s; topo record deleted; re-add via scale-out add --shard 80-"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VitessAdapter.ScaleOutRemoveAsync stops the tablet services then DeleteTablets the alias from the topo, refusing a PRIMARY and refusing to drop the shard below 2 surviving tablets."
+}

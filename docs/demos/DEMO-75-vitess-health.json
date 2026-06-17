@@ -1,0 +1,66 @@
+{
+  "id": "DEMO-75-vitess-health",
+  "title": "Vitess: etcd quorum + vtctld/VTOrc + vtgate + per-shard + sharding proof",
+  "description": "Runs `nexus health vitess`: etcd quorum (majority of 3), vtctld active, VTOrc healthy/no-problems, both vtgate :15306 listeners, per-shard 1 PRIMARY + 2 REPLICA, the operator mTLS round-trip via vtgate, and the sharding proof (both shards non-empty).",
+  "prerequisites": {
+    "vmsAlive": [
+      "vitess-etcd-1",
+      "vitess-etcd-2",
+      "vitess-etcd-3",
+      "vitess-control-1",
+      "vitess-vtgate-1",
+      "vitess-vtgate-2",
+      "vitess-shard1-tablet-1",
+      "vitess-shard1-tablet-2",
+      "vitess-shard1-tablet-3",
+      "vitess-shard2-tablet-1",
+      "vitess-shard2-tablet-2",
+      "vitess-shard2-tablet-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus health vitess",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "etcd-quorum",
+        "vtctld",
+        "vtorc",
+        "vtgate",
+        "shard-primary",
+        "shard-replicas",
+        "operator-auth",
+        "sharding"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "all probes green: etcd-quorum 3/3, vtctld active, vtorc healthy, 2 vtgate active+:15306, per-shard 1P+2R, operator SELECT 1 over mTLS, sharding -80=54 80-=47"
+        }
+      ]
+    },
+    {
+      "command": "nexus health vitess --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "overallHealth",
+        "probes"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON HealthReport overallHealth=green; probes cover etcd, control, both routers, both shards, operator-auth, sharding"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VitessAdapter.HealthAsync proves liveness at every layer: the etcd topo quorum, the vtctld/VTOrc control plane, the vtgate routing tier, per-shard primary/replica counts, and a real mTLS query + hash-vindex split through vtgate."
+}
