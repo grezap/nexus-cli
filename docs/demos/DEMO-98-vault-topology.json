@@ -1,0 +1,39 @@
+{
+  "id": "DEMO-98-vault-topology",
+  "title": "Vault: raft topology (leader + voters + transit custodian)",
+  "description": "Runs `nexus topology vault`. Nodes show their live raft roles: the active node is the raft-leader, the two standbys are voters, and vault-transit is the transit seal custodian. Vault is not sharded, so there is no Shards table.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vault-1",
+      "vault-2",
+      "vault-3",
+      "vault-transit"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus topology vault",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "topology",
+        "vault",
+        "raft-leader",
+        "voter"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "Nodes table with raft roles: vault-2 active/raft-leader, vault-1/3 standby/voter, vault-transit transit; no Shards table (Vault is not sharded)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VaultAdapter.GetTopologyAsync renders the live raft membership (one raft-leader, two voters) plus the transit custodian node, and correctly omits the Shards section because Vault is an unsharded HA cluster."
+}

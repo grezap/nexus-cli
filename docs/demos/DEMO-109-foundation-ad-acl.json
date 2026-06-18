@@ -1,0 +1,84 @@
+{
+  "id": "DEMO-109-foundation-ad-acl",
+  "title": "Foundation AD: list users/groups, describe membership, grant/revoke group membership",
+  "description": "Runs `nexus acl foundation-ad {list,describe,grant,revoke}`. list = 7 users + 5 groups; describe shows a user's MemberOf; grant/revoke round-trips a service account in/out of an AD group via Add-/Remove-ADGroupMember. Administrator/krbtgt/nexusadmin are protected.",
+  "prerequisites": {
+    "vmsAlive": [
+      "dc-nexus",
+      "dc-nexus-2",
+      "nexus-gateway"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_SSH_USER"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus acl foundation-ad list",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "acl",
+        "foundation-ad",
+        "user",
+        "group"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "7 users + 5 groups (nexus-vault-readers/operators/admins, nexus-gmsa-consumers, nexus-sql-cluster-members); protected: Administrator, krbtgt, nexusadmin"
+        }
+      ]
+    },
+    {
+      "command": "nexus acl foundation-ad describe --user nexusadmin",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "acl",
+        "foundation-ad",
+        "user"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "nexusadmin described with its MemberOf group list"
+        }
+      ]
+    },
+    {
+      "command": "nexus acl foundation-ad grant --user svc-vault-smoke --permissions nexus-vault-readers --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "acl",
+        "foundation-ad",
+        "group"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "svc-vault-smoke added to nexus-vault-readers via Add-ADGroupMember"
+        }
+      ]
+    },
+    {
+      "command": "nexus acl foundation-ad revoke --user svc-vault-smoke --permissions nexus-vault-readers --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "acl",
+        "foundation-ad",
+        "group"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "svc-vault-smoke removed from nexus-vault-readers via Remove-ADGroupMember (round-trip clean); protected principals refuse changes"
+        }
+      ]
+    }
+  ],
+  "whatProves": "FoundationAdAdapter.AclAsync lists the 7 users + 5 groups, describes a user's MemberOf, and round-trips a service account in and out of an AD group via Add-/Remove-ADGroupMember while protecting Administrator/krbtgt/nexusadmin."
+}

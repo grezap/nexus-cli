@@ -1,0 +1,38 @@
+{
+  "id": "DEMO-104-vault-chaos",
+  "title": "Vault: chaos process-kill a standby (cluster self-heals to green)",
+  "description": "Runs `nexus chaos vault process-kill --duration 10 --yes`. SIGKILLs a STANDBY vault.service (never the active node), holds for the duration, then confirms the cluster recovers to green.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vault-1",
+      "vault-2",
+      "vault-3",
+      "vault-transit"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus chaos vault process-kill --duration 10 --yes",
+      "waitAfterSeconds": 14,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "chaos",
+        "process-kill",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "SIGKILL on a STANDBY vault.service (never the active); after ~10s the standby is back and the cluster recovers to green"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VaultAdapter chaos process-kill deliberately targets a STANDBY vault.service (preserving the active leader), then verifies the cluster self-heals back to green once the killed standby restarts and re-unseals."
+}

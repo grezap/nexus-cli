@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.P%20v0.7.3%20%E2%9C%85%20citus%20adapter%20live-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.D%2F0.M%20v0.8.1%20%E2%9C%85%20vault%20%2B%20AD%20adapters%20live-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,24 +12,42 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.7.3):** **v0.7.3 = `CitusAdapter`** (ClusterId **`citus`**, Phase 0.P): the
-> Citus-sharded PostgreSQL cluster with **full Patroni HA** — 3 etcd DCS + a coordinator Patroni pair (VIP
-> `.211` = `pg_dist_node` groupid 0) + 2 worker Patroni pairs (VIPs `.212`/`.213` = groupid 1/2); PG 17 +
-> Citus 14.1; `events` hash-distributed on `tenant_id` (32 shards = 16+16 across the worker groups) +
-> colocated `event_tags` + reference `tenants`. **Citus = Patroni HA per group + Citus distribution.**
-> Operator = the dedicated `nexus-cluster-admin` role (ADR-0011 Vault-KV model, `nexus/citus/operator-password`)
-> auto-propagated to the workers with a `~postgres/.pgpass` entry so **distributed queries run as the operator**
-> via the coordinator VIP (mTLS+scram+client-cert). Verbs — status · health (etcd quorum **unioned across
-> nodes** + per-group HA + operator mTLS + registered workers + the **sharding proof** 16/16 + distributed
-> aggregate 800) · **topology (Shards populated — per-worker-group placements)** · failover (graceful
-> `patronictl switchover` on a chosen group, RTO≈1.6s; the VIP follows the leader so `pg_dist_node` is
-> untouched) · scale-out (Patroni-member add/remove; worker-group growth = apply-on-demand) · backup (operator
-> `COPY … TO STDOUT` round-trip of the distributed dataset, 800 events) · cert-rotate (per-node Vault PKI, PG
-> reload / etcd restart, coord-leader-last) · acl (PG roles via the operator; `CREATE ROLE` propagates to
-> workers) · chaos (process-kill `nexus-patroni`). AOT **26.71 MB / 30**; 137/137 tests; adapter code
-> first-try-green on every verb (the one live-caught issue was infra — the patroni.yml `ctl:` block — fixed +
-> baked). See [`docs/verification/0.7.3-citus.md`](./docs/verification/0.7.3-citus.md) + ADR-0021. Remaining:
-> the 5 non-data tiers, per the canon order.
+> **Current state (v0.8.1):** **v0.8.0 = the full-fleet roll-up** (the milestone marking all 12 data + sharded
+> adapter families sealed + the aggregate AOT re-validated ≤30 MB; no new adapter). **v0.8.1 = `VaultAdapter`
+> + `FoundationAdAdapter`** — the **first non-data-tier adapters**, so the CLI now deeply manages the
+> Foundation tier (the platform **trust root**), not just the data tier. **`VaultAdapter`** (ClusterId
+> **`vault`**, Phase 0.A-0.D/0.M): the Vault HA cluster — 3 Raft nodes (vault-1/2/3) + vault-transit (the
+> single-node Shamir **seal-key custodian** that auto-unseals them). The Vault **control plane runs over HTTP
+> from the build host** (the operator `VAULT_TOKEN`, ADR-0004 — the root token never reaches a node); only
+> node-local actions (service stop/start/reload, cert-file push, chaos, recover-ha, vault-transit) go over
+> SSH. **No managed Vault driver and no shelled `vault` binary** (NetArchTest). Mutating verbs **target
+> STANDBYS** so the active keeps serving. Verbs — status (leaders DRIFT, read dynamically) · health (per-node
+> seal + active-leader + raft 3 voters/1 leader + transit-unseal + operator-auth) · topology (raft
+> voter/leader roles; not sharded) · failover (**`vault operator step-down`** on the active → a standby
+> promotes, RTO≈2.0s) · scale-out (stop/start a STANDBY raft peer; auto-unseals on rejoin) · backup (**raft
+> snapshot** save to a build-host file + non-destructive gzip/tar `meta.json` inspect; restore on the live
+> trust root **deliberately refused**) · cert-rotate (`pki_int/issue/vault-server` via the build-host token +
+> SIGHUP reload, standbys-first/active-last) · acl (Vault policies + AppRoles) · chaos (process-kill a
+> STANDBY) · **`recover-ha`** (a NEW verb — the declarative boot-race recovery: unseal vault-transit from the
+> Shamir key file → restart vault-1/2/3 → poll unsealed; the ONLY exposed unseal path). **`FoundationAdAdapter`**
+> (ClusterId **`foundation-ad`**): the 2-DC AD forest (`nexus.lab`, WS2025) over **Windows-SSH** + the
+> `nexus-gateway` egress over Linux-SSH — status/health (DC reachability + AD replication + DNS + KDS root key
+> + all 5 FSMO roles + gateway NAT)/topology/acl (AD users/groups) are real; AD is multi-master so the
+> failover/FSMO + DC-add/remove + system-state-backup + NTDS-cert/chaos verbs return a graceful **actionable
+> N/A**. AOT **27.36 MB / 30**; 159/159 tests; adapter code first-try-green on every Vault verb (the one
+> live-caught bug was the AD-replication `-Server` arg). See
+> [`docs/verification/0.8.1-foundation.md`](./docs/verification/0.8.1-foundation.md) + ADR-0022. Remaining:
+> v0.8.2 Swarm → v0.8.3 Observability → v0.8.4 Lakehouse → v0.8.5 Harbor.
+>
+> <details><summary>v0.7.3 CitusAdapter (sealed)</summary>
+>
+> **v0.7.3 = `CitusAdapter`** (ClusterId **`citus`**, Phase 0.P): the Citus-sharded PostgreSQL cluster with
+> **full Patroni HA** — 3 etcd DCS + a coordinator Patroni pair + 2 worker Patroni pairs; PG 17 + Citus 14.1;
+> `events` hash-distributed on `tenant_id` (32 shards = 16+16). **Citus = Patroni HA per group + Citus
+> distribution.** `topology` Shards populated; failover = `patronictl switchover` (RTO≈1.6s); backup = operator
+> `COPY … TO STDOUT` round-trip (800 events). AOT 26.71 MB; 137/137 tests; adapter first-try-green. See
+> ADR-0021.
+> </details>
 >
 > <details><summary>v0.7.2 VitessAdapter (sealed)</summary>
 >
@@ -282,7 +300,9 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Twenty ADRs cover framewo
 | **v0.7.1** | Phase 0.N — the **MongoSharded adapter** (ClusterId `mongo-sharded`; 3 config-server RS + 2 shard RSes ×3 + 2 mongos; two-headed keyFile auth — `__system`@local for mongods + `nexus-sharded-admin`@admin through mongos; `topology` populates Shards; shard-primary stepdown RTO≈2.8s; mongodump-through-mongos backup; cert-rotate graceful N/A — no TLS in v1); all verbs live-verified (1 bug fixed); **26.30 MB** |
 | **v0.7.2** | Phase 0.O — the **Vitess adapter** (ClusterId `vitess`; 3 etcd topo + vtctld/VTOrc + 2 vtgate + 2 shards ×3 tablets; keyspace `commerce` hash-vindex on `customer_id`; hybrid mTLS-control-plane `nexus-vtctldclient` + vtgate `:15306` SQL plane as `nexus`; `topology` populates Shards; graceful `PlannedReparentShard` RTO≈0.17s; logical `mysqldump`-per-shard backup round-trip 101 rows; cert-rotate vttablet-only; acl = vtgate static-auth file; chaos primary-freeze → VTOrc auto-reparent); all verbs live-verified (3 bugs fixed); **26.52 MB**, 114/114 tests |
 | **v0.7.3** | Phase 0.P — the **Citus adapter** (ClusterId `citus`; Citus-sharded PostgreSQL + full Patroni HA: 3 etcd DCS + a coordinator Patroni pair + 2 worker Patroni pairs; PG 17 + Citus 14.1; `events` hash-distributed on `tenant_id`, 32 shards = 16+16 across the worker groups; **Citus = Patroni HA per group + Citus distribution**; operator `nexus-cluster-admin` propagated to workers + `.pgpass` so distributed queries run as the operator; `topology` populates Shards; `patronictl switchover` RTO≈1.6s with the VIP following the leader; operator `COPY` round-trip backup of the distributed dataset 800 rows; cert-rotate PG-reload/etcd-restart; acl = PG roles propagated to workers); all verbs live-verified (adapter first-try-green; the 1 infra fix = the patroni.yml `ctl:` block); **26.71 MB**, 137/137 tests |
-| v0.8.0+ | full-fleet, then the 5 non-data-tier adapters (Foundation/Vault · Swarm · Observability · Lakehouse · Harbor) |
+| **v0.8.0** | **Full-fleet roll-up** — the milestone marking all 12 data + sharded adapter families sealed + the aggregate AOT re-validated ≤30 MB (no new adapter); **26.71 MB**, 137/137 tests |
+| **v0.8.1** | Phase 0.A-0.D/0.M — the **Vault + Foundation-AD adapters** (the first **non-data-tier** adapters): `VaultAdapter` (ClusterId `vault`; the Vault HA trust root — 3 Raft nodes + vault-transit Shamir custodian; control plane over HTTP from the build host, no managed driver / no shelled `vault`; `vault operator step-down` failover RTO≈2.0s; stop/start-a-STANDBY scale-out; raft-snapshot backup + non-destructive `meta.json` inspect, restore refused; `pki_int/vault-server` cert-rotate standbys-first/active-last; Vault-policy/AppRole acl; process-kill-a-STANDBY chaos; + a NEW **`recover-ha`** verb = the declarative boot-race recovery, the only exposed unseal path) + `FoundationAdAdapter` (ClusterId `foundation-ad`; the 2-DC AD forest over Windows-SSH + gateway health; multi-master mutators graceful actionable N/A); all verbs live-verified (adapter first-try-green; 1 AD-replication `-Server` bug fixed); **27.36 MB**, 159/159 tests |
+| v0.8.2+ | the remaining 4 non-data-tier adapters (Swarm · Observability · Lakehouse · Harbor) |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing

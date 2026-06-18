@@ -1,0 +1,70 @@
+{
+  "id": "DEMO-103-vault-acl",
+  "title": "Vault: ACL policies list + grant/revoke a demo policy",
+  "description": "Runs `nexus acl vault {list,grant,revoke}`. list shows the 128 policies plus AppRoles (root/default/nexus-admin and others carry a protected flag); grant writes a throwaway demo ACL policy; revoke deletes it - a clean round-trip.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vault-1",
+      "vault-2",
+      "vault-3",
+      "vault-transit"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus acl vault list",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "acl",
+        "vault",
+        "policy"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "lists 128 ACL policies + approles; protected flag on root/default/nexus-admin and other system policies"
+        }
+      ]
+    },
+    {
+      "command": "nexus acl vault grant --user nexus-demo-policy --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "acl",
+        "vault",
+        "policy"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "nexus-demo-policy ACL policy written via the operator token"
+        }
+      ]
+    },
+    {
+      "command": "nexus acl vault revoke --user nexus-demo-policy --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "acl",
+        "vault",
+        "policy"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "nexus-demo-policy deleted (round-trip clean); protected policies refuse revoke"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VaultAdapter.AclAsync lists the 128 ACL policies + AppRoles (flagging system policies as protected), writes a demo ACL policy on grant, and deletes it on revoke - a clean round-trip that never touches the protected root/default/nexus-admin policies."
+}

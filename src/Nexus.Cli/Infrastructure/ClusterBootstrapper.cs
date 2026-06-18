@@ -79,6 +79,8 @@ public static class ClusterBootstrapper
             new SqlAgAdapter(catalog, ssh, sshUser, sshKey, vault),      // 0.G.7 (ClusterId sqlserver-ag)
             new VitessAdapter(catalog, ssh, sshUser, sshKey, vault),     // 0.7.2 (ClusterId vitess; Phase 0.O sharded MySQL)
             new CitusAdapter(catalog, ssh, sshUser, sshKey, vault),      // 0.7.3 (ClusterId citus; Phase 0.P Citus-sharded PostgreSQL + Patroni HA)
+            new VaultAdapter(catalog, ssh, sshUser, sshKey, vault),      // 0.8.1 (ClusterId vault; Foundation Vault HA + recover-ha) -- first non-data-tier adapter
+            new FoundationAdAdapter(catalog, ssh, sshUser, sshKey),      // 0.8.1 (ClusterId foundation-ad; AD via Windows-SSH + gateway health)
         };
         return new ClusterRegistry(adapters);
     }

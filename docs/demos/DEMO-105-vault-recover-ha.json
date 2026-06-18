@@ -1,0 +1,38 @@
+{
+  "id": "DEMO-105-vault-recover-ha",
+  "title": "Vault: recover-ha (boot-race recovery - transit unseal then restart raft)",
+  "description": "Runs `nexus recover-ha vault --yes`: the boot-race recovery sequence - unseal vault-transit from the Shamir key file, restart vault-1/2/3, then poll until each reports unsealed. Idempotent: a no-op when the cluster is already up.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vault-1",
+      "vault-2",
+      "vault-3",
+      "vault-transit"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus recover-ha vault --yes",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "recover-ha",
+        "transit",
+        "unsealed"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "vault-transit unsealed from the Shamir key file, then vault-1/2/3 restarted and polled; all nodes sealed=no, transit=unsealed; idempotent no-op when already up"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VaultAdapter.RecoverHaAsync replays the documented boot-race recovery - unseal vault-transit from the Shamir key file, restart the three raft nodes, and poll until unsealed - and is idempotent (no-op when the cluster is already healthy)."
+}

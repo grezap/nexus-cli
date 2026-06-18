@@ -1,0 +1,57 @@
+{
+  "id": "DEMO-96-vault-status",
+  "title": "Vault: full HA status (3 raft nodes + transit seal custodian)",
+  "description": "Runs `nexus status vault` (+ `--json`) across the Foundation Vault HA cluster. One table rolls up the 3 raft nodes (vault-1/2/3, one active + two standby) plus vault-transit (the Shamir-seal transit custodian). Leaders DRIFT; the active node is read dynamically (vault-2 was active during verify).",
+  "prerequisites": {
+    "vmsAlive": [
+      "vault-1",
+      "vault-2",
+      "vault-3",
+      "vault-transit"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus status vault",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "vault",
+        "vault-1",
+        "vault-transit",
+        "active",
+        "standby",
+        "transit"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "4-row table: vault-1/2/3 (one active, two standby) + vault-transit (transit), all alive; active leader read dynamically (was vault-2); overall green"
+        }
+      ]
+    },
+    {
+      "command": "nexus status vault --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "clusterId",
+        "overallHealth",
+        "members"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON ClusterStatus: 4 members, overallHealth=green, one member role=active and two standby, vault-transit role=transit"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VaultAdapter.GetStatusAsync classifies the 3 raft nodes by live seal/HA state (active vs standby, read dynamically because leaders drift) and reports vault-transit as the transit seal custodian, rolling all four into the overall health."
+}

@@ -157,6 +157,12 @@ public sealed class ClusterCertRotateSettings : ClusterTargetSettingsBase
 {
 }
 
+// --- recover-ha <cluster> (v0.8.1; IRecoverableCluster) -------------------
+
+public sealed class ClusterRecoverHaSettings : ClusterTargetSettingsBase
+{
+}
+
 // --- chaos <cluster> <scenario> -------------------------------------------
 
 public sealed class ClusterChaosSettings : ClusterTargetSettingsBase

@@ -426,6 +426,41 @@ internal static class ClusterRender
         Console.WriteLine(JsonSerializer.Serialize(dto, NexusJsonContext.Default.ClusterAclOutputJson));
     }
 
+    // --- recover-ha (v0.8.1) ----------------------------------------------
+
+    public static void EmitRecoverHaHuman(RecoverHaResult r)
+    {
+        var color = r.AllUnsealed ? "green" : "yellow";
+        var label = r.AllUnsealed ? "● GREEN  HA recovered (all nodes unsealed)" : "● YELLOW  HA partially recovered";
+        AnsiConsole.Write(new Rule(
+            $"[{color}]{label}[/]  transit={(r.TransitUnsealed ? "unsealed" : "SEALED")}  leader={Markup.Escape(r.Leader ?? "(none)")}  {r.Duration.TotalSeconds:F2}s")
+        { Justification = Justify.Left });
+        var t = new Table().AddColumns("node", "sealed", "outcome");
+        foreach (var n in r.Nodes)
+            t.AddRow(Markup.Escape(n.Hostname), n.Sealed ? "[red]yes[/]" : "[green]no[/]", Markup.Escape(n.Outcome));
+        AnsiConsole.Write(t);
+    }
+
+    public static void EmitRecoverHaJson(RecoverHaResult r)
+    {
+        var dto = new RecoverHaOutputJson
+        {
+            ClusterId = r.ClusterId,
+            TransitUnsealed = r.TransitUnsealed,
+            AllUnsealed = r.AllUnsealed,
+            Leader = r.Leader,
+            DurationSec = Math.Round(r.Duration.TotalSeconds, 3),
+            StartedAtUtc = r.StartedAtUtc.ToString("u"),
+            Nodes = r.Nodes.Select(n => new RecoverHaNodeJson
+            {
+                Hostname = n.Hostname,
+                Sealed = n.Sealed,
+                Outcome = n.Outcome,
+            }).ToList(),
+        };
+        Console.WriteLine(JsonSerializer.Serialize(dto, NexusJsonContext.Default.RecoverHaOutputJson));
+    }
+
     // === Helpers ============================================================
 
     private static string ColorStatus(string status) => status switch

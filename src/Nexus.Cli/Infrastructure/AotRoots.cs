@@ -80,5 +80,9 @@ internal static class AotRoots
     [DynamicDependency(SettingsRoots, typeof(ClusterChaosSettings))]
     [DynamicDependency(CommandRoots, typeof(ClusterAclCommand))]
     [DynamicDependency(SettingsRoots, typeof(ClusterAclSettings))]
+
+    // v0.8.1 recover-ha (IRecoverableCluster; foundation vault)
+    [DynamicDependency(CommandRoots, typeof(RecoverHaCommand))]
+    [DynamicDependency(SettingsRoots, typeof(ClusterRecoverHaSettings))]
     public static void KeepAlive() { }
 }

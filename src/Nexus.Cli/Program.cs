@@ -111,6 +111,10 @@ internal static class Program
                 .WithDescription("v0.6: per-data-cluster ACL inspection / mutation (list | describe | grant | revoke).")
                 .WithExample(["acl", "redis", "list"])
                 .WithExample(["acl", "redis", "describe", "--user", "ingest"]);
+            config.AddCommand<RecoverHaCommand>("recover-ha")
+                .WithDescription("v0.8.1: declarative HA recovery (foundation vault only) -- unseal vault-transit from the Shamir key file, restart + poll the HA nodes. The only exposed unseal path.")
+                .WithExample(["recover-ha", "vault"])
+                .WithExample(["recover-ha", "vault", "--yes"]);
             config.AddCommand<ClusterChaosCommand>("chaos")
                 .WithDescription("v0.6: inject a chaos scenario (network-partition | slow-disk | cpu-starve | memory-pressure | packet-loss).")
                 .WithExample(["chaos", "redis", "network-partition"])

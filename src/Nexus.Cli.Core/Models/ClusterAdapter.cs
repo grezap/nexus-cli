@@ -200,3 +200,21 @@ public sealed record AclUser(
     string Name,
     IReadOnlyList<string> Permissions,
     bool Enabled = true);
+
+// --- Recover-HA (IRecoverableCluster.RecoverHaAsync; v0.8.1, ADR-0022) -----
+// The declarative Vault-HA boot-race recovery: unseal vault-transit from the
+// operator's Shamir key file, restart the HA nodes, poll until unsealed.
+
+public sealed record RecoverHaResult(
+    string ClusterId,
+    bool TransitUnsealed,               // vault-transit (Shamir seal-key custodian) is unsealed
+    IReadOnlyList<RecoverNodeResult> Nodes,
+    bool AllUnsealed,                   // every HA node reported sealed=false
+    string? Leader,                     // active node after recovery (leaders drift)
+    TimeSpan Duration,
+    DateTimeOffset StartedAtUtc);
+
+public sealed record RecoverNodeResult(
+    string Hostname,
+    bool Sealed,                        // post-recovery seal state (false = recovered)
+    string Outcome);                    // "unsealed" | "restarted" | "already-up" | "failed: <why>"

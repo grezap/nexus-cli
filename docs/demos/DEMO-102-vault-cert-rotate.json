@@ -1,0 +1,39 @@
+{
+  "id": "DEMO-102-vault-cert-rotate",
+  "title": "Vault: TLS listener cert rotation (standbys first, active last)",
+  "description": "Runs `nexus cert-rotate vault --yes`. Re-issues each node's listener cert from pki_int/issue/vault-server and SIGHUP-reloads it. Standbys are rotated FIRST and the active node LAST so the cluster never loses its leader; 0 errors in ~16.8s.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vault-1",
+      "vault-2",
+      "vault-3",
+      "vault-transit"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus cert-rotate vault --yes",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "cert-rotate",
+        "vault-1",
+        "vault-2",
+        "new serial"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "each listener cert re-issued from pki_int/issue/vault-server, SIGHUP reload; standbys rotated FIRST, active LAST; new serial per node; 0 errors in ~16.8s"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VaultAdapter.CertRotateAsync re-issues each node's listener certificate from pki_int/issue/vault-server and SIGHUP-reloads it, ordering standbys first and the active node last so the cluster keeps its leader throughout (0 errors, ~16.8s)."
+}

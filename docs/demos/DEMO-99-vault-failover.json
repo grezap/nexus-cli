@@ -1,0 +1,55 @@
+{
+  "id": "DEMO-99-vault-failover",
+  "title": "Vault: leadership failover test (step-down, raft re-election)",
+  "description": "Runs `nexus failover-test cluster vault --yes` (+ `--json`). A controlled step-down on the active node promotes a standby; RTO is about 2.0s (e.g. vault-2 to vault-1). Recovery is skipped because Raft leadership is location-independent and the cluster served reads/writes throughout.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vault-1",
+      "vault-2",
+      "vault-3",
+      "vault-transit"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster vault --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "failover",
+        "vault-step-down",
+        "original primary",
+        "new primary"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "vault-step-down on the active triggers a standby promotion; original primary -> new primary (e.g. vault-2 -> vault-1); RTO ~2.0s; recovery = skipped (Raft leadership location-independent)"
+        }
+      ]
+    },
+    {
+      "command": "nexus failover-test cluster vault --yes --json",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "originalPrimary",
+        "newPrimary",
+        "rtoSeconds"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON failover result: originalPrimary + newPrimary differ, rtoSeconds ~2.0, recovery skipped; cluster served throughout"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VaultAdapter.FailoverTestAsync issues a raft step-down on the active node, observes a standby being promoted with RTO ~2.0s, and reports recovery as skipped because Raft leadership is location-independent and the cluster never lost availability."
+}

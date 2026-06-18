@@ -1,0 +1,36 @@
+{
+  "id": "DEMO-108-foundation-ad-topology",
+  "title": "Foundation AD: topology (pdc + dc + gateway)",
+  "description": "Runs `nexus topology foundation-ad`. Three nodes with their roles: DC-NEXUS (pdc), DC-NEXUS-2 (dc), and nexus-gateway (gateway).",
+  "prerequisites": {
+    "vmsAlive": [
+      "dc-nexus",
+      "dc-nexus-2",
+      "nexus-gateway"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_SSH_USER"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus topology foundation-ad",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "topology",
+        "foundation-ad",
+        "pdc",
+        "gateway"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "Nodes table with 3 entries: DC-NEXUS pdc, DC-NEXUS-2 dc, nexus-gateway gateway"
+        }
+      ]
+    }
+  ],
+  "whatProves": "FoundationAdAdapter.GetTopologyAsync renders the multi-master AD layout as three nodes with their roles (pdc, dc, gateway)."
+}

@@ -489,6 +489,98 @@ public sealed class ClusterAclOutputJson
     public List<AclUserJson> Users { get; set; } = new();
 }
 
+// === Vault admin / raft (v0.8.1 VaultAdapter, ADR-0022) ====================
+
+public sealed class VaultSealStatusDto
+{
+    [JsonPropertyName("type")] public string Type { get; set; } = "";
+    [JsonPropertyName("initialized")] public bool Initialized { get; set; }
+    [JsonPropertyName("sealed")] public bool Sealed { get; set; }
+    [JsonPropertyName("version")] public string Version { get; set; } = "";
+    [JsonPropertyName("cluster_name")] public string ClusterName { get; set; } = "";
+}
+
+public sealed class VaultLeaderDto
+{
+    [JsonPropertyName("ha_enabled")] public bool HaEnabled { get; set; }
+    [JsonPropertyName("is_self")] public bool IsSelf { get; set; }
+    [JsonPropertyName("leader_address")] public string LeaderAddress { get; set; } = "";
+}
+
+public sealed class VaultRaftServerDto
+{
+    [JsonPropertyName("node_id")] public string NodeId { get; set; } = "";
+    [JsonPropertyName("address")] public string Address { get; set; } = "";
+    [JsonPropertyName("leader")] public bool Leader { get; set; }
+    [JsonPropertyName("voter")] public bool Voter { get; set; }
+}
+
+public sealed class VaultRaftConfigInnerDto
+{
+    [JsonPropertyName("servers")] public List<VaultRaftServerDto>? Servers { get; set; }
+}
+
+public sealed class VaultRaftConfigDataDto
+{
+    [JsonPropertyName("config")] public VaultRaftConfigInnerDto? Config { get; set; }
+}
+
+public sealed class VaultRaftConfigResponse
+{
+    [JsonPropertyName("data")] public VaultRaftConfigDataDto? Data { get; set; }
+}
+
+public sealed class VaultKeysDataDto
+{
+    [JsonPropertyName("keys")] public List<string>? Keys { get; set; }
+}
+
+public sealed class VaultListKeysResponse
+{
+    [JsonPropertyName("data")] public VaultKeysDataDto? Data { get; set; }
+}
+
+public sealed class VaultPolicyDataDto
+{
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("policy")] public string Policy { get; set; } = "";
+}
+
+public sealed class VaultPolicyReadResponse
+{
+    [JsonPropertyName("data")] public VaultPolicyDataDto? Data { get; set; }
+}
+
+// Raft snapshot meta.json (gzip(tar) entry) -- the non-destructive "inspect".
+public sealed class VaultSnapshotMetaDto
+{
+    [JsonPropertyName("ID")] public string Id { get; set; } = "";
+    [JsonPropertyName("Index")] public long Index { get; set; }
+    [JsonPropertyName("Term")] public long Term { get; set; }
+    [JsonPropertyName("Version")] public int Version { get; set; }
+    [JsonPropertyName("Size")] public long Size { get; set; }
+}
+
+// === Recover-HA output (v0.8.1; ADR-0022) ==================================
+
+public sealed class RecoverHaNodeJson
+{
+    public string Hostname { get; set; } = "";
+    public bool Sealed { get; set; }
+    public string Outcome { get; set; } = "";
+}
+
+public sealed class RecoverHaOutputJson
+{
+    public string ClusterId { get; set; } = "";
+    public bool TransitUnsealed { get; set; }
+    public bool AllUnsealed { get; set; }
+    public string? Leader { get; set; }
+    public double DurationSec { get; set; }
+    public string StartedAtUtc { get; set; } = "";
+    public List<RecoverHaNodeJson> Nodes { get; set; } = new();
+}
+
 // === Source-gen context ====================================================
 
 [JsonSourceGenerationOptions(
@@ -527,4 +619,11 @@ public sealed class ClusterAclOutputJson
 [JsonSerializable(typeof(ClusterCertRotationOutputJson))]
 [JsonSerializable(typeof(ClusterChaosOutputJson))]
 [JsonSerializable(typeof(ClusterAclOutputJson))]
+[JsonSerializable(typeof(VaultSealStatusDto))]
+[JsonSerializable(typeof(VaultLeaderDto))]
+[JsonSerializable(typeof(VaultRaftConfigResponse))]
+[JsonSerializable(typeof(VaultListKeysResponse))]
+[JsonSerializable(typeof(VaultPolicyReadResponse))]
+[JsonSerializable(typeof(VaultSnapshotMetaDto))]
+[JsonSerializable(typeof(RecoverHaOutputJson))]
 public partial class NexusJsonContext : JsonSerializerContext;

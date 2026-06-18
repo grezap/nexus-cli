@@ -1,0 +1,54 @@
+{
+  "id": "DEMO-101-vault-backup",
+  "title": "Vault: raft snapshot backup (non-destructive) + restore deliberately refused",
+  "description": "`nexus backup take vault --tag demo` pulls a raft snapshot to the build host and inspects its gzip/tar meta.json (index/term). `nexus backup restore vault <id> --yes` is deliberately refused (exit 2) because restoring the live trust root is dangerous.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vault-1",
+      "vault-2",
+      "vault-3",
+      "vault-transit"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup take vault --tag demo",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "backup",
+        "vault-",
+        "snapshot",
+        "inspect"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "raft snapshot saved to build-host ~/.nexus/backups/vault/ (~1.7 MiB), non-destructive; gzip/tar meta.json inspect OK (index/term present)"
+        }
+      ]
+    },
+    {
+      "command": "nexus backup restore vault some-id --yes",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 2,
+      "expectedOutputContains": [
+        "restore",
+        "vault"
+      ],
+      "observe": [
+        {
+          "where": "stderr",
+          "what": "restore is deliberately refused on the live trust root (actionable error)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VaultAdapter.BackupTakeAsync pulls a raft snapshot to the build host and verifies its meta.json (index/term) without disrupting the cluster, while BackupRestoreAsync deliberately refuses (exit 2) to overwrite the live Vault trust root."
+}

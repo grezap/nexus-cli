@@ -1,0 +1,54 @@
+{
+  "id": "DEMO-100-vault-scale-out",
+  "title": "Vault: scale-out remove + add a standby (raft rejoin via transit auto-unseal)",
+  "description": "Two steps. `nexus scale-out remove vault vault-3 --yes` stops vault.service on a standby (it remains a raft peer); `nexus scale-out add vault --role standby --yes` restarts it, auto-unseals via vault-transit, and rejoins the raft quorum in ~3.6s.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vault-1",
+      "vault-2",
+      "vault-3",
+      "vault-transit"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out remove vault vault-3 --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "scale-out",
+        "vault-3",
+        "standby"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "vault.service stopped on vault-3 (a standby); it remains a registered raft peer; cluster stays green on the other two voters"
+        }
+      ]
+    },
+    {
+      "command": "nexus scale-out add vault --role standby --yes",
+      "waitAfterSeconds": 6,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "scale-out",
+        "vault-3",
+        "standby"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "vault-3 restarted, auto-unseals via vault-transit, rejoins raft as a standby voter in ~3.6s; quorum back to 3"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VaultAdapter scale-out remove stops a standby's vault.service while leaving it a raft peer, and scale-out add restarts it so it auto-unseals through vault-transit and rejoins the raft quorum (~3.6s) - a non-destructive standby cycle."
+}

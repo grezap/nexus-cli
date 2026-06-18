@@ -1,0 +1,36 @@
+{
+  "id": "DEMO-106-foundation-ad-status",
+  "title": "Foundation AD: cluster status (2 DCs + gateway)",
+  "description": "Runs `nexus status foundation-ad` over Windows-SSH. Three rows: DC-NEXUS (pdc, the PDC emulator @ .240), DC-NEXUS-2 (dc @ .242), and nexus-gateway (gateway), all alive; leader = dc-nexus.",
+  "prerequisites": {
+    "vmsAlive": [
+      "dc-nexus",
+      "dc-nexus-2",
+      "nexus-gateway"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_SSH_USER"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus status foundation-ad",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "foundation-ad",
+        "DC-NEXUS",
+        "gateway",
+        "pdc"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "3-row table: DC-NEXUS (pdc), DC-NEXUS-2 (dc), nexus-gateway (gateway), all alive; leader = dc-nexus; overall green"
+        }
+      ]
+    }
+  ],
+  "whatProves": "FoundationAdAdapter.GetStatusAsync reaches the two domain controllers and the gateway over Windows-SSH, classifies DC-NEXUS as the pdc, DC-NEXUS-2 as a dc, and nexus-gateway as the gateway, and rolls them into a green overall status."
+}

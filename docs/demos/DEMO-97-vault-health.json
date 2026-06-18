@@ -1,0 +1,58 @@
+{
+  "id": "DEMO-97-vault-health",
+  "title": "Vault: deep health probes (seal + raft + transit + auth)",
+  "description": "Runs `nexus health vault` (+ `--json`). Seven probes all green: per-node seal-status, active-leader election, raft peer quorum, the transit auto-unseal custodian, and operator token authorization.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vault-1",
+      "vault-2",
+      "vault-3",
+      "vault-transit"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus health vault",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "health",
+        "seal-status",
+        "raft-peers",
+        "transit-unseal",
+        "operator-auth",
+        "green"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "7 probes green: seal-status x3 (unsealed, active/standby, v1.18.4), active-leader (1 active), raft-peers (3 peers / 3 voters / 1 leader), transit-unseal (unsealed auto-unseal serving), operator-auth (token authorized, 128 policies)"
+        }
+      ]
+    },
+    {
+      "command": "nexus health vault --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "seal-status",
+        "raft-peers",
+        "transit-unseal",
+        "operator-auth"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON health: 7 checks, all status=green; raft-peers detail = 3 peers/3 voters/1 leader; transit-unseal detail = unsealed serving; operator-auth detail = 128 policies"
+        }
+      ]
+    }
+  ],
+  "whatProves": "VaultAdapter.GetHealthAsync runs seal-status on each node, confirms exactly one active leader and a 3-voter raft quorum, verifies vault-transit is unsealed and serving auto-unseal, and checks the operator token is authorized (128 policies) - all green."
+}

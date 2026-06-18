@@ -1,0 +1,56 @@
+{
+  "id": "DEMO-107-foundation-ad-health",
+  "title": "Foundation AD: deep health probes (replication + DNS + KDS + FSMO + gateway)",
+  "description": "Runs `nexus health foundation-ad` (+ `--json`). Nine probes all green: per-DC reachability and AD replication (0 failures), the nexus.lab DNS zone, the KDS root key, the FSMO role placement, and the gateway's services + NAT.",
+  "prerequisites": {
+    "vmsAlive": [
+      "dc-nexus",
+      "dc-nexus-2",
+      "nexus-gateway"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_SSH_USER"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus health foundation-ad",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "health",
+        "dc-reachable",
+        "ad-replication",
+        "kds-root-key",
+        "fsmo",
+        "gateway",
+        "green"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "9 probes green: dc-reachable x2, ad-replication x2 (result=0 failures=0), dns-zone (nexus.lab Primary AD-integrated), kds-root-key (3 root keys), fsmo-roles (FSMO=5), gateway-services (dnsmasq + nftables active), gateway-nat (masquerade)"
+        }
+      ]
+    },
+    {
+      "command": "nexus health foundation-ad --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "dc-reachable",
+        "ad-replication",
+        "kds-root-key",
+        "fsmo"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON health: 9 checks, all status=green; ad-replication detail = 0 failures; fsmo-roles detail = 5 roles; gateway-nat detail = masquerade active"
+        }
+      ]
+    }
+  ],
+  "whatProves": "FoundationAdAdapter.GetHealthAsync verifies both DCs are reachable and replicating (0 failures), the nexus.lab AD-integrated DNS zone is present, the KDS root key and all 5 FSMO roles exist, and the gateway's dnsmasq/nftables services and NAT masquerade are active - all green."
+}

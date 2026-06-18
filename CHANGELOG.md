@@ -6,6 +6,59 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-06-18
+
+Phase 0.A-0.D/0.M: **`VaultAdapter`** (ClusterId `vault`) + **`FoundationAdAdapter`** (ClusterId `foundation-ad`)
+— the **first non-data-tier adapters**, extending the CLI from the data tier to the Foundation tier (the
+platform **trust root** + the identity plane). Live-verified end-to-end against the running 6-VM foundation
+base (+ `dc-nexus-2`); the VaultAdapter code was **first-try-green on every verb**.
+
+- **`VaultAdapter`** manages the Vault HA cluster: 3 Raft nodes (vault-1/2/3) + vault-transit (the single-node
+  Shamir **seal-key custodian** that auto-unseals them). The Vault **control plane runs over HTTP from the
+  build host** (new `VaultAdminClient`, reusing the CA-pinned `NexusHttpClientFactory` + the source-gen JSON
+  context) using the operator `VAULT_TOKEN` (ADR-0004) — deliberately so the root token NEVER reaches a
+  node's process table; node-local actions (service stop/start/reload, cert-file push, the chaos helper, the
+  recover-ha restarts, and vault-transit which is outside the build-host CA bundle) go over SSH. **No managed
+  Vault driver and no shelled-out `vault` binary** (NetArchTest). Mutating verbs **target STANDBYS** so the
+  active keeps serving:
+  - status (per-node seal + active/standby — **leaders drift**, read dynamically) · health (seal×3 +
+    active-leader + raft 3 voters/1 leader + transit-unseal + operator-auth) · topology (raft voter/leader
+    roles; not sharded).
+  - failover = `PUT sys/step-down` on the active → a standby promotes (live RTO ≈ 2.0 s; Raft leadership is
+    location-independent so there is no forced return — the old active becomes a healthy standby).
+  - scale-out = stop/start a STANDBY's `vault.service` (it leaves/rejoins Raft; auto-unseals via vault-transit
+    on restart). Growing the quorum (a 4th voter) is terraform → documented, not silently skipped.
+  - backup = `GET sys/storage/raft/snapshot` to a build-host file + a **non-destructive** gzip/tar `meta.json`
+    inspect (Index/Term/Size, via `System.Formats.Tar`). `restore` is **deliberately refused** (it overwrites
+    every secret/policy/PKI mount of the live trust root).
+  - cert-rotate = re-issue each listener cert from `pki_int/issue/vault-server` via the build-host token →
+    SSH-push `vault.crt`/`vault.key` → SIGHUP reload, **standbys first, active LAST**.
+  - acl = Vault ACL policies + AppRoles (list/describe/grant/revoke; the operator/system + `nexus-agent-*`
+    policies are revoke-protected). chaos = process-kill a STANDBY + Raft rejoin.
+- **`recover-ha`** — a NEW verb via the new `IRecoverableCluster` capability interface (only `VaultAdapter`
+  implements it; other clusters get a graceful "not applicable"). It is the declarative form of
+  `scripts/recover-vault-ha.ps1` — the post-reboot boot-race recovery: read the Shamir keys from
+  `~/.nexus/vault-transit-init.json` → unseal vault-transit over SSH → `reset-failed` + `start vault` on
+  vault-1/2/3 → poll until unsealed. Idempotent; the **ONLY exposed unseal path**.
+- **`FoundationAdAdapter`** manages the 2-DC AD DS forest (`nexus.lab`, Windows Server 2025) over
+  **Windows-SSH** + the `nexus-gateway` egress over Linux-SSH. status/health (both DCs reachable + AD
+  replication result=0 + DNS zones AD-integrated + the KDS root key via the AD object + all 5 FSMO roles +
+  gateway dnsmasq/nftables/NAT)/topology/acl (AD users + the `nexus-*` security groups) are real; AD is
+  multi-master so failover/FSMO, DC add/remove, system-state backup, and NTDS cert-rotate/chaos return a
+  graceful **actionable N/A**. DC IPs hardcoded to the `.240`/`.242` reality (the ADR-0039 drift).
+- **1 live-caught bug (fixed):** the AD-replication probe's explicit `Get-ADReplicationPartnerMetadata
+  -Server <ip>` degraded the result to empty fields; dropped it (the session already runs on the DC).
+- AOT **26.71 → 27.36 MB / 30** (+0.65 from `System.Formats.Tar` + `GZipStream`); **137 → 159 tests** (+22
+  parser cases). NetArchTest green. ADR-0022. No infra `.tf` changed (adapter-only).
+
+## [0.8.0] — 2026-06-18
+
+**Full-fleet roll-up** — the milestone marking all **12 data + sharded adapter families** sealed (Redis ·
+Mongo · Percona · Patroni · ClickHouse · StarRocks · SQL FCI + AG · Kafka ×2 + ecosystem · MongoSharded ·
+Vitess · Citus), with the aggregate AOT re-validated ≤ 30 MB (the HEAD at v0.7.3: build 0/0, 137/137 tests,
+**26.71 MB**). No new adapter — mirrors the v0.7.0 base roll-up; the gate before the 0.8.x line adds the five
+non-data-tier adapters (Foundation/Vault · Swarm · Observability · Lakehouse · Harbor).
+
 ## [0.7.3] — 2026-06-18
 
 Phase 0.P: **`CitusAdapter`** (ClusterId `citus`) — the third adapter on the 0.7.x sharded line, closing the

@@ -181,6 +181,13 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 | mongo-sharded | ✅ 06-16 | ✅ 06-16 | ✅ 06-16¹⁰ | ✅ 06-16¹¹ | ✅ 06-16¹² | ✅ gen | ✅ 06-16¹³ | n/a¹⁴ | ✅ 06-16 | ✅ list+grant+revoke¹⁵ |
 | vitess | ✅ 06-17 | ✅ 06-17¹⁶ | ✅ 06-17¹⁷ | ✅ 06-17¹⁸ | ✅ 06-17¹⁹ | ✅ gen | ✅ 06-17²⁰ | ✅ 06-17²¹ | ✅ 06-17²² | ✅ list+grant+revoke²³ |
 | citus | ✅ 06-18 | ✅ 06-18²⁴ | ✅ 06-18²⁵ | ✅ 06-18²⁶ | ✅ 06-18²⁷ | ✅ gen | ✅ 06-18²⁸ | ✅ 06-18²⁹ | ✅ 06-18³⁰ | ✅ list+grant+revoke³¹ |
+| **vault** | ✅ 06-18 | ✅ 06-18³² | ✅ 06-18³³ | ✅ 06-18³⁴ | ✅ 06-18³⁵ | ✅ gen | ✅ 06-18³⁶ | ✅ 06-18³⁷ | ✅ 06-18³⁸ | ✅ list+grant+revoke³⁹ |
+| **foundation-ad** | ✅ 06-18 | ✅ 06-18⁴⁰ | ✅ 06-18 | n/a⁴¹ | n/a⁴¹ | ✅ gen | n/a⁴¹ | n/a⁴¹ | n/a⁴¹ | ✅ list+grant+revoke⁴² |
+
+> The **`vault`** cluster also has a bespoke **`recover-ha`** verb (not a matrix column) — the declarative
+> boot-race recovery via the `IRecoverableCluster` capability: unseal vault-transit from the Shamir key file
+> → restart vault-1/2/3 → poll unsealed. Idempotent; the ONLY exposed unseal path. `recover-ha <other>`
+> returns a graceful "not applicable".⁴³
 
 ✅ live-verified · ⚠ coded, fix pending · ⏳ pending · n/a not-applicable (graceful). Dates = live-verify date.
 ¹ an FCI is a fixed 2-node shared-storage instance — `scale-out` returns a skip-with-explanation (grow via `sqlserver-ag` or `scale-up`).
@@ -222,6 +229,30 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 ³⁰ citus `acl` = PostgreSQL roles via the operator over the coordinator VIP. `list` reads `pg_roles` (attribute flags); `grant` `CREATE ROLE … LOGIN` (idempotent) + `GRANT CONNECT` — Citus **auto-propagates** the role to the workers (`citus.enable_create_role_propagation`); `revoke` removes the DB grant. The operator/system/app roles (`nexus-cluster-admin`/`postgres`/`citus_app`/`replicator`/`rewind`) are revoke-protected.
 
 ³¹ citus `chaos` process-kill SIGSTOPs a single `nexus-patroni` unit (`nexus-chaos.sh`): a worker-group replica by default (the group stays writable on its leader); `--target` may name any PG member. Lift + restart + recover to green — Patroni HA absorbing a member loss.
+
+³² vault `health` proves every layer of the trust root: per-node seal-status (vault-1/2/3 unsealed, active/standby), exactly 1 active, the **Raft peer set** (`sys/storage/raft/configuration` — 3 voters + 1 leader), the **transit-unseal** custodian (vault-transit serving the auto-unseal), and the **operator-auth** round-trip (`sys/policies/acl` readable with the env `VAULT_TOKEN` → 128 policies). The Vault control plane is **HTTP from the build host** (`VaultAdminClient`); vault-transit (outside the build-host CA bundle) is probed over SSH.
+
+³³ vault `topology` enriches each node with its Raft role (`active/raft-leader`, `standby/voter`); Shards = null (Vault is not sharded). Leaders **drift** — the active is read dynamically per node (`sys/leader`), never assumed (the build-host `VAULT_ADDR` is usually a follower; the API forwards).
+
+³⁴ vault failover = **`PUT sys/step-down`** on the active node → poll until a standby becomes active (live RTO ≈ 2.0 s). Raft leadership is location-independent: the old active becomes a healthy standby and the cluster serves throughout (clients follow the active-node redirect), so there is no forced "return" — `Recovery = skipped`, not a defect. Mutating verbs target standbys, but `step-down` is the one exception (it must hit the active to trigger the election; the active is briefly demoted in place, never stopped).
+
+³⁵ vault scale-out = stop/start a **STANDBY** `vault.service` (never the active, never the transit custodian): `remove <vault-N>` stops it (it stays a Raft peer, offline; the cluster keeps quorum on the other two); `add` restarts a stopped standby → it **auto-unseals via vault-transit** and rejoins Raft (≈ 3.6 s). Growing the quorum (a 4th voter) is a terraform/Packer op (documented in the OutcomeReason, not silently skipped).
+
+³⁶ vault backup = **`GET sys/storage/raft/snapshot`** streamed to a build-host file (`~/.nexus/backups/vault/<id>.snap`) + a **non-destructive inspect** — a Vault raft snapshot is a gzip(tar) whose `meta.json` carries {Index, Term, Size}, parsed via `System.Formats.Tar` (the safe equivalent of `vault operator raft snapshot inspect`, never a restore). `backup restore` is **deliberately refused**: `raft snapshot restore` overwrites every secret/policy/PKI mount of the live trust root in place — the DR runbook restores onto an ISOLATED cluster, never the live one.
+
+³⁷ vault `cert-rotate` = re-issue each listener cert from **`pki_int/issue/vault-server`** via the build-host token (`IssuePkiCertAsync`) → SSH-push `vault.crt`/`vault.key` to `/etc/vault.d/tls/` (chown `vault:vault`, 644/600) → `systemctl reload vault` (SIGHUP, zero-downtime — no leadership change). Order: **standbys first, active LAST**. The vault nodes have NO Vault Agent (they ARE the servers), so the cert is issued with the operator token, not a node token.
+
+³⁸ vault `chaos` process-kill SIGKILLs a **STANDBY** `vault.service` (`nexus-chaos.sh`; never the active, never the transit custodian) → lift + restart + the standby re-auto-unseals and rejoins Raft → recover to green.
+
+³⁹ vault `acl` = **Vault ACL policies + AppRoles**. `list`/`describe` read `sys/policies/acl` + `auth/approle/role` (the policy HCL on describe); `grant` writes a demonstrative ACL policy; `revoke` deletes it. The operator/system policies (`root`/`default`/`nexus-admin`/`nexus-operator`/`nexus-reader`/`nexus-foundation-reader`/`nomad-jobs`/`nexus-bootstrap`) and the per-node `nexus-agent-*` policies are revoke-protected.
+
+⁴⁰ foundation-ad `health` (Windows-SSH to the DCs + Linux-SSH to the gateway) proves: both DCs reachable (ADWS), **AD replication** (`Get-ADReplicationPartnerMetadata` LastReplicationResult = 0, failures = 0 — run ON each DC with the default `-Server`; an explicit `-Server <ip>` returns empty fields, the one live-caught bug), DNS zones AD-integrated, the **KDS root key** (via the AD `Master Root Keys` object — `Get-KdsRootKey` is unreliable over SSH), all **5 FSMO roles**, and the gateway (dnsmasq + nftables + the NAT masquerade rule).
+
+⁴¹ foundation-ad failover/scale-out/backup/cert-rotate/chaos = graceful **actionable N/A**: AD is multi-master (no DC failover; FSMO move/seize is `Move-ADDirectoryServerOperationMasterRole`/`ntdsutil`), DC add/remove is terraform (`Install`/`Uninstall-ADDSDomainController`, ADR-0039), system-state backup is `wbadmin`/`ntdsutil` (out-of-band; AD is already continuously replicated to dc-nexus-2), LDAPS cert rotation is the security overlay (an unguarded NTDS restart is refused), and DC chaos risks the auth plane (the 2-DC HA is validated by smoke-0.M). Each names the right out-of-band tool.
+
+⁴² foundation-ad `acl` = AD users + groups via Windows-SSH. `list` reads the enabled users + the `nexus-*` security groups; `describe --user <u>` reads MemberOf; `grant`/`revoke --user <u> --permissions <group[,group]>` = `Add`/`Remove-ADGroupMember`. Protected principals (`Administrator`/`krbtgt`/`nexusadmin`/`Domain Admins`/`Enterprise Admins`/`Schema Admins`/…) are refused.
+
+⁴³ `recover-ha vault` (the `IRecoverableCluster` capability) replicates `nexus-infra-vmware/scripts/recover-vault-ha.ps1`: read the Shamir keys from the operator's `~/.nexus/vault-transit-init.json` → unseal vault-transit over SSH → `reset-failed` + `start vault` on vault-1/2/3 → poll until unsealed. Idempotent (already-unsealed = no-op). It is the ONLY exposed unseal path (raw `vault operator unseal` is never surfaced).
 
 ---
 
@@ -265,12 +296,14 @@ The diagnostic ladder (run top-down; each rung names the fix):
    Symptoms: nothing listening on 8200, or `journalctl -u vault` shows
    `Code: 503 … Vault is sealed` against `…/transit/encrypt/…`. vault-transit is Shamir-sealed and
    the HA nodes crash-loop until it's unsealed.
-   **→ Recovery script (idempotent, autonomous):**
+   **→ Recovery — CLI-native (v0.8.1, the declarative `IRecoverableCluster` verb):**
    ```pwsh
-   pwsh -File nexus-infra-vmware/scripts/recover-vault-ha.ps1
+   nexus recover-ha vault --yes
    ```
-   It unseals vault-transit from `~/.nexus/vault-transit-init.json`, kicks vault-1/2/3, and installs
-   a StartLimit drop-in so the next reboot races more gracefully. Memory:
+   It unseals vault-transit from `~/.nexus/vault-transit-init.json` over SSH, `reset-failed` + `start vault`
+   on vault-1/2/3, and polls until unsealed — idempotent (already-unsealed = no-op), the ONLY exposed unseal
+   path. The original PowerShell script `pwsh -File nexus-infra-vmware/scripts/recover-vault-ha.ps1` still
+   works (and additionally installs the StartLimit drop-in so the next reboot races more gracefully). Memory:
    `feedback_vault_transit_boot_race_recovery.md`.
 4. **Is the engine service active?**
    `ssh … '<ip>' 'systemctl is-active nexus-<engine>'`. If `inactive`/`masked`: the **stock package
