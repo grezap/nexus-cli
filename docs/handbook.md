@@ -180,7 +180,7 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 | kafka (DR meta) | — | — | — | ✅ v0.5 MM2 | — | — | — | — | — | — |
 | mongo-sharded | ✅ 06-16 | ✅ 06-16 | ✅ 06-16¹⁰ | ✅ 06-16¹¹ | ✅ 06-16¹² | ✅ gen | ✅ 06-16¹³ | n/a¹⁴ | ✅ 06-16 | ✅ list+grant+revoke¹⁵ |
 | vitess | ✅ 06-17 | ✅ 06-17¹⁶ | ✅ 06-17¹⁷ | ✅ 06-17¹⁸ | ✅ 06-17¹⁹ | ✅ gen | ✅ 06-17²⁰ | ✅ 06-17²¹ | ✅ 06-17²² | ✅ list+grant+revoke²³ |
-| citus | ⏳ per canon order (v0.7.3) | | | | | | | | | |
+| citus | ✅ 06-18 | ✅ 06-18²⁴ | ✅ 06-18²⁵ | ✅ 06-18²⁶ | ✅ 06-18²⁷ | ✅ gen | ✅ 06-18²⁸ | ✅ 06-18²⁹ | ✅ 06-18³⁰ | ✅ list+grant+revoke³¹ |
 
 ✅ live-verified · ⚠ coded, fix pending · ⏳ pending · n/a not-applicable (graceful). Dates = live-verify date.
 ¹ an FCI is a fixed 2-node shared-storage instance — `scale-out` returns a skip-with-explanation (grow via `sqlserver-ag` or `scale-up`).
@@ -207,6 +207,22 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 ²² vitess `chaos` process-kill SIGSTOPs a single unit (`nexus-chaos.sh`): a replica freezes `nexus-vttablet`; a PRIMARY target freezes `nexus-mysqlctld` (mysqld) → **VTOrc auto-reparents** the shard to a replica (proven live: VTOrc promoted shard2-tablet-2 when the `80-` primary froze) → lift + recover to green.
 ²³ vitess `acl` = the **vtgate static-auth file** `/etc/nexus-vitess/vtgate_creds.json` (the real MySQL credentials at the `:15306` front door) — `list` parses it; `grant`/`revoke` edit it on **both** vtgate nodes + restart `nexus-vtgate` to apply. vtgate does NOT proxy `CREATE USER` DDL; the built-in `nexus` operator user is revoke-protected.
 
+²⁴ citus `health` proves every layer: etcd quorum (**unioned across nodes** — running `nexus-etcdctl endpoint health` ON an etcd node always reports that node's OWN endpoint unhealthy via `127.0.1.1`, so each node sees only 2/3; union the "is healthy" endpoint names → 3/3), per-group single-leader + replication lag, the operator scram+mTLS round-trip via the coordinator VIP, the registered-worker count from `pg_dist_node` (2), the **sharding proof** (`events` shards span both worker groups — worker1=16 worker2=16), and a distributed cross-shard aggregate (800 rows).
+
+²⁵ citus `topology` **populates the Shards table**: one row per worker group with its Patroni primary + replica and its `citus_shards` count of the distributed `events` table (16 + 16 of 32). Coordinator + etcd appear in the Nodes table only. Leaders drift — read from `patronictl`, never assumed.
+
+²⁶ citus failover = a graceful **`patronictl switchover`** on a chosen Patroni group (`--node` selects `coord`/`worker1`/`worker2`, a scope, or a node; default the coordinator group), measured to the new leader (RTO ≈ 1.6 s), then a switch-back. For a worker group the keepalived **VRRP VIP follows** the new Patroni leader, so `pg_dist_node` (which registers workers by VIP) needs no rewrite. Requires the patroni.yml `ctl:` block (without it, the state-changing REST POST 403s "client certificate required" — the 0.G.4 lesson, baked into `role-overlay-citus-patroni-bootstrap.tf` v2).
+
+²⁷ citus scale-out = **Patroni member** membership: `remove <node>` stops `nexus-patroni` on a replica (leader-guarded — fail it over first); `add --role replica` restarts a previously-removed member so Patroni re-streams it. Genuine **shard** growth (a 3rd worker group) is apply-on-demand (ADR-0042): provision the VMs + overlays, `citus.ps1 apply`, then on the coordinator `SELECT citus_add_node('<vip>',5432)` + `SELECT rebalance_table_shards()`.
+
+²⁸ citus backup = an **operator `COPY (…) TO STDOUT` round-trip** of the distributed dataset: the operator (`nexus-cluster-admin`) streams `tenants` (reference) + `events` (distributed) + `event_tags` (colocated) via the coordinator VIP — a client-side pull that fans the distributed rows out to the workers through the coordinator (no superuser needed; a server-side `COPY TO file` would require it) → gzip node-local on the coordinator. `restore` recreates plain tables in a throwaway `citus_restore_verify` DB the operator owns, COPYs the rows back, and counts (800 events). `backup restore` takes the id **positionally**. (pg_dump on a coordinator doesn't dump worker data, so the `COPY` pull is the faithful distributed round-trip.)
+
+²⁹ citus `cert-rotate` = per-node Vault PKI (`pki_int/issue/citus-server` via the node's own Agent token → `nexus-citus-tls-split.sh`), order etcd → worker-replicas → worker-leaders → coord-replica → coord-leader LAST. **PG nodes RELOAD** (`systemctl reload nexus-patroni` → SIGHUP; PG re-reads `ssl_cert_file` with no restart, so no leader is demoted); **etcd RESTARTS** (reads certs at boot).
+
+³⁰ citus `acl` = PostgreSQL roles via the operator over the coordinator VIP. `list` reads `pg_roles` (attribute flags); `grant` `CREATE ROLE … LOGIN` (idempotent) + `GRANT CONNECT` — Citus **auto-propagates** the role to the workers (`citus.enable_create_role_propagation`); `revoke` removes the DB grant. The operator/system/app roles (`nexus-cluster-admin`/`postgres`/`citus_app`/`replicator`/`rewind`) are revoke-protected.
+
+³¹ citus `chaos` process-kill SIGSTOPs a single `nexus-patroni` unit (`nexus-chaos.sh`): a worker-group replica by default (the group stays writable on its leader); `--target` may name any PG member. Lift + restart + recover to green — Patroni HA absorbing a member loss.
+
 ---
 
 ## §3 Operator runbooks
@@ -228,9 +244,14 @@ $vmrun = 'C:/Program Files/VMware/VMware Workstation/vmrun.exe'
 'vitess-shard1-tablet-1','vitess-shard1-tablet-2','vitess-shard1-tablet-3',
 'vitess-shard2-tablet-1','vitess-shard2-tablet-2','vitess-shard2-tablet-3' |
   % { & $vmrun start "H:\VMS\NexusPlatform\07-vitess\$_\$_.vmx" nogui; Start-Sleep 4 }
+# citus (9 VMs, tier 08-citus) — etcd DCS first, then coordinator pair, then the 2 worker pairs:
+'citus-etcd-1','citus-etcd-2','citus-etcd-3','citus-coord-1','citus-coord-2',
+'citus-worker1-1','citus-worker1-2','citus-worker2-1','citus-worker2-2' |
+  % { & $vmrun start "H:\VMS\NexusPlatform\08-citus\$_\$_.vmx" nogui; Start-Sleep 4 }
 ```
 Then **always** run §3.2 (the boot-race recovery) before expecting Vault-backed services. (mongo-sharded
-needs `VAULT_*` set — the keyFile / operator password is read from Vault KV `nexus/oltp/mongo/keyfile`.)
+needs `VAULT_*` set — the keyFile / operator password is read from Vault KV `nexus/oltp/mongo/keyfile`;
+citus needs `VAULT_*` too — the operator password is read from Vault KV `nexus/citus/operator-password`.)
 
 ### §3.2 TROUBLESHOOTING — "cluster verb returns nothing / cluster-status empty"
 The diagnostic ladder (run top-down; each rung names the fix):

@@ -1,0 +1,74 @@
+{
+  "id": "DEMO-94-citus-acl",
+  "title": "Citus: PostgreSQL roles via the operator (CREATE ROLE propagates to workers)",
+  "description": "Runs `nexus acl citus {list,grant,revoke}` via the operator over the coordinator VIP. CREATE ROLE on the coordinator auto-propagates to the workers (citus.enable_create_role_propagation); the operator/system/app roles are revoke-protected.",
+  "prerequisites": {
+    "vmsAlive": [
+      "citus-etcd-1",
+      "citus-etcd-2",
+      "citus-etcd-3",
+      "citus-coord-1",
+      "citus-coord-2",
+      "citus-worker1-1",
+      "citus-worker1-2",
+      "citus-worker2-1",
+      "citus-worker2-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus acl citus list",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "citus",
+        "nexus-cluster-admin",
+        "citus_app",
+        "postgres",
+        "LOGIN"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "lists PG roles with attribute flags: nexus-cluster-admin LOGIN CREATEROLE CREATEDB, citus_app LOGIN, postgres SUPERUSER, replicator REPLICATION"
+        }
+      ]
+    },
+    {
+      "command": "nexus acl citus grant --user nexus_report --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "nexus_report",
+        "LOGIN"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "nexus_report created (LOGIN) + GRANT CONNECT on citus; Citus propagates the role to both workers"
+        }
+      ]
+    },
+    {
+      "command": "nexus acl citus revoke --user nexus_report --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "nexus_report"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "CONNECT revoked from nexus_report (round-trip clean); protected roles refuse revoke"
+        }
+      ]
+    }
+  ],
+  "whatProves": "CitusAdapter.AclAsync manages PG roles via the operator over the coordinator VIP: list reads pg_roles; grant CREATE ROLE + GRANT (auto-propagated to workers by Citus); revoke is refused for the operator/system/app roles."
+}

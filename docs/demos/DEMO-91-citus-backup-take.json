@@ -1,0 +1,45 @@
+{
+  "id": "DEMO-91-citus-backup-take",
+  "title": "Citus: operator COPY round-trip backup of the distributed dataset",
+  "description": "Runs `nexus backup take citus`: the operator (nexus-cluster-admin) streams `COPY (...) TO STDOUT` for the reference `tenants`, the distributed `events`, and the colocated `event_tags` via the coordinator VIP — pulling the distributed rows out through the coordinator — into gzip archives node-local on the coordinator.",
+  "prerequisites": {
+    "vmsAlive": [
+      "citus-etcd-1",
+      "citus-etcd-2",
+      "citus-etcd-3",
+      "citus-coord-1",
+      "citus-coord-2",
+      "citus-worker1-1",
+      "citus-worker1-2",
+      "citus-worker2-1",
+      "citus-worker2-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup take citus --tag verify --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "citus-verify",
+        "csv.gz",
+        "events",
+        "event_tags",
+        "tenants"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "/var/backups/nexus-citus/<id>/{tenants,events,event_tags}.csv.gz node-local on the coordinator; ~5.5 KiB total"
+        }
+      ]
+    }
+  ],
+  "whatProves": "CitusAdapter.BackupTakeAsync uses the operator credential to COPY each table TO STDOUT through the coordinator (a client-side pull, no superuser needed), fanning the distributed events/event_tags rows out to the workers via the coordinator's operator .pgpass."
+}

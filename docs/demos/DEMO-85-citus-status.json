@@ -1,0 +1,64 @@
+{
+  "id": "DEMO-85-citus-status",
+  "title": "Citus: full cluster status (etcd DCS + coordinator HA + 2 worker-group HA)",
+  "description": "Runs `nexus status citus` across all 9 nodes. One table rolls up the 3 etcd DCS members and the 3 Patroni groups (coordinator + worker1 + worker2), each 1 primary + 1 streaming replica (Shard column = the Patroni scope). Leaders DRIFT and are read from patronictl.",
+  "prerequisites": {
+    "vmsAlive": [
+      "citus-etcd-1",
+      "citus-etcd-2",
+      "citus-etcd-3",
+      "citus-coord-1",
+      "citus-coord-2",
+      "citus-worker1-1",
+      "citus-worker1-2",
+      "citus-worker2-1",
+      "citus-worker2-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus status citus",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "citus",
+        "citus-coord",
+        "citus-worker1",
+        "citus-worker2",
+        "primary",
+        "replica",
+        "dcs"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "9-row table: 3 etcd alive (dcs), each of 3 groups 1 primary + 1 replica alive; leader = the coordinator group primary; overall green"
+        }
+      ]
+    },
+    {
+      "command": "nexus status citus --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "clusterId",
+        "overallHealth",
+        "members",
+        "shardId"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON ClusterStatus: 9 members, overallHealth=green, shardId=scope per PG member, etcd shardId=null, leader=coord primary"
+        }
+      ]
+    }
+  ],
+  "whatProves": "CitusAdapter.GetStatusAsync classifies nodes by name (etcd vs the 3 PG groups), reads each group's leader/replica from per-scope patronictl, and incorporates the etcd quorum + registered Citus worker count into the overall health."
+}

@@ -1,0 +1,44 @@
+{
+  "id": "DEMO-89-citus-scale-out-remove",
+  "title": "Citus: gracefully remove a Patroni member from a group",
+  "description": "Runs `nexus scale-out remove citus citus-worker1-1`: stops nexus-patroni on a replica (PRIMARY-guarded — fail it over first). The group keeps quorum on its leader.",
+  "prerequisites": {
+    "vmsAlive": [
+      "citus-etcd-1",
+      "citus-etcd-2",
+      "citus-etcd-3",
+      "citus-coord-1",
+      "citus-coord-2",
+      "citus-worker1-1",
+      "citus-worker1-2",
+      "citus-worker2-1",
+      "citus-worker2-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out remove citus citus-worker1-1 --yes",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "remove",
+        "citus-worker1-1",
+        "citus-worker1",
+        "stopped"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "gracefully left citus-worker1-1 from Patroni group citus-worker1; group keeps its leader; re-add via scale-out add"
+        }
+      ]
+    }
+  ],
+  "whatProves": "CitusAdapter.ScaleOutRemoveAsync stops nexus-patroni on a replica member (refusing the current leader), leaving the group on its leader; reversible via scale-out add."
+}

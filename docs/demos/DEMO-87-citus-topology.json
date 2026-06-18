@@ -1,0 +1,61 @@
+{
+  "id": "DEMO-87-citus-topology",
+  "title": "Citus: sharded topology (Shards populated — distributed-table placements per worker group)",
+  "description": "Runs `nexus topology citus`. Populates the Shards table: one row per worker group with its Patroni primary + replica and the count of `events` shards placed on it (16 + 16 of 32), the distributed-sharding showcase.",
+  "prerequisites": {
+    "vmsAlive": [
+      "citus-etcd-1",
+      "citus-etcd-2",
+      "citus-etcd-3",
+      "citus-coord-1",
+      "citus-coord-2",
+      "citus-worker1-1",
+      "citus-worker1-2",
+      "citus-worker2-1",
+      "citus-worker2-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus topology citus",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "citus-worker1",
+        "citus-worker2",
+        "events",
+        "tenant_id",
+        "16"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "Nodes table (group/role per node) + Shards table: worker1 (primary worker1-2, replica worker1-1, 16 events shards) + worker2 (primary worker2-1, replica worker2-2, 16 shards)"
+        }
+      ]
+    },
+    {
+      "command": "nexus topology citus --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "nodes",
+        "shards",
+        "slotRange"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON TopologySnapshot with shards[] non-null (2 TopologyShard — one per worker group) — the genuinely-sharded showcase"
+        }
+      ]
+    }
+  ],
+  "whatProves": "CitusAdapter.TopologyAsync emits a populated Shards array (one TopologyShard per worker group, with its Patroni primary/replica + its citus_shards count of the events table), distinguishing Citus distribution from non-sharded HA clusters."
+}

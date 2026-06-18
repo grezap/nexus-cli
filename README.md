@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.O%20v0.7.2%20%E2%9C%85%20vitess%20adapter%20live-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.P%20v0.7.3%20%E2%9C%85%20citus%20adapter%20live-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,20 +12,34 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.7.2):** **v0.7.2 = `VitessAdapter`** (ClusterId **`vitess`**, Phase 0.O): the
-> Vitess-sharded MySQL/Percona cluster — 3 etcd topo + vtctld/VTOrc control + 2 vtgate routers + 2 shards ×3
-> tablets (keyspace `commerce` split `-80`/`80-` by a **hash vindex on `customer_id`**; Percona Server 8.4
-> under `mysqlctld`). **Hybrid operator identity:** the mTLS gRPC control plane via `sudo nexus-vtctldclient`
-> (no password) + the SQL plane via the vtgate `:15306` mTLS listener as the static-auth user `nexus`
-> (password in Vault KV `nexus/vitess/mysql-app-password`). Verbs — status · health (etcd quorum + vtctld +
-> VTOrc + vtgate + per-shard 1P+2R + the **sharding proof** 54/47) · **topology (Shards populated — hash-vindex
-> key ranges)** · failover (graceful **PlannedReparentShard**, RTO≈0.17s) · scale-out (tablet membership via
-> `DeleteTablets` + restart) · backup (**logical `mysqldump` per shard** round-trip, 101 rows — no BackupStorage
-> in 0.O; engine-native Backup is the 0.O.1 enhancement) · cert-rotate (per-node Vault PKI, vttablet-only
-> restart) · acl (the **vtgate static-auth file** — vtgate doesn't proxy `CREATE USER`) · chaos (SIGSTOP a
-> tablet; a primary freeze triggers **VTOrc auto-reparent**). AOT **26.52 MB / 30**; 114/114 tests; 3
-> live-caught bugs (fixed). See [`docs/verification/0.7.2-vitess.md`](./docs/verification/0.7.2-vitess.md) +
-> ADR-0020. Remaining: Citus → the 5 non-data tiers, per the canon order.
+> **Current state (v0.7.3):** **v0.7.3 = `CitusAdapter`** (ClusterId **`citus`**, Phase 0.P): the
+> Citus-sharded PostgreSQL cluster with **full Patroni HA** — 3 etcd DCS + a coordinator Patroni pair (VIP
+> `.211` = `pg_dist_node` groupid 0) + 2 worker Patroni pairs (VIPs `.212`/`.213` = groupid 1/2); PG 17 +
+> Citus 14.1; `events` hash-distributed on `tenant_id` (32 shards = 16+16 across the worker groups) +
+> colocated `event_tags` + reference `tenants`. **Citus = Patroni HA per group + Citus distribution.**
+> Operator = the dedicated `nexus-cluster-admin` role (ADR-0011 Vault-KV model, `nexus/citus/operator-password`)
+> auto-propagated to the workers with a `~postgres/.pgpass` entry so **distributed queries run as the operator**
+> via the coordinator VIP (mTLS+scram+client-cert). Verbs — status · health (etcd quorum **unioned across
+> nodes** + per-group HA + operator mTLS + registered workers + the **sharding proof** 16/16 + distributed
+> aggregate 800) · **topology (Shards populated — per-worker-group placements)** · failover (graceful
+> `patronictl switchover` on a chosen group, RTO≈1.6s; the VIP follows the leader so `pg_dist_node` is
+> untouched) · scale-out (Patroni-member add/remove; worker-group growth = apply-on-demand) · backup (operator
+> `COPY … TO STDOUT` round-trip of the distributed dataset, 800 events) · cert-rotate (per-node Vault PKI, PG
+> reload / etcd restart, coord-leader-last) · acl (PG roles via the operator; `CREATE ROLE` propagates to
+> workers) · chaos (process-kill `nexus-patroni`). AOT **26.71 MB / 30**; 137/137 tests; adapter code
+> first-try-green on every verb (the one live-caught issue was infra — the patroni.yml `ctl:` block — fixed +
+> baked). See [`docs/verification/0.7.3-citus.md`](./docs/verification/0.7.3-citus.md) + ADR-0021. Remaining:
+> the 5 non-data tiers, per the canon order.
+>
+> <details><summary>v0.7.2 VitessAdapter (sealed)</summary>
+>
+> **v0.7.2 = `VitessAdapter`** (ClusterId **`vitess`**, Phase 0.O): the Vitess-sharded MySQL/Percona cluster
+> (3 etcd topo + vtctld/VTOrc + 2 vtgate + 2 shards ×3 tablets; keyspace `commerce` split `-80`/`80-` by a
+> hash vindex on `customer_id`). Hybrid operator identity (mTLS gRPC via `nexus-vtctldclient` + the vtgate
+> `:15306` SQL plane). `topology` Shards populated; failover = `PlannedReparentShard` (RTO≈0.17s); backup =
+> logical `mysqldump` per shard (101 rows); acl = the vtgate static-auth file; chaos = SIGSTOP → VTOrc
+> auto-reparent. AOT 26.52 MB; 114/114 tests; 3 live-caught bugs. See ADR-0020.
+> </details>
 >
 > <details><summary>v0.7.0 base + v0.7.1 MongoSharded (sealed)</summary>
 >
@@ -267,7 +281,8 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Twenty ADRs cover framewo
 | **v0.7.0** | Phase 0.G **base roll-up** — the 0.G exit-gate milestone: the 9 data-tier adapter families sealed + the aggregate AOT validated ≤30 MB (no new adapter); **26.18 MB**, 86/86 tests |
 | **v0.7.1** | Phase 0.N — the **MongoSharded adapter** (ClusterId `mongo-sharded`; 3 config-server RS + 2 shard RSes ×3 + 2 mongos; two-headed keyFile auth — `__system`@local for mongods + `nexus-sharded-admin`@admin through mongos; `topology` populates Shards; shard-primary stepdown RTO≈2.8s; mongodump-through-mongos backup; cert-rotate graceful N/A — no TLS in v1); all verbs live-verified (1 bug fixed); **26.30 MB** |
 | **v0.7.2** | Phase 0.O — the **Vitess adapter** (ClusterId `vitess`; 3 etcd topo + vtctld/VTOrc + 2 vtgate + 2 shards ×3 tablets; keyspace `commerce` hash-vindex on `customer_id`; hybrid mTLS-control-plane `nexus-vtctldclient` + vtgate `:15306` SQL plane as `nexus`; `topology` populates Shards; graceful `PlannedReparentShard` RTO≈0.17s; logical `mysqldump`-per-shard backup round-trip 101 rows; cert-rotate vttablet-only; acl = vtgate static-auth file; chaos primary-freeze → VTOrc auto-reparent); all verbs live-verified (3 bugs fixed); **26.52 MB**, 114/114 tests |
-| v0.7.3–v0.8.0 | Citus → full-fleet, then the 5 non-data-tier adapters |
+| **v0.7.3** | Phase 0.P — the **Citus adapter** (ClusterId `citus`; Citus-sharded PostgreSQL + full Patroni HA: 3 etcd DCS + a coordinator Patroni pair + 2 worker Patroni pairs; PG 17 + Citus 14.1; `events` hash-distributed on `tenant_id`, 32 shards = 16+16 across the worker groups; **Citus = Patroni HA per group + Citus distribution**; operator `nexus-cluster-admin` propagated to workers + `.pgpass` so distributed queries run as the operator; `topology` populates Shards; `patronictl switchover` RTO≈1.6s with the VIP following the leader; operator `COPY` round-trip backup of the distributed dataset 800 rows; cert-rotate PG-reload/etcd-restart; acl = PG roles propagated to workers); all verbs live-verified (adapter first-try-green; the 1 infra fix = the patroni.yml `ctl:` block); **26.71 MB**, 137/137 tests |
+| v0.8.0+ | full-fleet, then the 5 non-data-tier adapters (Foundation/Vault · Swarm · Observability · Lakehouse · Harbor) |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing

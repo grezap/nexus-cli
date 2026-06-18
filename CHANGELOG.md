@@ -6,6 +6,51 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-06-18
+
+Phase 0.P: **`CitusAdapter`** (ClusterId `citus`) — the third adapter on the 0.7.x sharded line, closing the
+relational-PostgreSQL-sharding axis: a **Citus-sharded PostgreSQL cluster with full Patroni HA** (3 etcd DCS
++ a coordinator Patroni pair + 2 worker Patroni pairs; PG 17 + Citus 14.1; `events` hash-distributed on
+`tenant_id` into 32 shards across the 2 worker groups + colocated `event_tags` + reference `tenants`).
+**Citus = Patroni HA per group + Citus distribution** — reuses the ADR-0013 PatroniAdapter HA idioms three
+times + the ADR-0020 populated-Shards topology. Operator = the dedicated `nexus-cluster-admin` role
+(ADR-0011 Vault-KV model, `nexus/citus/operator-password`) auto-propagated to the workers with a
+`~postgres/.pgpass` entry so **distributed queries run as the operator** via the coordinator VIP
+(mTLS+scram+client-cert). SSH-shell-out to on-node `patronictl`/`psql`/`etcdctl`, **no managed Npgsql
+driver** (NetArchTest). Live-verified end-to-end against the running 9-VM cluster — **adapter code
+first-try-green on every verb**; the one live-caught issue was infra (the missing patroni.yml `ctl:` block →
+switchover 403, the 0.G.4 lesson), fixed live + baked into the overlay. AOT **26.71 MB / 30** (+0.19 over
+v0.7.2); **137/137** tests (+23 Citus parser tests). Cold-rebuild PENDING consent. See ADR-0021 +
+`docs/verification/0.7.3-citus.md`.
+
+### Added — CitusAdapter (Phase 0.P)
+
+- ClusterId `citus`, registered next to `VitessAdapter`. Nodes classified by name
+  (`citus-etcd-*` / `citus-coord-*` / `citus-worker1-*` / `citus-worker2-*`); the 3 PG groups (coordinator +
+  2 workers, registered in `pg_dist_node` by VIP = groupid 0/1/2) each run a Patroni leader + streaming
+  replica over the shared etcd DCS. **Leaders drift — read from `patronictl`**, never assumed.
+- `status` / `health` / `topology` roll up all 9 nodes. `topology` **populates the Shards array** (one row
+  per worker group with its Patroni primary/replica + its `citus_shards` count of `events` — 16 + 16 of 32).
+  `health` proves etcd quorum (**unioned across nodes** to beat the `127.0.1.1` self-probe artifact),
+  per-group HA, the operator mTLS round-trip via the coordinator VIP, the registered-worker count, the
+  sharding spread, and a distributed aggregate.
+- `failover` = a graceful `patronictl switchover` on a chosen group (RTO ≈ 1.6 s; the VRRP VIP follows the
+  new leader so `pg_dist_node` is untouched). `scale-out` = Patroni-member add/remove (worker-group growth =
+  apply-on-demand `citus_add_node` + `rebalance_table_shards`, ADR-0042). `backup` = an operator
+  `COPY … TO STDOUT` round-trip of the distributed dataset (800 events). `cert-rotate` = `pki_int/issue/
+  citus-server` + `nexus-citus-tls-split.sh`, PG **reload** (no failover) / etcd restart, coord-leader-last.
+  `acl` = PG roles via the operator (`CREATE ROLE` auto-propagates to workers). `chaos` = process-kill
+  `nexus-patroni`.
+- 11 System B demos `docs/demos/DEMO-85..95-citus-*.json` (one per verb).
+
+### Fixed / infra (cold-rebuild bake)
+
+- The patroni.yml **`ctl:` block** (added to `nexus-infra-citus` `role-overlay-citus-patroni-bootstrap.tf`
+  v2) so `patronictl` presents a client cert for state-changing REST calls — without it graceful switchover
+  403s (the 0.G.4 PatroniAdapter lesson). Also baked: `role-overlay-citus-operator-user.tf` (NEW — the
+  operator role + `.pgpass`), the security `role-overlay-vault-citus-cluster-creds-seed.tf` v2
+  (+operator-password) + `role-overlay-vault-agent-citus-policies.tf` v2 (+operator-password read).
+
 ## [0.7.2] — 2026-06-17
 
 Phase 0.O: **`VitessAdapter`** (ClusterId `vitess`) — the second adapter on the 0.7.x sharded line: the

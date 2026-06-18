@@ -1,0 +1,44 @@
+{
+  "id": "DEMO-90-citus-scale-out-add",
+  "title": "Citus: re-join a removed Patroni member",
+  "description": "Runs `nexus scale-out add citus --role replica`: finds a provisioned-but-stopped PG member, starts nexus-patroni, waits for it to reach streaming. Genuine shard growth (a 3rd worker group + citus_add_node + rebalance_table_shards) is apply-on-demand.",
+  "prerequisites": {
+    "vmsAlive": [
+      "citus-etcd-1",
+      "citus-etcd-2",
+      "citus-etcd-3",
+      "citus-coord-1",
+      "citus-coord-2",
+      "citus-worker1-1",
+      "citus-worker1-2",
+      "citus-worker2-1",
+      "citus-worker2-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out add citus --role replica --yes",
+      "waitAfterSeconds": 6,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "add",
+        "citus-worker1-1",
+        "citus-worker1",
+        "streaming"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "citus-worker1-1 rejoined Patroni group citus-worker1 (streaming) in ~4.5s"
+        }
+      ]
+    }
+  ],
+  "whatProves": "CitusAdapter.ScaleOutAddAsync brings a stopped PG member back up so Patroni re-streams it (apply-on-demand for a genuine new worker group, ADR-0042: provision VMs + citus_add_node + rebalance_table_shards)."
+}

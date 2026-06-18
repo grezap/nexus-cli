@@ -1,0 +1,57 @@
+{
+  "id": "DEMO-95-citus-chaos",
+  "title": "Citus: process-kill chaos + Patroni rejoin",
+  "description": "Runs `nexus chaos citus process-kill`: SIGSTOPs nexus-patroni on a worker-group replica via the embedded nexus-chaos.sh (the group stays writable on its leader), captures impact, lifts, restarts the member, and confirms recovery to green.",
+  "prerequisites": {
+    "vmsAlive": [
+      "citus-etcd-1",
+      "citus-etcd-2",
+      "citus-etcd-3",
+      "citus-coord-1",
+      "citus-coord-2",
+      "citus-worker1-1",
+      "citus-worker1-2",
+      "citus-worker2-1",
+      "citus-worker2-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus chaos citus process-kill --yes",
+      "waitAfterSeconds": 25,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "process-kill",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "froze a worker-group replica nexus-patroni, captured impact, lifted + restarted -> all probes green"
+        }
+      ]
+    },
+    {
+      "command": "nexus chaos citus process-kill --target citus-coord-2 --yes",
+      "waitAfterSeconds": 30,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "process-kill",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "froze the coordinator replica; the coordinator group stayed writable on its leader; recovered green"
+        }
+      ]
+    }
+  ],
+  "whatProves": "CitusAdapter.ApplyChaosAsync SIGSTOPs a single nexus-patroni unit (a worker-group replica by default), then lifts + restarts it and confirms the cluster recovers to green — Patroni HA absorbing a member loss."
+}

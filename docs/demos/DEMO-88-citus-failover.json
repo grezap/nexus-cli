@@ -1,0 +1,49 @@
+{
+  "id": "DEMO-88-citus-failover",
+  "title": "Citus: graceful Patroni switchover on a chosen group + RTO",
+  "description": "Runs `nexus failover-test cluster citus --node citus-worker2`: a graceful patronictl switchover of the worker2 group to its streaming replica, measured to the new leader, then a switch-back. The VRRP VIP follows the new leader so pg_dist_node needs no rewrite (workers registered by VIP). --node selects a group (coord/worker1/worker2) or a node; default = the coordinator group.",
+  "prerequisites": {
+    "vmsAlive": [
+      "citus-etcd-1",
+      "citus-etcd-2",
+      "citus-etcd-3",
+      "citus-coord-1",
+      "citus-coord-2",
+      "citus-worker1-1",
+      "citus-worker1-2",
+      "citus-worker2-1",
+      "citus-worker2-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster citus --node citus-worker2 --yes",
+      "waitAfterSeconds": 6,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "citus-patroni-switchover",
+        "citus-worker2",
+        "original primary",
+        "new primary",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "original primary citus-worker2/citus-worker2-1 -> new primary citus-worker2-2; RTO timeline (~1.6s live); recovery=recovered; VIP-follows-leader hint"
+        },
+        {
+          "where": "ssh a worker2 node: sudo nexus-patronictl list",
+          "what": "the promoted member is Leader; the old leader is a streaming Replica"
+        }
+      ]
+    }
+  ],
+  "whatProves": "CitusAdapter.FailoverAsync runs a graceful patronictl switchover (needing the patroni.yml ctl: client cert) on the targeted Patroni group and measures the RTO to the new leader; the keepalived VIP follows so the Citus metadata is untouched."
+}

@@ -1,0 +1,42 @@
+{
+  "id": "DEMO-92-citus-backup-restore",
+  "title": "Citus: backup restore round-trip (reload + count)",
+  "description": "Runs `nexus backup restore citus <id>`: the operator creates a throwaway citus_restore_verify DB it owns, recreates plain (non-distributed) tables, COPYs the rows back in, and counts events — proving the full distributed dataset round-trips.",
+  "prerequisites": {
+    "vmsAlive": [
+      "citus-etcd-1",
+      "citus-etcd-2",
+      "citus-etcd-3",
+      "citus-coord-1",
+      "citus-coord-2",
+      "citus-worker1-1",
+      "citus-worker1-2",
+      "citus-worker2-1",
+      "citus-worker2-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup restore citus citus-verify-<ts> --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "items restored",
+        "800"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "items restored = 800 (the full distributed events dataset, pulled + reloaded via the operator)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "CitusAdapter.BackupRestoreAsync reloads each CSV.gz into a scratch DB the operator owns on the coordinator and counts the events rows (the round-trip proof). backup restore takes the id positionally."
+}

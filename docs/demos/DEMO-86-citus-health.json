@@ -1,0 +1,62 @@
+{
+  "id": "DEMO-86-citus-health",
+  "title": "Citus: etcd quorum + per-group HA + Citus workers + sharding proof",
+  "description": "Runs `nexus health citus`: etcd quorum (union across nodes — defeats the 127.0.1.1 self-probe artifact), per-group single-leader + replication lag, the operator mTLS round-trip via the coordinator VIP, the registered-worker count from pg_dist_node, the sharding proof (events shards span both worker groups), and a distributed cross-shard aggregate.",
+  "prerequisites": {
+    "vmsAlive": [
+      "citus-etcd-1",
+      "citus-etcd-2",
+      "citus-etcd-3",
+      "citus-coord-1",
+      "citus-coord-2",
+      "citus-worker1-1",
+      "citus-worker1-2",
+      "citus-worker2-1",
+      "citus-worker2-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus health citus",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "etcd-quorum",
+        "single-leader",
+        "patroni-state",
+        "operator-auth",
+        "citus-workers",
+        "sharding",
+        "distributed-query"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "all green: etcd-quorum 3/3, each group 1 leader + streaming replica (0 MB lag), operator scram+mTLS via VIP, citus-workers 2, sharding worker1=16 worker2=16, distributed-query 800 rows"
+        }
+      ]
+    },
+    {
+      "command": "nexus health citus --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "overallHealth",
+        "probes"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON HealthReport overallHealth=green; probes cover etcd, all 3 groups, operator-auth, citus-workers, sharding, distributed-query"
+        }
+      ]
+    }
+  ],
+  "whatProves": "CitusAdapter.HealthAsync proves every layer: the etcd DCS quorum (unioned across nodes), Patroni HA per group, the Vault-KV operator credential over mTLS via the coordinator VIP, and the Citus distributed layer (registered workers + 16/16 shard spread + a distributed count)."
+}

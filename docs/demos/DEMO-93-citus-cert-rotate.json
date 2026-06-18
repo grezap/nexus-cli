@@ -1,0 +1,59 @@
+{
+  "id": "DEMO-93-citus-cert-rotate",
+  "title": "Citus: per-node Vault PKI cert rotation (PG reload, etcd restart)",
+  "description": "Runs `nexus cert-rotate citus`: re-issues a fresh leaf from pki_int/issue/citus-server on every node via its own Vault Agent token, runs nexus-citus-tls-split.sh, and applies — PG nodes RELOAD (SIGHUP, no failover) and etcd nodes RESTART. Order: etcd -> worker replicas -> worker leaders -> coord replica -> coord leader LAST.",
+  "prerequisites": {
+    "vmsAlive": [
+      "citus-etcd-1",
+      "citus-etcd-2",
+      "citus-etcd-3",
+      "citus-coord-1",
+      "citus-coord-2",
+      "citus-worker1-1",
+      "citus-worker1-2",
+      "citus-worker2-1",
+      "citus-worker2-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus cert-rotate citus --yes",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "cert",
+        "serial",
+        "citus-etcd-1",
+        "citus-coord-1"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "9 rows old->new serial, 0 errors; cluster stays green (PG reloaded so no leader is demoted)"
+        }
+      ]
+    },
+    {
+      "command": "nexus cert-rotate citus --yes --json",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "rotatedNodes",
+        "newSerial"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON CertRotationResult: 9 rotatedNodes, each with a new serial_number, error=null"
+        }
+      ]
+    }
+  ],
+  "whatProves": "CitusAdapter.RotateCertAsync re-issues per-host certs via the node Agent token + nexus-citus-tls-split.sh; PG nodes reload (no failover), etcd restarts; coordinator leader last so the write endpoint reloads only after the rest are healthy."
+}
