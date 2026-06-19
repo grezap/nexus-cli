@@ -1,0 +1,47 @@
+{
+  "id": "DEMO-111-swarm-health",
+  "title": "Swarm: 9-probe health (Consul + Nomad + Portainer + Docker Swarm)",
+  "description": "Runs `nexus health swarm`. Nine probes: Consul members + leader, Nomad servers + leader + clients, Portainer reachability, and Docker Swarm managers + workers + raft leader.",
+  "prerequisites": {
+    "vmsAlive": [
+      "swarm-manager-1",
+      "swarm-manager-2",
+      "swarm-manager-3",
+      "swarm-worker-1",
+      "swarm-worker-2",
+      "swarm-worker-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus health swarm",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "consul-members",
+        "consul-leader",
+        "nomad-servers",
+        "nomad-leader",
+        "nomad-clients",
+        "portainer",
+        "swarm-managers",
+        "swarm-workers",
+        "swarm-leader",
+        "green"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "overall=green; consul 6 alive/0 failed + leader; nomad 3 servers/1 leader/3 ready; portainer reachable (v2.39.3); swarm 3/3 + 3/3 Ready + 1 leader"
+        }
+      ]
+    }
+  ],
+  "whatProves": "SwarmAdapter.HealthAsync rolls the three control planes (Consul/Nomad/Portainer via the reused clients) together with the authoritative docker node ls quorum view into one health report."
+}

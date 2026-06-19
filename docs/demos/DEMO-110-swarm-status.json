@@ -1,0 +1,59 @@
+{
+  "id": "DEMO-110-swarm-status",
+  "title": "Swarm: orchestration-tier status (3 managers + 3 workers + Portainer)",
+  "description": "Runs `nexus status swarm`. One table rolls up the 6 nodes from `docker node ls` (manager/leader vs reachable + worker), with overall health folded in from the Consul+Nomad+Portainer rollup (ClusterStatusService). The Swarm raft leader is read dynamically.",
+  "prerequisites": {
+    "vmsAlive": [
+      "swarm-manager-1",
+      "swarm-manager-2",
+      "swarm-manager-3",
+      "swarm-worker-1",
+      "swarm-worker-2",
+      "swarm-worker-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus status swarm",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "swarm",
+        "swarm-manager-1",
+        "swarm-worker-1",
+        "manager/leader",
+        "worker",
+        "alive"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "6-row table: 3 managers (one manager/leader, two manager/reachable) + 3 workers, all alive; leader line shows the swarm raft leader"
+        }
+      ]
+    },
+    {
+      "command": "nexus status swarm --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "clusterId",
+        "overallHealth",
+        "members"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON ClusterStatus: 6 members, overallHealth=green, Shards null"
+        }
+      ]
+    }
+  ],
+  "whatProves": "SwarmAdapter.GetStatusAsync reuses ClusterStatusService for the overall rollup and enriches per-node role/status from docker node ls, identifying the single Swarm raft leader."
+}

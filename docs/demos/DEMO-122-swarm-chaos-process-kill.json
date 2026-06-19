@@ -1,0 +1,40 @@
+{
+  "id": "DEMO-122-swarm-chaos-process-kill",
+  "title": "Swarm: chaos process-kill on a worker (recover to green)",
+  "description": "Runs `nexus chaos swarm process-kill --target swarm-worker-2 --duration 30 --yes`. Process-kills the worker's nomad client (managers are spared to keep quorum), observes the impact, then recovers and polls docker node ls until the worker is Ready+Active.",
+  "prerequisites": {
+    "vmsAlive": [
+      "swarm-manager-1",
+      "swarm-manager-2",
+      "swarm-manager-3",
+      "swarm-worker-1",
+      "swarm-worker-2",
+      "swarm-worker-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus chaos swarm process-kill --target swarm-worker-2 --duration 30 --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "chaos",
+        "process-kill",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "observed-impact probes during the kill, then cluster recovered = true"
+        }
+      ]
+    }
+  ],
+  "whatProves": "SwarmAdapter.ApplyChaosAsync runs the embedded nexus-chaos.sh on a WORKER and recovers via a lightweight docker node ls poll (keeping inside the chaos command Duration+60s budget)."
+}

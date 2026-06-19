@@ -1,0 +1,40 @@
+{
+  "id": "DEMO-117-swarm-scale-out-add",
+  "title": "Swarm: re-activate a drained node",
+  "description": "Runs `nexus scale-out add swarm --role worker --yes`. Finds the drained node and re-activates it (`docker node update --availability active` + re-promote if a manager + `nomad node eligibility -enable`).",
+  "prerequisites": {
+    "vmsAlive": [
+      "swarm-manager-1",
+      "swarm-manager-2",
+      "swarm-manager-3",
+      "swarm-worker-1",
+      "swarm-worker-2",
+      "swarm-worker-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out add swarm --role worker --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "scale-out add",
+        "swarm-activated",
+        "nomad-eligible"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the drained node is re-activated into Swarm scheduling + Nomad eligibility"
+        }
+      ]
+    }
+  ],
+  "whatProves": "SwarmAdapter.ScaleOutAddAsync reverses the drain; growing the fixed 3+3 fleet is reported as a terraform operation, not silently skipped."
+}

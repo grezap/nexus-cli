@@ -1,0 +1,40 @@
+{
+  "id": "DEMO-123-swarm-chaos-network-partition",
+  "title": "Swarm: chaos backplane partition (docker restarted after nft)",
+  "description": "Runs `nexus chaos swarm network-partition --target swarm-worker-3 --duration 30 --yes`. Drops the VMnet10 backplane on a worker (the mgmt NIC stays up), observes the partition (consul 5/1, worker 2/3 Ready), then lifts it and restarts docker to rebuild the ingress-mesh DNAT.",
+  "prerequisites": {
+    "vmsAlive": [
+      "swarm-manager-1",
+      "swarm-manager-2",
+      "swarm-manager-3",
+      "swarm-worker-1",
+      "swarm-worker-2",
+      "swarm-worker-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus chaos swarm network-partition --target swarm-worker-3 --duration 30 --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "chaos",
+        "network-partition",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "observed impact shows the worker partitioned off consul/swarm; after lift + docker restart the cluster recovers"
+        }
+      ]
+    }
+  ],
+  "whatProves": "SwarmAdapter.ApplyChaosAsync partitions the backplane CIDR (not the mgmt NIC) and restarts docker after the nft scenario lifts ([[nftables-flush-ruleset-wipes-docker]])."
+}

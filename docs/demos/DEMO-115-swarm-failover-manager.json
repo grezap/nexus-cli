@@ -1,0 +1,41 @@
+{
+  "id": "DEMO-115-swarm-failover-manager",
+  "title": "Swarm: manager failover via vmrun host-level suspend",
+  "description": "Runs `nexus failover-test cluster swarm --direction swarm-manager --yes`. SUSPENDS the Swarm raft-leader VM with vmrun (a host-level outage, not a service stop), polls docker node ls for the new leader, then resumes the VM.",
+  "prerequisites": {
+    "vmsAlive": [
+      "swarm-manager-1",
+      "swarm-manager-2",
+      "swarm-manager-3",
+      "swarm-worker-1",
+      "swarm-worker-2",
+      "swarm-worker-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster swarm --direction swarm-manager --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "swarm-manager",
+        "original primary",
+        "new primary",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "leader VM suspended -> a different manager becomes Leader, RTO ~20s, VM resumed, all 3 managers Ready again"
+        }
+      ]
+    }
+  ],
+  "whatProves": "SwarmAdapter.FailoverAsync routes swarm-manager to FailoverTestService.RunSwarmManagerAsync (vmrun suspend/resume of the raft-leader VM — the only host-level failover of the three)."
+}

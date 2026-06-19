@@ -1,0 +1,40 @@
+{
+  "id": "DEMO-120-swarm-acl-list",
+  "title": "Swarm: list Consul + Nomad ACL tokens (protected flagged)",
+  "description": "Runs `nexus acl swarm list`. Merges `consul acl token list` + `nomad acl token list`; bootstrap/agent/anonymous/management tokens are flagged protected.",
+  "prerequisites": {
+    "vmsAlive": [
+      "swarm-manager-1",
+      "swarm-manager-2",
+      "swarm-manager-3",
+      "swarm-worker-1",
+      "swarm-worker-2",
+      "swarm-worker-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus acl swarm list",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "consul:",
+        "nomad:",
+        "protected"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "merged token table; agent + bootstrap + anonymous tokens carry the protected tag"
+        }
+      ]
+    }
+  ],
+  "whatProves": "SwarmAdapter.AclAsync(list) parses both ACL engines (ParseConsulAclTokens + ParseNomadAclTokens) and marks the cluster/operator-identity tokens revoke-protected."
+}

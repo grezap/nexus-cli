@@ -1,0 +1,56 @@
+{
+  "id": "DEMO-118-swarm-backup",
+  "title": "Swarm: Consul + Nomad snapshot backup (round-trip verified)",
+  "description": "Runs `nexus backup take swarm --tag verify`. Runs consul snapshot save + consul snapshot inspect (the round-trip verify) + consul kv export + nomad operator snapshot save on a manager, downloads them to the build host, best-effort copies the Portainer boltdb.",
+  "prerequisites": {
+    "vmsAlive": [
+      "swarm-manager-1",
+      "swarm-manager-2",
+      "swarm-manager-3",
+      "swarm-worker-1",
+      "swarm-worker-2",
+      "swarm-worker-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup take swarm --tag verify",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "backup take",
+        "consul.snap",
+        "nomad.snap",
+        "inspect OK"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "destination dir on the build host with consul.snap + nomad.snap + consul-kv.json; consul snapshot inspect reported OK"
+        }
+      ]
+    },
+    {
+      "command": "nexus backup restore swarm dummy --yes",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 2,
+      "expectedOutputContains": [
+        "intentionally NOT exposed",
+        "isolated cluster"
+      ],
+      "observe": [
+        {
+          "where": "stderr",
+          "what": "restore is deliberately refused on the live cluster (would overwrite live KV/jobs)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "SwarmAdapter.BackupTakeAsync captures + round-trip-verifies the Consul/Nomad raft snapshots to a build-host file; BackupRestoreAsync refuses a live in-place restore (DR runbook on an isolated cluster)."
+}

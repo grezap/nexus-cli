@@ -183,6 +183,7 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 | citus | ✅ 06-18 | ✅ 06-18²⁴ | ✅ 06-18²⁵ | ✅ 06-18²⁶ | ✅ 06-18²⁷ | ✅ gen | ✅ 06-18²⁸ | ✅ 06-18²⁹ | ✅ 06-18³⁰ | ✅ list+grant+revoke³¹ |
 | **vault** | ✅ 06-18 | ✅ 06-18³² | ✅ 06-18³³ | ✅ 06-18³⁴ | ✅ 06-18³⁵ | ✅ gen | ✅ 06-18³⁶ | ✅ 06-18³⁷ | ✅ 06-18³⁸ | ✅ list+grant+revoke³⁹ |
 | **foundation-ad** | ✅ 06-18 | ✅ 06-18⁴⁰ | ✅ 06-18 | n/a⁴¹ | n/a⁴¹ | ✅ gen | n/a⁴¹ | n/a⁴¹ | n/a⁴¹ | ✅ list+grant+revoke⁴² |
+| **swarm** | ✅ 06-19 | ✅ 06-19⁴⁴ | ✅ 06-19⁴⁵ | ✅ 06-19⁴⁶ | ✅ 06-19⁴⁷ | ✅ gen | ✅ 06-19⁴⁸ | ✅ 06-19⁴⁹ | ✅ 06-19⁵⁰ | ✅ list+grant+revoke⁵¹ |
 
 > The **`vault`** cluster also has a bespoke **`recover-ha`** verb (not a matrix column) — the declarative
 > boot-race recovery via the `IRecoverableCluster` capability: unseal vault-transit from the Shamir key file
@@ -254,6 +255,22 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 
 ⁴³ `recover-ha vault` (the `IRecoverableCluster` capability) replicates `nexus-infra-vmware/scripts/recover-vault-ha.ps1`: read the Shamir keys from the operator's `~/.nexus/vault-transit-init.json` → unseal vault-transit over SSH → `reset-failed` + `start vault` on vault-1/2/3 → poll until unsealed. Idempotent (already-unsealed = no-op). It is the ONLY exposed unseal path (raw `vault operator unseal` is never surfaced).
 
+⁴⁴ swarm `health` = 9 probes rolling up the **three** control planes: Consul (`/v1/agent/members` 6 alive/0 failed + `/v1/status/leader`), Nomad (3 servers + exactly 1 leader + 3 ready clients), Portainer (`/api/system/status` reachable), and Docker Swarm from `docker node ls` (3 managers + 3 workers Ready + exactly 1 raft leader). The reused `ClusterStatusService` provides the Consul/Nomad/Portainer rollup; the docker view is the authoritative quorum source. All three HTTP clients target a **manager IP** (the build host doesn't resolve `*.nexus.lab`; the CA-pinned factory validates the chain, not the SAN).
+
+⁴⁵ swarm `topology` lists the 6 nodes role-annotated (manager = consul-server/nomad-server with its raft state; worker = consul-client/nomad-client/portainer-agent) + a **Portainer service** node (best-effort `/api/endpoints` count, else its version). Shards = null (the orchestration tier is not data-sharded). The three rafts (Swarm/Consul/Nomad) elect independently — each leader read from its own source.
+
+⁴⁶ swarm failover dispatches **`--direction`** to the reused `FailoverTestService`: `consul-leader` / `nomad-leader` SSH-`systemctl stop` the discovered raft leader → poll a different manager for re-election → restart (RTO ≈ 2–3 s); **`swarm-manager`** is a **vmrun host-level SUSPEND** of the Swarm raft-leader VM → poll `docker node ls` for the new leader → vmrun resume (RTO ≈ 21 s — the only host-level failover). Let the cluster settle after a swarm-manager run (the Consul re-election window can briefly show no leader).
+
+⁴⁷ swarm scale-out = **reversible drain** (not `docker node rm`): `remove <node>` = `docker node update --availability drain` (+ `docker node demote` for managers, guarded by "not the raft leader AND ≥2 managers Ready") + `nomad node drain -enable -self`; `add --role <manager|worker>` re-`active`s (+ `promote`s) + re-enables Nomad eligibility on the drained node. Growing the fixed 3-manager + 3-worker fleet is a terraform op (documented in the OutcomeReason).
+
+⁴⁸ swarm backup = `consul snapshot save` + **`consul snapshot inspect`** (the round-trip verify) + `consul kv export` + `nomad operator snapshot save` on a manager → downloaded to `~/.nexus/backups/swarm/<id>/` (+ best-effort Portainer boltdb copy). `backup restore` is **deliberately refused** on the live cluster (`consul`/`nomad … snapshot restore` overwrite the live KV + job state in place — the DR runbook restores onto an isolated cluster).
+
+⁴⁹ swarm `cert-rotate` **force-reissues** each node's pki_int leaves: the vault-agent templates use the `pkiCert` function, which **persists + reuses** the leaf across restarts, so a bare `systemctl restart nexus-vault-agent` does NOT rotate — the verb `cp -a`+`rm`s the rendered bundle (with a `.bak` restore safety) so `pkiCert` re-issues on the next render, then restarts the services: **consul ROLLING** (workers → non-leader managers → leader) and **nomad PARALLEL big-bang** across all six ([[feedback_nomad_tls_rolling_restart_must_be_parallel]] — a rolling flip strands the first TLS node and raft can't elect). New vs old wire serials (via `openssl s_client`) prove the rotation.
+
+⁵⁰ swarm `chaos` runs `nexus-chaos.sh` on a **WORKER** (managers are spared to keep raft quorum): process-kill targets the worker's `nomad`; network-partition/packet-loss drop the **VMnet10 backplane** CIDR (the management NIC stays up so the lift + recovery work). After any nftables-based scenario the victim's `docker` is restarted to rebuild the ingress-mesh DNAT the `flush ruleset` wiped ([[feedback_nftables_flush_ruleset_wipes_docker]]); recover-to-green via a lightweight `docker node ls` poll (the victim Ready+Active) — kept under the chaos command's `Duration+60 s` budget.
+
+⁵¹ swarm `acl` = **Consul + Nomad ACL tokens** merged: `list`/`describe` parse `consul acl token list -format=json` + `nomad acl token list -json`; `grant --user <name>` creates a Consul token with the minimal `builtin/dns` templated policy (Consul refuses a policy-less token); `revoke --user <accessor|description>` = `consul acl token delete -accessor-id` / `nomad acl token delete`. Bootstrap/management/agent/anonymous tokens + the global-management/node-identity policies are revoke-protected. (`CanResizeVm` refuses the current Swarm OR Nomad raft leader.)
+
 ---
 
 ## §3 Operator runbooks
@@ -279,10 +296,17 @@ $vmrun = 'C:/Program Files/VMware/VMware Workstation/vmrun.exe'
 'citus-etcd-1','citus-etcd-2','citus-etcd-3','citus-coord-1','citus-coord-2',
 'citus-worker1-1','citus-worker1-2','citus-worker2-1','citus-worker2-2' |
   % { & $vmrun start "H:\VMS\NexusPlatform\08-citus\$_\$_.vmx" nogui; Start-Sleep 4 }
+# swarm (6 VMs, tier 06-orchestration) — 3 managers then 3 workers (Portainer is a Swarm service, no VM):
+1..3 | % { & $vmrun start "H:\VMS\NexusPlatform\06-orchestration\swarm-manager-$_\swarm-manager-$_.vmx" nogui; Start-Sleep 4 }
+1..3 | % { & $vmrun start "H:\VMS\NexusPlatform\06-orchestration\swarm-worker-$_\swarm-worker-$_.vmx" nogui; Start-Sleep 4 }
 ```
 Then **always** run §3.2 (the boot-race recovery) before expecting Vault-backed services. (mongo-sharded
 needs `VAULT_*` set — the keyFile / operator password is read from Vault KV `nexus/oltp/mongo/keyfile`;
-citus needs `VAULT_*` too — the operator password is read from Vault KV `nexus/citus/operator-password`.)
+citus needs `VAULT_*` too — the operator password is read from Vault KV `nexus/citus/operator-password`;
+**swarm** needs `VAULT_*` too — the Consul/Nomad mgmt tokens are read from Vault KV
+`nexus/swarm/{consul,nomad}-bootstrap-token`. NOTE: if the swarm tier has been **offline > 168 h**, Consul
+refuses to rejoin [`server_rejoin_age_max`] — cold-rebuild it via `pwsh scripts/swarm.ps1 cycle` in
+nexus-infra-swarm-nomad, which also re-bootstraps + re-seeds those tokens.)
 
 ### §3.2 TROUBLESHOOTING — "cluster verb returns nothing / cluster-status empty"
 The diagnostic ladder (run top-down; each rung names the fix):

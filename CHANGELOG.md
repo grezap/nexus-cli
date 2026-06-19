@@ -6,6 +6,43 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-06-19
+
+Phase 0.E: **`SwarmAdapter`** (ClusterId `swarm`) — the **second non-data-tier adapter** and the **most
+reusable**, extending the CLI over the orchestration tier (Docker Swarm + Nomad + Consul + Portainer).
+Live-verified end-to-end against a **freshly cold-rebuilt** 6-VM tier (`swarm.ps1 cycle` → smoke 0.E.4e
+ALL GREEN → full verb matrix GREEN).
+
+- **`SwarmAdapter`** manages 3 combined Consul-server/Nomad-server/Swarm-manager nodes (swarm-manager-1/2/3)
+  + 3 Consul-client/Nomad-client/Swarm-worker/Portainer-agent nodes (swarm-worker-1/2/3) + a manager-pinned
+  Portainer service. **Maximum reuse:** the already-built `ConsulClient` (`:8501`), `NomadClient` (`:4646`),
+  `PortainerClient` (`:9443`), `ClusterStatusService` (the 3-way rollup) and `FailoverTestService`
+  (consul-leader / nomad-leader / swarm-manager runners) — shipped v0.1–v0.5 for the standalone
+  `cluster-status` + `failover-test` commands — are wired verbatim into the full `IClusterAdapter` surface.
+- **Build-host control-plane posture** (the v0.8.1 model): the Consul/Nomad mgmt tokens stay on the build host
+  (read from Vault KV `nexus/swarm/{consul,nomad}-bootstrap-token` via `INexusVaultClient`) and reach the
+  cluster over HTTPS (targeting a manager IP — the build host doesn't resolve `*.nexus.lab`); node-local
+  actions go over SSH. **No managed Docker/Consul/Nomad driver** (NetArchTest).
+- **Verbs** — status/health/topology = the Consul+Nomad+Portainer rollup **enriched** with `docker node ls`
+  (the authoritative Swarm membership + raft-leader view); failover dispatches `--direction` to
+  consul-leader / nomad-leader (SSH `systemctl stop` → re-election, RTO ≈ 2–3 s) / **swarm-manager** (a vmrun
+  host-level SUSPEND of the raft-leader VM, RTO ≈ 21 s); scale-out = reversible `docker node drain`/`demote` +
+  `nomad node drain` (quorum-guarded; growing the fixed 3+3 fleet = terraform → graceful N/A); backup =
+  `consul snapshot save` + `consul kv export` + `nomad operator snapshot save` round-trip-verified to a
+  build-host file (restore on the live cluster **refused**); cert-rotate = force-reissue each node's pki_int
+  leaves then **consul ROLLING + nomad PARALLEL big-bang** restart; acl = Consul + Nomad ACL tokens
+  (bootstrap/agent/management protected); chaos = `nexus-chaos.sh` on a WORKER (managers keep quorum), with a
+  `docker` restart after any nftables scenario (the `flush ruleset` wipes the ingress-mesh DNAT).
+- **3 live-caught bugs fixed:** (1) cert-rotate didn't rotate — the vault-agent `pkiCert` function persists +
+  reuses the leaf across restarts; fixed by force-deleting the bundle (with a `.bak` restore safety) so it
+  re-issues. (2) acl grant — Consul refuses a policy-less token; fixed with the `builtin/dns` templated policy
+  + the explicit `-accessor-id` revoke flag. (3) chaos was cancelled before output — the recovery poll's full
+  status rollup (Portainer HTTP timeout each cycle) blew the command's `Duration+60 s` budget; fixed with a
+  lightweight `docker node ls` recovery poll.
+- **AOT 27.59 MB / 30** (+0.23). **173 tests** (+14 SwarmAdapter parser cases: `ClassifyNode`,
+  `ParseDockerNodes`, `ParseConsulAclTokens`, `ParseNomadAclTokens`). ADR-0023;
+  `docs/verification/0.8.2-swarm.md`; demos DEMO-110..123.
+
 ## [0.8.1] — 2026-06-18
 
 Phase 0.A-0.D/0.M: **`VaultAdapter`** (ClusterId `vault`) + **`FoundationAdAdapter`** (ClusterId `foundation-ad`)

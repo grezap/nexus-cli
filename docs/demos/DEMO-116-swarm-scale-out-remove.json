@@ -1,0 +1,41 @@
+{
+  "id": "DEMO-116-swarm-scale-out-remove",
+  "title": "Swarm: drain a node out of scheduling (reversible)",
+  "description": "Runs `nexus scale-out remove swarm swarm-worker-3 --yes`. Drains the Swarm node (`docker node update --availability drain`) + demotes it if a manager (quorum-guarded) + drains the Nomad client. Reversible — the VM stays a raft/gossip member.",
+  "prerequisites": {
+    "vmsAlive": [
+      "swarm-manager-1",
+      "swarm-manager-2",
+      "swarm-manager-3",
+      "swarm-worker-1",
+      "swarm-worker-2",
+      "swarm-worker-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out remove swarm swarm-worker-3 --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "scale-out remove",
+        "swarm-drained",
+        "nomad-drained",
+        "swarm-worker-3"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "swarm-worker-3 drained from Swarm scheduling + Nomad; reason notes it is reversible via scale-out add"
+        }
+      ]
+    }
+  ],
+  "whatProves": "SwarmAdapter.ScaleOutRemoveAsync does a reversible drain (not docker node rm), with a raft-leader + >=2-managers-Ready quorum guard for managers."
+}

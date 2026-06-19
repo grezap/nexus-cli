@@ -1,0 +1,42 @@
+{
+  "id": "DEMO-112-swarm-topology",
+  "title": "Swarm: topology (role-annotated nodes + the Portainer service)",
+  "description": "Runs `nexus topology swarm`. Each manager is annotated consul-server/nomad-server, each worker consul-client/nomad-client/portainer-agent, plus a Portainer service node (best-effort endpoint count or version). Not sharded.",
+  "prerequisites": {
+    "vmsAlive": [
+      "swarm-manager-1",
+      "swarm-manager-2",
+      "swarm-manager-3",
+      "swarm-worker-1",
+      "swarm-worker-2",
+      "swarm-worker-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus topology swarm",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "swarm-manager-1",
+        "consul-server",
+        "nomad-server",
+        "worker",
+        "portainer"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "6 nodes role-annotated (manager/raft-leader|reachable + consul-server,nomad-server / worker + consul-client,nomad-client,portainer-agent) + a portainer (swarm service) node"
+        }
+      ]
+    }
+  ],
+  "whatProves": "SwarmAdapter.TopologyAsync renders the orchestration-tier shape from docker node ls + Portainer reachability; Shards = null (the tier is not data-sharded)."
+}

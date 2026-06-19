@@ -27,6 +27,8 @@ namespace Nexus.Cli.Infrastructure;
 ///     <item>0.7.1 -- MongoShardedAdapter (Phase 0.N sharded cluster)</item>
 ///     <item>0.7.2 -- VitessAdapter (Phase 0.O Vitess-sharded MySQL)</item>
 ///     <item>0.7.3 -- CitusAdapter (Phase 0.P Citus-sharded PostgreSQL + Patroni HA)</item>
+///     <item>0.8.1 -- VaultAdapter + FoundationAdAdapter (first non-data-tier adapters)</item>
+///     <item>0.8.2 -- SwarmAdapter (Phase 0.E orchestration tier: Swarm + Nomad + Consul + Portainer)</item>
 ///   </list>
 /// </para>
 /// </summary>
@@ -81,6 +83,7 @@ public static class ClusterBootstrapper
             new CitusAdapter(catalog, ssh, sshUser, sshKey, vault),      // 0.7.3 (ClusterId citus; Phase 0.P Citus-sharded PostgreSQL + Patroni HA)
             new VaultAdapter(catalog, ssh, sshUser, sshKey, vault),      // 0.8.1 (ClusterId vault; Foundation Vault HA + recover-ha) -- first non-data-tier adapter
             new FoundationAdAdapter(catalog, ssh, sshUser, sshKey),      // 0.8.1 (ClusterId foundation-ad; AD via Windows-SSH + gateway health)
+            new SwarmAdapter(catalog, ssh, sshUser, sshKey, vault),      // 0.8.2 (ClusterId swarm; Docker Swarm + Nomad + Consul + Portainer) -- reuses Consul/Nomad/Portainer clients + ClusterStatusService + FailoverTestService
         };
         return new ClusterRegistry(adapters);
     }

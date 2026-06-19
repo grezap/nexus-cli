@@ -1,0 +1,40 @@
+{
+  "id": "DEMO-119-swarm-cert-rotate",
+  "title": "Swarm: rotate the mTLS leaves (consul rolling, nomad parallel)",
+  "description": "Runs `nexus cert-rotate swarm --yes`. FORCES a fresh pki_int leaf on each node (rm the persisted bundle so the vault-agent pkiCert re-issues), restarts consul ROLLING (followers-first/leader-last) + nomad PARALLEL big-bang. Old vs new wire serials prove the rotation.",
+  "prerequisites": {
+    "vmsAlive": [
+      "swarm-manager-1",
+      "swarm-manager-2",
+      "swarm-manager-3",
+      "swarm-worker-1",
+      "swarm-worker-2",
+      "swarm-worker-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus cert-rotate swarm --yes",
+      "waitAfterSeconds": 10,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "cert-rotate",
+        "swarm-manager-1",
+        "swarm-worker-1"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "6-node table; new serial differs from old serial on every node; 0 errors"
+        }
+      ]
+    }
+  ],
+  "whatProves": "SwarmAdapter.RotateCertAsync force-reissues the pkiCert leaves (a bare vault-agent restart reuses the cached cert), then restarts consul rolling and nomad parallel big-bang ([[nomad-tls-rolling-restart-must-be-parallel]]); serials are read on the wire via openssl s_client."
+}

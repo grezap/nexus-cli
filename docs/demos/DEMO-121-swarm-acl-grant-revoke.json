@@ -1,0 +1,68 @@
+{
+  "id": "DEMO-121-swarm-acl-grant-revoke",
+  "title": "Swarm: grant + revoke a Consul ACL token (protected refusal)",
+  "description": "Runs `nexus acl swarm grant --user demo` (creates consul:nexus-acl-demo with builtin/dns), then `revoke --user nexus-acl-demo`, then proves a protected token cannot be revoked.",
+  "prerequisites": {
+    "vmsAlive": [
+      "swarm-manager-1",
+      "swarm-manager-2",
+      "swarm-manager-3",
+      "swarm-worker-1",
+      "swarm-worker-2",
+      "swarm-worker-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus acl swarm grant --user demo --yes",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "grant",
+        "consul:nexus-acl-demo",
+        "builtin/dns"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "a new consul token nexus-acl-demo is created with the builtin/dns policy"
+        }
+      ]
+    },
+    {
+      "command": "nexus acl swarm revoke --user nexus-acl-demo --yes",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "revoke"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the demo token is deleted; the post-revoke list no longer shows it"
+        }
+      ]
+    },
+    {
+      "command": "nexus acl swarm revoke --user \"Bootstrap Token\" --yes",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 2,
+      "expectedOutputContains": [
+        "refusing to revoke the protected"
+      ],
+      "observe": [
+        {
+          "where": "stderr",
+          "what": "the bootstrap token revoke is refused (cluster/operator identity)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "SwarmAdapter.AclAsync(grant/revoke) creates a Consul token with the minimal builtin/dns policy and deletes by accessor; bootstrap/agent/management tokens are protected."
+}

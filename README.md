@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.D%2F0.M%20v0.8.1%20%E2%9C%85%20vault%20%2B%20AD%20adapters%20live-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.E%20v0.8.2%20%E2%9C%85%20swarm%20adapter%20live-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,7 +12,29 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.8.1):** **v0.8.0 = the full-fleet roll-up** (the milestone marking all 12 data + sharded
+> **Current state (v0.8.2):** **v0.8.2 = `SwarmAdapter`** (ClusterId **`swarm`**, Phase 0.E) — the **second
+> non-data-tier adapter** and the **most reusable**: it wires the already-built `ConsulClient` (`:8501`) +
+> `NomadClient` (`:4646`) + `PortainerClient` (`:9443`) + `ClusterStatusService` + `FailoverTestService` (all
+> shipped v0.1–v0.5) into the full `IClusterAdapter` surface over the orchestration tier (3 combined
+> Consul-server/Nomad-server/Swarm-manager nodes + 3 Consul-client/Nomad-client/Swarm-worker/Portainer-agent
+> nodes + a manager-pinned Portainer service). Same build-host control-plane posture as v0.8.1 (the
+> Consul/Nomad mgmt tokens stay on the build host, read from Vault KV; **no managed Docker/Consul/Nomad driver**
+> — NetArchTest). Verbs — status/health/topology (the 3-way rollup enriched with `docker node ls`) · failover
+> (`--direction` → consul-leader / nomad-leader / **swarm-manager** [a vmrun host-level suspend of the raft
+> leader VM]; RTO≈2/3/21s) · scale-out (reversible `docker node drain`/`demote` + `nomad node drain`, quorum-
+> guarded) · backup (`consul snapshot save` + `consul kv export` + `nomad operator snapshot save`, round-trip-
+> verified; restore refused on the live cluster) · cert-rotate (force-reissue the pki_int leaves; consul
+> ROLLING + nomad **PARALLEL** big-bang) · acl (Consul + Nomad tokens, bootstrap/agent protected) · chaos
+> (nexus-chaos.sh on a WORKER; docker restarted after any nftables scenario). **3 live-caught bugs fixed**
+> (cert-rotate pkiCert persists+reuses the leaf → force re-issue; acl grant needs a policy → builtin/dns;
+> chaos recovery poll exceeded the command budget → lightweight docker poll). Cold-rebuild-proven
+> (`swarm.ps1 cycle` → smoke 0.E.4e GREEN → full verb matrix GREEN). AOT **27.59 MB / 30**; 173/173 tests. See
+> [`docs/verification/0.8.2-swarm.md`](./docs/verification/0.8.2-swarm.md) + ADR-0023. Remaining: v0.8.3
+> Observability → v0.8.4 Lakehouse → v0.8.5 Harbor.
+>
+> <details><summary>v0.8.0 full-fleet roll-up + v0.8.1 Vault + AD adapters (sealed)</summary>
+>
+> **v0.8.0 = the full-fleet roll-up** (the milestone marking all 12 data + sharded
 > adapter families sealed + the aggregate AOT re-validated ≤30 MB; no new adapter). **v0.8.1 = `VaultAdapter`
 > + `FoundationAdAdapter`** — the **first non-data-tier adapters**, so the CLI now deeply manages the
 > Foundation tier (the platform **trust root**), not just the data tier. **`VaultAdapter`** (ClusterId
@@ -36,8 +58,8 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 > failover/FSMO + DC-add/remove + system-state-backup + NTDS-cert/chaos verbs return a graceful **actionable
 > N/A**. AOT **27.36 MB / 30**; 159/159 tests; adapter code first-try-green on every Vault verb (the one
 > live-caught bug was the AD-replication `-Server` arg). See
-> [`docs/verification/0.8.1-foundation.md`](./docs/verification/0.8.1-foundation.md) + ADR-0022. Remaining:
-> v0.8.2 Swarm → v0.8.3 Observability → v0.8.4 Lakehouse → v0.8.5 Harbor.
+> [`docs/verification/0.8.1-foundation.md`](./docs/verification/0.8.1-foundation.md) + ADR-0022.
+> </details>
 >
 > <details><summary>v0.7.3 CitusAdapter (sealed)</summary>
 >
@@ -302,7 +324,8 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Twenty ADRs cover framewo
 | **v0.7.3** | Phase 0.P — the **Citus adapter** (ClusterId `citus`; Citus-sharded PostgreSQL + full Patroni HA: 3 etcd DCS + a coordinator Patroni pair + 2 worker Patroni pairs; PG 17 + Citus 14.1; `events` hash-distributed on `tenant_id`, 32 shards = 16+16 across the worker groups; **Citus = Patroni HA per group + Citus distribution**; operator `nexus-cluster-admin` propagated to workers + `.pgpass` so distributed queries run as the operator; `topology` populates Shards; `patronictl switchover` RTO≈1.6s with the VIP following the leader; operator `COPY` round-trip backup of the distributed dataset 800 rows; cert-rotate PG-reload/etcd-restart; acl = PG roles propagated to workers); all verbs live-verified (adapter first-try-green; the 1 infra fix = the patroni.yml `ctl:` block); **26.71 MB**, 137/137 tests |
 | **v0.8.0** | **Full-fleet roll-up** — the milestone marking all 12 data + sharded adapter families sealed + the aggregate AOT re-validated ≤30 MB (no new adapter); **26.71 MB**, 137/137 tests |
 | **v0.8.1** | Phase 0.A-0.D/0.M — the **Vault + Foundation-AD adapters** (the first **non-data-tier** adapters): `VaultAdapter` (ClusterId `vault`; the Vault HA trust root — 3 Raft nodes + vault-transit Shamir custodian; control plane over HTTP from the build host, no managed driver / no shelled `vault`; `vault operator step-down` failover RTO≈2.0s; stop/start-a-STANDBY scale-out; raft-snapshot backup + non-destructive `meta.json` inspect, restore refused; `pki_int/vault-server` cert-rotate standbys-first/active-last; Vault-policy/AppRole acl; process-kill-a-STANDBY chaos; + a NEW **`recover-ha`** verb = the declarative boot-race recovery, the only exposed unseal path) + `FoundationAdAdapter` (ClusterId `foundation-ad`; the 2-DC AD forest over Windows-SSH + gateway health; multi-master mutators graceful actionable N/A); all verbs live-verified (adapter first-try-green; 1 AD-replication `-Server` bug fixed); **27.36 MB**, 159/159 tests |
-| v0.8.2+ | the remaining 4 non-data-tier adapters (Swarm · Observability · Lakehouse · Harbor) |
+| **v0.8.2** | Phase 0.E — the **Swarm adapter** (ClusterId `swarm`; the orchestration tier — Docker Swarm + Nomad + Consul + Portainer over 3 managers + 3 workers; the **most reusable** adapter — wires the v0.1–v0.5 Consul/Nomad/Portainer clients + ClusterStatusService + FailoverTestService into the full SPI; no managed driver; status/health/topology = the 3-way rollup + `docker node ls`; `--direction` failover to consul-leader/nomad-leader/swarm-manager [vmrun suspend] RTO≈2/3/21s; reversible `docker node drain`/`demote` scale-out; consul+nomad snapshot backup round-trip; force-reissue cert-rotate consul-rolling/nomad-parallel; Consul+Nomad acl; nexus-chaos.sh on a worker + docker-restart-after-nft); all verbs live-verified + cold-rebuild-proven (3 bugs fixed); **27.59 MB**, 173/173 tests |
+| v0.8.3+ | the remaining 3 non-data-tier adapters (Observability · Lakehouse · Harbor) |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing

@@ -1,0 +1,41 @@
+{
+  "id": "DEMO-114-swarm-failover-nomad",
+  "title": "Swarm: Nomad raft-leader failover (RTO measured)",
+  "description": "Runs `nexus failover-test cluster swarm --direction nomad-leader --yes`. SSH-stops nomad on the Nomad raft leader, polls for re-election, then restarts it.",
+  "prerequisites": {
+    "vmsAlive": [
+      "swarm-manager-1",
+      "swarm-manager-2",
+      "swarm-manager-3",
+      "swarm-worker-1",
+      "swarm-worker-2",
+      "swarm-worker-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster swarm --direction nomad-leader --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "nomad-leader",
+        "original primary",
+        "new primary",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "original primary -> new primary, RTO ~3s, recovery=recovered"
+        }
+      ]
+    }
+  ],
+  "whatProves": "SwarmAdapter.FailoverAsync routes nomad-leader to FailoverTestService.RunNomadLeaderAsync."
+}

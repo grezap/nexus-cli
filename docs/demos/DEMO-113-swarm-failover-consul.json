@@ -1,0 +1,41 @@
+{
+  "id": "DEMO-113-swarm-failover-consul",
+  "title": "Swarm: Consul raft-leader failover (RTO measured)",
+  "description": "Runs `nexus failover-test cluster swarm --direction consul-leader --yes`. SSH-stops consul on the discovered Consul raft leader, polls a different manager until raft elects a new leader, then restarts the original (auto-recovery).",
+  "prerequisites": {
+    "vmsAlive": [
+      "swarm-manager-1",
+      "swarm-manager-2",
+      "swarm-manager-3",
+      "swarm-worker-1",
+      "swarm-worker-2",
+      "swarm-worker-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster swarm --direction consul-leader --yes",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "consul-leader",
+        "original primary",
+        "new primary",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "original primary -> new primary (a different manager), RTO ~2s, recovery=recovered; timeline table of the 5 instants"
+        }
+      ]
+    }
+  ],
+  "whatProves": "SwarmAdapter.FailoverAsync dispatches --direction to the reused FailoverTestService.RunConsulLeaderAsync (stop consul on the leader, measure re-election RTO, auto-recover)."
+}
