@@ -109,24 +109,26 @@ public class ObservabilityAdapterParseTests
         ver.Should().Be("11.6.3");
     }
 
-    // === ParseGrafanaUsers (/api/admin/users) ==============================
-    private const string GrafanaUsersFixture = """
+    // === ParseGrafanaOrgUsers (/api/org/users) =============================
+    // Verbatim shape from Grafana 11.6 /api/org/users (preferred over the
+    // server-admin /api/admin/users, which 404s under basic auth).
+    private const string GrafanaOrgUsersFixture = """
         [
-          {"id":1,"name":"Admin","login":"admin","email":"admin@localhost","isAdmin":true},
-          {"id":2,"name":"viewer","login":"viewer","email":"v@nexus.lab","isAdmin":false}
+          {"orgId":1,"userId":1,"uid":"ffpxu1a6upc74a","login":"admin","email":"admin@localhost","role":"Admin","isDisabled":false},
+          {"orgId":1,"userId":2,"uid":"abc","login":"viewer","email":"v@nexus.lab","role":"Viewer","isDisabled":false}
         ]
         """;
 
     [Fact]
-    public void ParseGrafanaUsers_reads_login_and_admin_flag()
+    public void ParseGrafanaOrgUsers_reads_userid_login_and_role()
     {
-        var users = ObservabilityAdapter.ParseGrafanaUsers(GrafanaUsersFixture);
+        var users = ObservabilityAdapter.ParseGrafanaOrgUsers(GrafanaOrgUsersFixture);
         users.Should().HaveCount(2);
-        users.Should().ContainSingle(u => u.Login == "admin" && u.IsAdmin);
-        users.Should().ContainSingle(u => u.Login == "viewer" && !u.IsAdmin);
+        users.Should().ContainSingle(u => u.UserId == 1 && u.Login == "admin" && u.Role == "Admin");
+        users.Should().ContainSingle(u => u.UserId == 2 && u.Login == "viewer" && u.Role == "Viewer");
     }
 
     [Fact]
-    public void ParseGrafanaUsers_empty_on_non_array() =>
-        ObservabilityAdapter.ParseGrafanaUsers("""{"message":"unauthorized"}""").Should().BeEmpty();
+    public void ParseGrafanaOrgUsers_empty_on_non_array() =>
+        ObservabilityAdapter.ParseGrafanaOrgUsers("""{"message":"unauthorized"}""").Should().BeEmpty();
 }

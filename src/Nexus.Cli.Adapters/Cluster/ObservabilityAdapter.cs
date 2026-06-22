@@ -59,9 +59,6 @@ public sealed class ObservabilityAdapter : IClusterAdapter
     private const string DisplayNameConst = "Observability tier (Grafana LGTM: Prometheus + Loki + Grafana + Tempo + Alertmanager + OTel)";
     private const string VmsCluster = "observability";
 
-    private const string PkiMount = "pki_int";
-    private const string PkiRole = "observability-server";
-
     // VRRP VIPs (vms.yaml virtual_ips; the front doors for the two HA pairs).
     private const string GrafanaVip = "192.168.70.184";
     private const string GrafanaDbVip = "192.168.70.185";
@@ -111,8 +108,10 @@ public sealed class ObservabilityAdapter : IClusterAdapter
 
     private static readonly RoleSpec PrometheusSpec = new("prometheus", "nexus-prometheus", 9090, "/etc/nexus-prometheus/tls", "/-/ready", false, false);
     private static readonly RoleSpec AlertmanagerSpec = new("alertmanager", "nexus-alertmanager", 9093, "/etc/nexus-alertmanager/tls", "/-/ready", false, false);
-    private static readonly RoleSpec LokiSpec = new("loki", "nexus-loki", 3100, "/etc/nexus-loki/tls", "/ready", false, false);
-    private static readonly RoleSpec TempoSpec = new("tempo", "nexus-tempo", 3200, "/etc/nexus-tempo/tls", "/ready", false, false);
+    // Loki + Tempo do NOT cleanly pick up a rotated cert on SIGHUP (a reload after a cert
+    // swap leaves them inactive) → cert-rotate RESTARTS them (rolling, the ring tolerates it).
+    private static readonly RoleSpec LokiSpec = new("loki", "nexus-loki", 3100, "/etc/nexus-loki/tls", "/ready", true, false);
+    private static readonly RoleSpec TempoSpec = new("tempo", "nexus-tempo", 3200, "/etc/nexus-tempo/tls", "/ready", true, false);
     private static readonly RoleSpec GrafanaSpec = new("grafana", "grafana-server", 3000, "/etc/nexus-grafana/tls", "/api/health", true, false);
     private static readonly RoleSpec GrafanaPgSpec = new("grafana-pg", "postgresql@17-main", 5432, "/etc/nexus-grafana-pg/tls", "", true, false);
     private static readonly RoleSpec OtelSpec = new("otel", "nexus-otel-collector", 13133, "/etc/nexus-otel-collector/tls", "/", true, true);
@@ -252,10 +251,15 @@ public sealed class ObservabilityAdapter : IClusterAdapter
         catch (JsonException) { return ("", ""); }
     }
 
-    /// <summary>Parse Grafana /api/admin/users → list of (login, isAdmin).</summary>
-    internal static List<(string Login, bool IsAdmin)> ParseGrafanaUsers(string json)
+    /// <summary>
+    /// Parse Grafana <c>/api/org/users</c> → list of (userId, login, role). The
+    /// org-scoped endpoint is used in preference to <c>/api/admin/users</c>, which
+    /// 404s under basic auth on the live tier even for a Grafana server admin (the
+    /// cold-rebuild live-caught this once the admin-password drift was fixed).
+    /// </summary>
+    internal static List<(int UserId, string Login, string Role)> ParseGrafanaOrgUsers(string json)
     {
-        var list = new List<(string, bool)>();
+        var list = new List<(int, string, string)>();
         try
         {
             using var doc = JsonDocument.Parse(json);
@@ -264,8 +268,9 @@ public sealed class ObservabilityAdapter : IClusterAdapter
             {
                 var login = Str(u, "login");
                 if (login.Length == 0) login = Str(u, "name");
-                var isAdmin = u.TryGetProperty("isAdmin", out var a) && a.ValueKind == JsonValueKind.True;
-                list.Add((login, isAdmin));
+                var role = Str(u, "role");
+                var uid = u.TryGetProperty("userId", out var idEl) && idEl.ValueKind == JsonValueKind.Number ? idEl.GetInt32() : 0;
+                list.Add((uid, login, role));
             }
         }
         catch (JsonException) { }
@@ -695,11 +700,9 @@ public sealed class ObservabilityAdapter : IClusterAdapter
             "restore is graceful N/A — see `backup take` for why nothing is adapter-snapshotted. Recover via the component's own DR "
             + "path: MinIO EC heal, grafana-pg pg_basebackup re-seed (handbook §3.D), or re-apply the provisioned dashboards."));
 
-    // === RotateCertAsync (build-host issue + SSH-push + per-service reload) ==
+    // === RotateCertAsync (force the node's vault-agent to re-render its leaves) ==
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
-        if (_vault is null)
-            return Result.Fail<CertRotationResult>("cert-rotate needs VAULT_ADDR + VAULT_TOKEN + VAULT_CACERT to issue from pki_int/observability-server.");
         var nodesR = Nodes();
         if (nodesR.IsFail) return Result.Fail<CertRotationResult>(nodesR.Error!);
         var all = nodesR.Value!;
@@ -708,7 +711,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
         var sw = Stopwatch.StartNew();
         var rotated = new List<CertRotatedNode>();
 
-        // Order: leaf-only ring/scrape nodes first, VIP holders last (minimise blast radius).
+        // Order: ring/scrape nodes first, VIP holders last (minimise blast radius).
         var gHolder = await VipHolderAsync(Role(all, "grafana"), GrafanaVip, cancellationToken).ConfigureAwait(false);
         var pgHolder = await VipHolderAsync(Role(all, "grafana-pg"), GrafanaDbVip, cancellationToken).ConfigureAwait(false);
         var ordered = all.OrderBy(n => n.Name == gHolder || n.Name == pgHolder ? 1 : 0).ThenBy(n => n.Name, StringComparer.Ordinal).ToList();
@@ -718,53 +721,57 @@ public sealed class ObservabilityAdapter : IClusterAdapter
             var role = ClassifyRole(n.Name);
             if (role == "grafana-pg")
             {
-                // grafana-pg's server cert lives under a different dir + reload is a PG reload, not handled here
-                // to avoid a streaming-replication hiccup; surface it as an explicit skip with the path.
                 rotated.Add(new CertRotatedNode(n.Name, "(skipped)", "(skipped)",
                     Error: "grafana-pg cert rotation is deferred to the grafana-pg DR runbook (a PG ssl reload during streaming repl is handled separately)."));
                 continue;
             }
-            var spec = SpecFor(role);
-            var oldSerialR = await _ssh.ExecuteAsync(T(n.Vmnet11),
-                $"sudo openssl x509 -in {spec.TlsDir}/server.crt -noout -serial 2>/dev/null | sed 's/serial=//'", SshTimeout, cancellationToken).ConfigureAwait(false);
-            var oldSerial = oldSerialR.IsOk && oldSerialR.Value!.Stdout.Trim().Length > 0 ? oldSerialR.Value.Stdout.Trim() : "(unknown)";
+            // Per-node TLS dir(s) + service reload command(s). A prom node carries BOTH the
+            // Prometheus and the Alertmanager leaf (its vault-agent renders two templates).
+            var units = role == "prometheus"
+                ? new[] { (PrometheusSpec.TlsDir, $"sudo systemctl reload {PrometheusSpec.Unit}"), (AlertmanagerSpec.TlsDir, $"sudo systemctl reload {AlertmanagerSpec.Unit}") }
+                : new[] { (SpecFor(role).TlsDir, SpecFor(role).ReloadIsRestart ? $"sudo systemctl restart {SpecFor(role).Unit}" : $"sudo systemctl reload {SpecFor(role).Unit}") };
+            var primaryDir = units[0].Item1;
+            var oldSerial = await WireSerialAsync(n.Vmnet11, primaryDir, cancellationToken).ConfigureAwait(false);
 
-            var cn = $"{n.Name}.nexus.lab";
-            // alt_names mirror the live cert (incl the VIP DNS for grafana); ip_sans incl the VIP for the grafana pair.
-            var alts = role == "grafana" ? $"{n.Name},{cn},grafana.nexus.lab,localhost" : $"{n.Name},{cn},localhost";
-            var ips = role == "grafana" ? $"{n.Vmnet10},{n.Vmnet11},{GrafanaVip},127.0.0.1" : $"{n.Vmnet10},{n.Vmnet11},127.0.0.1";
-            var issue = await _vault.IssuePkiCertAsync(PkiMount, PkiRole, cn, alts, ips, "2160h", cancellationToken).ConfigureAwait(false);
-            if (issue.IsFail)
+            // Force the vault-agent's pkiCert to re-issue: back up + remove the rendered bundle(s)
+            // (pkiCert PERSISTS + reuses the leaf otherwise — the Swarm v0.8.2 lesson), restart the
+            // agent, wait for the re-render (the post-render command splits bundle.pem →
+            // server.crt/server.key), restore any bundle that didn't reappear, then reload the
+            // service(s). Re-issuing from the NODE'S OWN TEMPLATE (not a build-host issue) is what
+            // keeps the FULL alt_names — the RR-DNS aliases (prometheus/alertmanager/loki/tempo/
+            // otel.nexus.lab) + the grafana VIP — and the PKCS#8 key the services + smokes expect.
+            var rmList = string.Join(" ", units.Select(u => $"\"{u.Item1}/bundle.pem\""));
+            var reloadList = string.Join("; ", units.Select(u => u.Item2));
+            var script = string.Join(" ; ", new[]
             {
-                rotated.Add(new CertRotatedNode(n.Name, oldSerial, "(unchanged)", Error: $"vault issue failed: {issue.Error}"));
-                continue;
-            }
-            var d = issue.Value!;
-            var certPem = d.Certificate.TrimEnd() + "\n" + (d.IssuingCa?.TrimEnd() ?? "") + "\n";
-            var keyPem = d.PrivateKey.TrimEnd() + "\n";
-            var bundlePem = certPem; // bundle.pem = leaf + issuing-ca (the vault-agent post-render layout).
-            var owner = role == "grafana" ? "grafana:grafana" : $"{spec.Role}:{spec.Role}";
-            var reload = spec.ReloadIsRestart ? $"sudo systemctl restart {spec.Unit}" : $"sudo systemctl reload {spec.Unit}";
-
-            var writeCmd =
-                $"echo {B64(certPem)}|base64 -d|sudo tee {spec.TlsDir}/server.crt >/dev/null; "
-                + $"echo {B64(keyPem)}|base64 -d|sudo tee {spec.TlsDir}/server.key >/dev/null; "
-                + $"echo {B64(bundlePem)}|base64 -d|sudo tee {spec.TlsDir}/bundle.pem >/dev/null 2>&1 || true; "
-                + $"sudo chown {owner} {spec.TlsDir}/server.crt {spec.TlsDir}/server.key 2>/dev/null || true; "
-                + $"sudo chmod 644 {spec.TlsDir}/server.crt; sudo chmod 600 {spec.TlsDir}/server.key; "
-                + $"{reload}; echo WROTE";
-            var writeExec = await _ssh.ExecuteAsync(T(n.Vmnet11), writeCmd, SshTimeout, cancellationToken).ConfigureAwait(false);
-            if (writeExec.IsFail || writeExec.Value!.ExitCode != 0 || !writeExec.Value.Stdout.Contains("WROTE", StringComparison.Ordinal))
+                $"for f in {rmList}; do if sudo test -f \"$f\"; then sudo cp -a \"$f\" \"$f.bak\"; sudo rm -f \"$f\"; fi; done",
+                "sudo systemctl restart nexus-vault-agent",
+                $"for i in $(seq 1 25); do sudo test -f {primaryDir}/bundle.pem && break; sleep 1; done",
+                $"for f in {rmList}; do if sudo test -f \"$f.bak\"; then if sudo test -f \"$f\"; then sudo rm -f \"$f.bak\"; else sudo mv \"$f.bak\" \"$f\"; fi; fi; done",
+                reloadList,
+                "echo ROTATED",
+            });
+            var exec = await _ssh.ExecuteAsync(T(n.Vmnet11), script, SshTimeout, cancellationToken).ConfigureAwait(false);
+            if (exec.IsFail || !exec.Value!.Stdout.Contains("ROTATED", StringComparison.Ordinal))
             {
                 rotated.Add(new CertRotatedNode(n.Name, oldSerial, "(unchanged)",
-                    Error: writeExec.IsFail ? writeExec.Error : $"writing new cert failed: {Tail(writeExec.Value!.Stdout + writeExec.Value.Stderr, 200)}"));
+                    Error: exec.IsFail ? exec.Error : $"force-rerender/reload failed: {Tail(exec.Value!.Stdout + exec.Value.Stderr, 200)}"));
                 continue;
             }
-            rotated.Add(new CertRotatedNode(n.Name, oldSerial, d.SerialNumber, Error: null));
-            await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken).ConfigureAwait(false);
+            var newSerial = await WireSerialAsync(n.Vmnet11, primaryDir, cancellationToken).ConfigureAwait(false);
+            rotated.Add(new CertRotatedNode(n.Name, oldSerial, newSerial, Error: null));
         }
         sw.Stop();
         return Result.Ok(new CertRotationResult(rotated, sw.Elapsed, startedAt));
+    }
+
+    /// <summary>Read a node's current leaf serial from its rendered server.crt (proof of rotation).</summary>
+    private async Task<string> WireSerialAsync(string ip, string tlsDir, CancellationToken ct)
+    {
+        var r = await _ssh.ExecuteAsync(T(ip),
+            $"sudo openssl x509 -in {tlsDir}/server.crt -noout -serial 2>/dev/null | sed 's/serial=//'", SshTimeout, ct).ConfigureAwait(false);
+        return r.IsOk && r.Value!.Stdout.Trim().Length > 0 ? r.Value.Stdout.Trim() : "(unknown)";
     }
 
     // === AclAsync (Grafana users via /api/admin/users) =====================
@@ -780,49 +787,48 @@ public sealed class ObservabilityAdapter : IClusterAdapter
         var via = grafanas[0].Vmnet11;
         var verb = operation.Verb.ToLowerInvariant();
 
+        // The org-scoped /api/org/users is used in preference to /api/admin/users
+        // (the latter 404s under basic auth on the live tier even for a server admin);
+        // grant/revoke manage the org ROLE (Admin vs Viewer) via PATCH /api/org/users/<id>.
         if (verb is "list" or "describe")
         {
-            var (code, body) = await CurlAsync(via, GrafanaSpec, "/api/admin/users", auth, cancellationToken).ConfigureAwait(false);
+            var (code, body) = await CurlAsync(via, GrafanaSpec, "/api/org/users", auth, cancellationToken).ConfigureAwait(false);
             if (code == 401)
                 return Result.Fail<AclSnapshot>(
                     "Grafana refused the admin credential from Vault KV (nexus/observability/grafana/admin-password) — HTTP 401. "
-                    + "The live Grafana admin password has drifted from KV (the v0.8.1 Vault greenfield rotated the KV value while "
-                    + "the obs tier was offline, so Grafana still holds the pre-greenfield password). Reconcile with "
+                    + "The live Grafana admin password has drifted from KV. Reconcile with "
                     + "`grafana-cli admin reset-admin-password <kv-value>` on a grafana node (writes the shared PG), then retry.");
-            if (code != 200) return Result.Fail<AclSnapshot>($"Grafana /api/admin/users returned HTTP {code}.");
-            var users = ParseGrafanaUsers(body).Select(u => new AclUser(
-                u.Login, u.IsAdmin ? ["grafana-admin"] : ["grafana-user"], Enabled: true)).ToList();
+            if (code != 200) return Result.Fail<AclSnapshot>($"Grafana /api/org/users returned HTTP {code}.");
+            var users = ParseGrafanaOrgUsers(body).Select(u => new AclUser(
+                u.Login,
+                ProtectedGrafanaUsers.Contains(u.Login, StringComparer.OrdinalIgnoreCase) ? [u.Role, "protected"] : [u.Role],
+                Enabled: true)).ToList();
             return Result.Ok(new AclSnapshot(ClusterName, verb, users, DateTimeOffset.UtcNow));
         }
 
         if (verb is "grant" or "revoke")
         {
             if (string.IsNullOrWhiteSpace(operation.User))
-                return Result.Fail<AclSnapshot>($"acl {verb} requires --user (a Grafana login to promote/demote to/from admin).");
+                return Result.Fail<AclSnapshot>($"acl {verb} requires --user (a Grafana login to promote to org Admin / demote to Viewer).");
             var login = operation.User!;
             if (verb == "revoke" && ProtectedGrafanaUsers.Contains(login, StringComparer.OrdinalIgnoreCase))
                 return Result.Fail<AclSnapshot>($"refusing to demote the protected Grafana '{login}' user (built-in operator identity).");
 
-            // Find the user id.
-            var (lcode, lbody) = await CurlAsync(via, GrafanaSpec, "/api/admin/users", auth, cancellationToken).ConfigureAwait(false);
+            // Resolve the org userId from /api/org/users.
+            var (lcode, lbody) = await CurlAsync(via, GrafanaSpec, "/api/org/users", auth, cancellationToken).ConfigureAwait(false);
             if (lcode == 401)
                 return Result.Fail<AclSnapshot>("Grafana admin credential drift (HTTP 401) — see `acl list` for the reconcile command.");
-            if (lcode != 200) return Result.Fail<AclSnapshot>($"Grafana /api/admin/users returned HTTP {lcode}.");
-            var idR = await _ssh.ExecuteAsync(T(via),
-                $"sudo curl -sS --max-time 8 --cacert {GrafanaSpec.TlsDir}/ca.crt -u '{auth}' https://127.0.0.1:3000/api/users/lookup?loginOrEmail={Uri.EscapeDataString(login)} 2>/dev/null", CurlTimeout, cancellationToken).ConfigureAwait(false);
-            if (idR.IsFail || idR.Value!.Stdout.Length == 0) return Result.Fail<AclSnapshot>($"no Grafana user '{login}'.");
-            int uid;
-            try { using var d = JsonDocument.Parse(idR.Value.Stdout); uid = d.RootElement.TryGetProperty("id", out var idEl) ? idEl.GetInt32() : 0; }
-            catch (JsonException) { return Result.Fail<AclSnapshot>($"no Grafana user '{login}'."); }
-            if (uid == 0) return Result.Fail<AclSnapshot>($"no Grafana user '{login}'.");
+            if (lcode != 200) return Result.Fail<AclSnapshot>($"Grafana /api/org/users returned HTTP {lcode}.");
+            var hit = ParseGrafanaOrgUsers(lbody).FirstOrDefault(u => string.Equals(u.Login, login, StringComparison.OrdinalIgnoreCase));
+            if (hit.UserId == 0) return Result.Fail<AclSnapshot>($"no Grafana org user '{login}'.");
 
-            var makeAdmin = (verb == "grant").ToString().ToLowerInvariant();
-            var permCmd =
-                $"sudo curl -sS --max-time 8 --cacert {GrafanaSpec.TlsDir}/ca.crt -u '{auth}' -X PUT -H 'Content-Type: application/json' "
-                + $"-d '{{\"isGrafanaAdmin\":{makeAdmin}}}' https://127.0.0.1:3000/api/admin/users/{uid}/permissions -w '__HTTP_%{{http_code}}__' 2>/dev/null";
-            var permR = await _ssh.ExecuteAsync(T(via), permCmd, CurlTimeout, cancellationToken).ConfigureAwait(false);
+            var newRole = verb == "grant" ? "Admin" : "Viewer";
+            var patchCmd =
+                $"sudo curl -sS --max-time 8 --cacert {GrafanaSpec.TlsDir}/ca.crt -u '{auth}' -X PATCH -H 'Content-Type: application/json' "
+                + $"-d '{{\"role\":\"{newRole}\"}}' https://127.0.0.1:3000/api/org/users/{hit.UserId} -w '__HTTP_%{{http_code}}__' 2>/dev/null";
+            var permR = await _ssh.ExecuteAsync(T(via), patchCmd, CurlTimeout, cancellationToken).ConfigureAwait(false);
             if (permR.IsFail || !permR.Value!.Stdout.Contains("__HTTP_200__", StringComparison.Ordinal))
-                return Result.Fail<AclSnapshot>($"Grafana permission update for '{login}' failed: {(permR.IsFail ? permR.Error : Tail(permR.Value!.Stdout, 160))}");
+                return Result.Fail<AclSnapshot>($"Grafana org-role update for '{login}' failed: {(permR.IsFail ? permR.Error : Tail(permR.Value!.Stdout, 160))}");
             return await AclAsync(new AclOperation("list"), cancellationToken).ConfigureAwait(false);
         }
 
@@ -933,6 +939,5 @@ public sealed class ObservabilityAdapter : IClusterAdapter
     }
 
     // === helpers ===========================================================
-    private static string B64(string s) => Convert.ToBase64String(Encoding.UTF8.GetBytes(s));
     private static string Tail(string s, int n) => string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= n ? s : s.Substring(s.Length - n));
 }
