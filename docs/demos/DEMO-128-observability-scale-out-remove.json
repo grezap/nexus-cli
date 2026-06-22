@@ -1,0 +1,52 @@
+{
+  "id": "DEMO-128-observability-scale-out-remove",
+  "title": "Observability: drain a Loki ring member (reversible)",
+  "description": "Runs `nexus scale-out remove observability loki-3 --yes`. Stops nexus-loki on loki-3 (guarded by a >=2-ready floor); the Loki memberlist ring evicts it after the dead-member timeout and rebalances. Reversible via scale-out add.",
+  "prerequisites": {
+    "vmsAlive": [
+      "prom-1",
+      "prom-2",
+      "loki-1",
+      "loki-2",
+      "loki-3",
+      "tempo-1",
+      "tempo-2",
+      "tempo-3",
+      "grafana-1",
+      "grafana-2",
+      "grafana-pg-1",
+      "grafana-pg-2",
+      "otel-collector-1",
+      "otel-collector-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out remove observability loki-3 --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "scale-out remove",
+        "nexus-loki stopped on loki-3",
+        "memberlist ring"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "loki-3 drained from the ring; reason notes the ~60s self-heal + the scale-out add re-join path"
+        }
+      ]
+    }
+  ],
+  "whatProves": "ObservabilityAdapter.ScaleOutRemoveAsync stops the ring service with a >=2-ready guard; the memberlist ring self-heals — growing the ring is a terraform op, reported not skipped."
+}

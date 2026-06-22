@@ -1,0 +1,52 @@
+{
+  "id": "DEMO-132-observability-acl-list",
+  "title": "Observability: Grafana users (honest credential-drift report)",
+  "description": "Runs `nexus acl observability list`. Reads the Grafana admin password from Vault KV and lists users via /api/admin/users. On the current tier the live Grafana admin password has drifted from KV (a v0.8.1-greenfield casualty), so the verb correctly returns HTTP 401 with the exact reconcile command — honest, actionable output rather than a false success.",
+  "prerequisites": {
+    "vmsAlive": [
+      "prom-1",
+      "prom-2",
+      "loki-1",
+      "loki-2",
+      "loki-3",
+      "tempo-1",
+      "tempo-2",
+      "tempo-3",
+      "grafana-1",
+      "grafana-2",
+      "grafana-pg-1",
+      "grafana-pg-2",
+      "otel-collector-1",
+      "otel-collector-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus acl observability list",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 2,
+      "expectedOutputContains": [
+        "Grafana refused the admin credential",
+        "401",
+        "grafana-cli admin reset-admin-password"
+      ],
+      "observe": [
+        {
+          "where": "stderr",
+          "what": "an actionable error: the live Grafana admin password has drifted from KV; reconcile via grafana-cli admin reset-admin-password <kv-value>"
+        }
+      ]
+    }
+  ],
+  "whatProves": "ObservabilityAdapter.AclAsync lists Grafana users via /api/admin/users; on a credential-drifted tier it reports the 401 with the reconcile command instead of masking it. On a reconciled tier it lists users with the grafana-admin flag."
+}

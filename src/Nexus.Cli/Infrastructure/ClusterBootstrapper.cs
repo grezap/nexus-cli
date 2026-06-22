@@ -84,6 +84,7 @@ public static class ClusterBootstrapper
             new VaultAdapter(catalog, ssh, sshUser, sshKey, vault),      // 0.8.1 (ClusterId vault; Foundation Vault HA + recover-ha) -- first non-data-tier adapter
             new FoundationAdAdapter(catalog, ssh, sshUser, sshKey),      // 0.8.1 (ClusterId foundation-ad; AD via Windows-SSH + gateway health)
             new SwarmAdapter(catalog, ssh, sshUser, sshKey, vault),      // 0.8.2 (ClusterId swarm; Docker Swarm + Nomad + Consul + Portainer) -- reuses Consul/Nomad/Portainer clients + ClusterStatusService + FailoverTestService
+            new ObservabilityAdapter(catalog, ssh, sshUser, sshKey, vault), // 0.8.3 (ClusterId observability; Grafana LGTM: Prometheus + Loki + Grafana + Tempo + Alertmanager + OTel; 14 VMs + 2 VRRP VIPs)
         };
         return new ClusterRegistry(adapters);
     }

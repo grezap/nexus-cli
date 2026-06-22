@@ -1,0 +1,73 @@
+{
+  "id": "DEMO-124-observability-status",
+  "title": "Observability: tier status (14 nodes + 2 VRRP VIP holders)",
+  "description": "Runs `nexus status observability`. One table over the 14 LGTM nodes (prom/loki/tempo/grafana/grafana-pg/otel) with each service active-state and the live VRRP VIP holders folded into the grafana / grafana-pg role labels.",
+  "prerequisites": {
+    "vmsAlive": [
+      "prom-1",
+      "prom-2",
+      "loki-1",
+      "loki-2",
+      "loki-3",
+      "tempo-1",
+      "tempo-2",
+      "tempo-3",
+      "grafana-1",
+      "grafana-2",
+      "grafana-pg-1",
+      "grafana-pg-2",
+      "otel-collector-1",
+      "otel-collector-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus status observability",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "observability",
+        "prom-1",
+        "loki-1",
+        "tempo-1",
+        "grafana/",
+        "grafana-pg/",
+        "otel",
+        "alive"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "14-row table; grafana/grafana-pg nodes show vip-master vs backup; all services alive"
+        }
+      ]
+    },
+    {
+      "command": "nexus status observability --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "clusterId",
+        "overallHealth",
+        "members"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON ClusterStatus: 14 members, Shards null"
+        }
+      ]
+    }
+  ],
+  "whatProves": "ObservabilityAdapter.GetStatusAsync probes each service unit over SSH and resolves the two VRRP VIP holders (.184/.185) dynamically (nopreempt — the holder drifts)."
+}

@@ -1,0 +1,53 @@
+{
+  "id": "DEMO-133-observability-backup-na",
+  "title": "Observability: backup graceful N/A (durable state elsewhere)",
+  "description": "Runs `nexus backup take observability`. The verb returns an actionable N/A: every piece of durable state already has its own recovery story (Loki/Tempo -> MinIO erasure-coded; Grafana DB -> streaming-replicated PG RPO~0; dashboards -> provisioned-as-code; Prom TSDB ephemeral).",
+  "prerequisites": {
+    "vmsAlive": [
+      "prom-1",
+      "prom-2",
+      "loki-1",
+      "loki-2",
+      "loki-3",
+      "tempo-1",
+      "tempo-2",
+      "tempo-3",
+      "grafana-1",
+      "grafana-2",
+      "grafana-pg-1",
+      "grafana-pg-2",
+      "otel-collector-1",
+      "otel-collector-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup take observability",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 2,
+      "expectedOutputContains": [
+        "backup is graceful N/A",
+        "MinIO",
+        "provisioned-as-code",
+        "ephemeral"
+      ],
+      "observe": [
+        {
+          "where": "stderr",
+          "what": "an actionable N/A explaining where each piece of state is already durable/reproducible"
+        }
+      ]
+    }
+  ],
+  "whatProves": "ObservabilityAdapter.BackupTakeAsync graceful-N/As: nothing is adapter-ownable to snapshot that is not already durable (MinIO EC + PG repl) or reproducible (dashboards-as-code)."
+}

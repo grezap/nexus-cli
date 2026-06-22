@@ -184,6 +184,7 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 | **vault** | ✅ 06-18 | ✅ 06-18³² | ✅ 06-18³³ | ✅ 06-18³⁴ | ✅ 06-18³⁵ | ✅ gen | ✅ 06-18³⁶ | ✅ 06-18³⁷ | ✅ 06-18³⁸ | ✅ list+grant+revoke³⁹ |
 | **foundation-ad** | ✅ 06-18 | ✅ 06-18⁴⁰ | ✅ 06-18 | n/a⁴¹ | n/a⁴¹ | ✅ gen | n/a⁴¹ | n/a⁴¹ | n/a⁴¹ | ✅ list+grant+revoke⁴² |
 | **swarm** | ✅ 06-19 | ✅ 06-19⁴⁴ | ✅ 06-19⁴⁵ | ✅ 06-19⁴⁶ | ✅ 06-19⁴⁷ | ✅ gen | ✅ 06-19⁴⁸ | ✅ 06-19⁴⁹ | ✅ 06-19⁵⁰ | ✅ list+grant+revoke⁵¹ |
+| **observability** | ✅ 06-22 | ✅ 06-22⁵² | ✅ 06-22⁵³ | ✅ 06-22⁵⁴ | ✅ 06-22⁵⁵ | ✅ gen | n/a⁵⁶ | ⚠ impl⁵⁷ | ✅ 06-22 | ✅ list⁵⁸ |
 
 > The **`vault`** cluster also has a bespoke **`recover-ha`** verb (not a matrix column) — the declarative
 > boot-race recovery via the `IRecoverableCluster` capability: unseal vault-transit from the Shamir key file
@@ -271,6 +272,20 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 
 ⁵¹ swarm `acl` = **Consul + Nomad ACL tokens** merged: `list`/`describe` parse `consul acl token list -format=json` + `nomad acl token list -json`; `grant --user <name>` creates a Consul token with the minimal `builtin/dns` templated policy (Consul refuses a policy-less token); `revoke --user <accessor|description>` = `consul acl token delete -accessor-id` / `nomad acl token delete`. Bootstrap/management/agent/anonymous tokens + the global-management/node-identity policies are revoke-protected. (`CanResizeVm` refuses the current Swarm OR Nomad raft leader.)
 
+⁵² observability `health` rolls the whole Grafana LGTM stack into one report: Prometheus ready ×2 + scrape-targets-up (`/api/v1/targets`), Alertmanager gossip-mesh peers (`/api/v2/status`, on the VMnet10 backplane `:9094`), Loki + Tempo `/ready` ×3 + `/memberlist` ring counts, Grafana `/api/health` `database`=ok ×2, OTel loopback health (`http://127.0.0.1:13133/`, on-node only), **Grafana-PG streaming replication** (dynamic primary detection → `pg_stat_replication` streaming count), **MinIO S3 reachability** (the Loki/Tempo backend, `/minio/health/live`), and both VRRP VIPs bound. The endpoints are probed **over SSH with each node's own `ca.crt`** — the obs leaves are on the tier's OLD CA generation (the tier was offline during the v0.8.1 Vault greenfield) while the build host trusts the NEW root, so the build-host CA bundle can't validate them (the diagnose-first divergence). KV creds (Grafana admin etc.) come from Vault via `INexusVaultClient` (every obs secret field = `value`). On the as-is degraded tier `health` is correctly RED on `grafana-pg-replication` (the standby was promoted in the 0.I.4 `-Strict` test and never re-seeded — split).
+
+⁵³ observability `topology` = 14 role-annotated nodes + **2 VIP pseudo-nodes** (the live `.184` grafana / `.185` grafana-db front-door holders) + the Loki/Tempo memberlist member counts + the Prometheus scrape-target count. Shards = null (the observability tier is not data-sharded).
+
+⁵⁴ observability `failover-test cluster observability --direction grafana|grafana-db` = a **keepalived VRRP cutover**: stop keepalived on the live VIP MASTER → poll the VIP onto the backup → restart (nopreempt keeps it put); RTO measured. `grafana` (.184) is live-proven (RTO ≈ 1.2 s, recovered); `grafana-db` (.185) uses the identical code path but is not live-run on the split-replication tier (promoting the divergent standby would be unsafe).
+
+⁵⁵ observability `scale-out` = the Loki/Tempo **memberlist rings** only: `remove <loki-N|tempo-N>` stops the ring service (guarded by a ≥2-ready floor; the ring self-heals ~60 s), `add --role loki|tempo` restarts a stopped member and polls `/ready` for the rejoin. Prometheus (scrape-all), Grafana (VRRP active-active), Grafana-PG (streaming pair) and OTel (RR-DNS pair) are **fixed at 2** → graceful actionable N/A naming the terraform path.
+
+⁵⁶ observability `backup` = graceful actionable **N/A**: every piece of durable state already has its own recovery story — Loki/Tempo blocks → MinIO erasure-coded (the lakehouse tier's backup), the Grafana state DB → streaming-replicated PG (RPO ≈ 0; pg_basebackup belongs to the grafana-pg DR runbook), dashboards + datasources → provisioned-as-code from `nexus-infra-observability` (re-applied, not snapshotted), and the Prometheus TSDB is intentionally ephemeral (HA = both Proms scrape every target; ADR-0038). Nothing is adapter-ownable to snapshot that isn't already durable or reproducible.
+
+⁵⁷ observability `cert-rotate` is **implemented but not live-run on the current tier** (⚠): it re-issues each node's leaf on the build host (`IssuePkiCertAsync(pki_int, observability-server, …)`; the role is verified present) + SSH-pushes + reloads (SIGHUP Prom/AM/Loki/Tempo, restart Grafana/OTel). Build-host issue (not on-node vault-agent re-render) is required because the agents can't authenticate (their `ca-bundle.crt` trusts the OLD root). Live-running it on the degraded tier would put a NEW-root leaf behind an OLD-root trust anchor + inter-service mTLS — a mixed-CA that degrades the functional data plane. It is safe only after a coordinated tier trust re-apply (`observability.ps1`), which is a Greg-authorized infra repair.
+
+⁵⁸ observability `acl` = Grafana users via `/api/admin/users` (admin basic-auth from Vault KV; the `admin` login is revoke-protected); `grant`/`revoke` = PUT `/api/admin/users/<id>/permissions {isGrafanaAdmin}`. `list` is live-verified and **correctly reports the Grafana admin-password drift** (HTTP 401 + the exact `grafana-cli admin reset-admin-password <kv-value>` reconcile) — the v0.8.1 greenfield rotated the KV value while the obs tier was offline, so Grafana still holds the pre-greenfield password. `grant`/`revoke` are implemented but blocked live by the same drift. (`CanResizeVm` refuses the current `.184`/`.185` VIP holders.)
+
 ---
 
 ## §3 Operator runbooks
@@ -299,6 +314,12 @@ $vmrun = 'C:/Program Files/VMware/VMware Workstation/vmrun.exe'
 # swarm (6 VMs, tier 06-orchestration) — 3 managers then 3 workers (Portainer is a Swarm service, no VM):
 1..3 | % { & $vmrun start "H:\VMS\NexusPlatform\06-orchestration\swarm-manager-$_\swarm-manager-$_.vmx" nogui; Start-Sleep 4 }
 1..3 | % { & $vmrun start "H:\VMS\NexusPlatform\06-orchestration\swarm-worker-$_\swarm-worker-$_.vmx" nogui; Start-Sleep 4 }
+# observability (14 VMs, tier 01-foundation) + the 4 lakehouse MinIO nodes (Loki/Tempo S3 backend) —
+# power on in staggered batches to avoid the power-on storm; MinIO MUST be up for the S3 health probe:
+'minio-1','minio-2','minio-3','minio-4' | % { & $vmrun start "H:\VMS\NexusPlatform\08-spark\$_\$_.vmx" nogui; Start-Sleep 4 }
+'prom-1','prom-2','loki-1','loki-2','loki-3','tempo-1','tempo-2','tempo-3',
+'grafana-1','grafana-2','grafana-pg-1','grafana-pg-2','otel-collector-1','otel-collector-2' |
+  % { & $vmrun start "H:\VMS\NexusPlatform\01-foundation\$_\$_.vmx" nogui; Start-Sleep 4 }
 ```
 Then **always** run §3.2 (the boot-race recovery) before expecting Vault-backed services. (mongo-sharded
 needs `VAULT_*` set — the keyFile / operator password is read from Vault KV `nexus/oltp/mongo/keyfile`;

@@ -1,0 +1,52 @@
+{
+  "id": "DEMO-130-observability-scale-out-na",
+  "title": "Observability: scale-out N/A on a fixed-HA role (actionable)",
+  "description": "Runs `nexus scale-out remove observability prom-1 --yes`. Prometheus is fixed at 2 (both Proms scrape every target) — the verb refuses with an actionable message naming the terraform path, never a silent no-op.",
+  "prerequisites": {
+    "vmsAlive": [
+      "prom-1",
+      "prom-2",
+      "loki-1",
+      "loki-2",
+      "loki-3",
+      "tempo-1",
+      "tempo-2",
+      "tempo-3",
+      "grafana-1",
+      "grafana-2",
+      "grafana-pg-1",
+      "grafana-pg-2",
+      "otel-collector-1",
+      "otel-collector-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out remove observability prom-1 --yes",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 2,
+      "expectedOutputContains": [
+        "prometheus is not a runtime-scalable role",
+        "FIXED at 2",
+        "terraform"
+      ],
+      "observe": [
+        {
+          "where": "stderr",
+          "what": "an actionable refusal: only the Loki/Tempo rings scale at runtime; Prom/Grafana/PG/OTel growth is a terraform op"
+        }
+      ]
+    }
+  ],
+  "whatProves": "ObservabilityAdapter graceful-N/As the fixed-HA roles (Prometheus scrape-all / Grafana VRRP / Grafana-PG pair / OTel RR-DNS) with an actionable message, never a silent skip."
+}

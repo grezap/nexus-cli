@@ -1,0 +1,55 @@
+{
+  "id": "DEMO-126-observability-topology",
+  "title": "Observability: topology (14 nodes + 2 VIPs + rings + scrape count)",
+  "description": "Runs `nexus topology observability`. Renders the 14 role-annotated nodes, two VRRP VIP pseudo-nodes (with their live holders), the Loki + Tempo memberlist member counts, and the Prometheus scrape-target count. Not sharded.",
+  "prerequisites": {
+    "vmsAlive": [
+      "prom-1",
+      "prom-2",
+      "loki-1",
+      "loki-2",
+      "loki-3",
+      "tempo-1",
+      "tempo-2",
+      "tempo-3",
+      "grafana-1",
+      "grafana-2",
+      "grafana-pg-1",
+      "grafana-pg-2",
+      "otel-collector-1",
+      "otel-collector-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus topology observability",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "prom-1",
+        "loki-ring",
+        "tempo-ring",
+        "prometheus-scrape",
+        "VIP 192.168.70.184",
+        "VIP 192.168.70.185"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "14 nodes + 2 VIP pseudo-nodes (front-door holders) + loki-ring/tempo-ring 3/3 + prometheus-scrape N/N up"
+        }
+      ]
+    }
+  ],
+  "whatProves": "ObservabilityAdapter.TopologyAsync enriches the node list with the VRRP holders, the memberlist ring counts and the Prometheus scrape-target count; Shards = null (not data-sharded)."
+}

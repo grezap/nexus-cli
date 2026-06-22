@@ -1,0 +1,51 @@
+{
+  "id": "DEMO-129-observability-scale-out-add",
+  "title": "Observability: re-join a removed Loki ring member",
+  "description": "Runs `nexus scale-out add observability --role loki --yes`. Finds the stopped Loki node, restarts nexus-loki, and polls /ready until it rejoins the memberlist ring.",
+  "prerequisites": {
+    "vmsAlive": [
+      "prom-1",
+      "prom-2",
+      "loki-1",
+      "loki-2",
+      "loki-3",
+      "tempo-1",
+      "tempo-2",
+      "tempo-3",
+      "grafana-1",
+      "grafana-2",
+      "grafana-pg-1",
+      "grafana-pg-2",
+      "otel-collector-1",
+      "otel-collector-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out add observability --role loki --yes",
+      "waitAfterSeconds": 25,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "scale-out add",
+        "rejoined the loki memberlist ring"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the stopped loki node restarts and returns /ready=200 (rejoined the ring), ~20s"
+        }
+      ]
+    }
+  ],
+  "whatProves": "ObservabilityAdapter.ScaleOutAddAsync restarts a previously-removed ring member and polls /ready for the rejoin; Prometheus/Grafana/Grafana-PG/OTel are fixed-HA -> graceful N/A."
+}

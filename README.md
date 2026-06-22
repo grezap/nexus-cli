@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.E%20v0.8.2%20%E2%9C%85%20swarm%20adapter%20live-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.I%20v0.8.3%20%E2%9C%85%20observability%20adapter%20live-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,7 +12,31 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.8.2):** **v0.8.2 = `SwarmAdapter`** (ClusterId **`swarm`**, Phase 0.E) — the **second
+> **Current state (v0.8.3):** **v0.8.3 = `ObservabilityAdapter`** (ClusterId **`observability`**, Phase 0.I)
+> — the **third non-data-tier adapter**: the CLI now manages the Grafana LGTM stack (Prometheus + Loki +
+> Grafana + Tempo + Alertmanager + OTel Collector) across 14 VMs + 2 VRRP VIPs. **Access posture diverges,
+> on purpose, from v0.8.1/0.8.2's build-host-HTTP** — the live probe caught that the obs leaves are on the
+> tier's OLD CA generation (the tier was offline during the v0.8.1 Vault greenfield) while the build host now
+> trusts the NEW root, so the endpoints are probed **over SSH with each node's own `ca.crt`** + runtime creds
+> from Vault KV (every obs secret field = `value`). **No managed Prometheus/Grafana/Loki driver** (NetArchTest).
+> Verbs — status (14 nodes + VIP holders) · health (Prom ready + scrape-targets-up · Alertmanager mesh peers ·
+> Loki/Tempo memberlist rings · Grafana `database`=ok · OTel loopback · **Grafana-PG streaming replication** ·
+> **MinIO S3 reachable** · both VIPs bound) · topology (14 nodes + 2 VIP pseudo-nodes + ring + scrape counts) ·
+> **failover = Grafana/Grafana-PG VRRP cutover** (`--direction grafana` proven, RTO≈1.2 s) · scale-out =
+> Loki/Tempo memberlist ring add/remove (fixed-HA roles → graceful N/A) · cert-rotate (build-host
+> `pki_int/observability-server` issue + SSH-push + per-service reload) · acl (Grafana users via
+> `/api/admin/users`) · backup (graceful N/A — state durable in MinIO EC + PG repl RPO≈0 + dashboards-as-code +
+> ephemeral Prom TSDB). **8 verbs live-verified GREEN; zero adapter code bugs.** The verify surfaced **three
+> infra divergences** (all v0.8.1-greenfield-while-offline casualties): the tier-wide vault-agent broken trust
+> (drove the SSH posture), the Grafana admin password drift (`acl` honestly returns 401 + the reconcile), and
+> the grafana-pg replication split (`health` correctly red) — `cert-rotate`/`failover grafana-db`/`acl grant`
+> are implemented but await the Greg-authorized tier trust re-apply. AOT **27.59 MB / 30**; 194/194 tests. See
+> [`docs/verification/0.8.3-observability.md`](./docs/verification/0.8.3-observability.md) + ADR-0024.
+> Remaining: v0.8.4 Lakehouse → v0.8.5 Harbor.
+>
+> <details><summary>v0.8.2 SwarmAdapter — orchestration tier (sealed)</summary>
+>
+> **v0.8.2 = `SwarmAdapter`** (ClusterId **`swarm`**, Phase 0.E) — the **second
 > non-data-tier adapter** and the **most reusable**: it wires the already-built `ConsulClient` (`:8501`) +
 > `NomadClient` (`:4646`) + `PortainerClient` (`:9443`) + `ClusterStatusService` + `FailoverTestService` (all
 > shipped v0.1–v0.5) into the full `IClusterAdapter` surface over the orchestration tier (3 combined
@@ -29,8 +53,9 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 > (cert-rotate pkiCert persists+reuses the leaf → force re-issue; acl grant needs a policy → builtin/dns;
 > chaos recovery poll exceeded the command budget → lightweight docker poll). Cold-rebuild-proven
 > (`swarm.ps1 cycle` → smoke 0.E.4e GREEN → full verb matrix GREEN). AOT **27.59 MB / 30**; 173/173 tests. See
-> [`docs/verification/0.8.2-swarm.md`](./docs/verification/0.8.2-swarm.md) + ADR-0023. Remaining: v0.8.3
-> Observability → v0.8.4 Lakehouse → v0.8.5 Harbor.
+> [`docs/verification/0.8.2-swarm.md`](./docs/verification/0.8.2-swarm.md) + ADR-0023.
+>
+> </details>
 >
 > <details><summary>v0.8.0 full-fleet roll-up + v0.8.1 Vault + AD adapters (sealed)</summary>
 >

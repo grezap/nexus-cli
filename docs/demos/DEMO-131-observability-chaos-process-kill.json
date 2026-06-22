@@ -1,0 +1,51 @@
+{
+  "id": "DEMO-131-observability-chaos-process-kill",
+  "title": "Observability: chaos process-kill a ring node (recover to green)",
+  "description": "Runs `nexus chaos observability process-kill --duration 15 --yes`. Process-kills nexus-loki on a Loki ring node (VIP holders spared), observes the impact, then restarts the service and polls /ready until the ring is whole again.",
+  "prerequisites": {
+    "vmsAlive": [
+      "prom-1",
+      "prom-2",
+      "loki-1",
+      "loki-2",
+      "loki-3",
+      "tempo-1",
+      "tempo-2",
+      "tempo-3",
+      "grafana-1",
+      "grafana-2",
+      "grafana-pg-1",
+      "grafana-pg-2",
+      "otel-collector-1",
+      "otel-collector-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus chaos observability process-kill --duration 15 --yes",
+      "waitAfterSeconds": 6,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "process-kill",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "observed-impact health probes during the kill, then cluster recovered = true (loki ring back to 3/3)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "ObservabilityAdapter.ApplyChaosAsync runs the embedded nexus-chaos.sh on a Loki/Tempo ring node (VIP holders spared) and recovers via a /ready poll."
+}

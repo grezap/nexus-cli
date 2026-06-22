@@ -6,6 +6,41 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-06-22
+
+Phase 0.I: **`ObservabilityAdapter`** (ClusterId `observability`) — the **third non-data-tier adapter**,
+extending the CLI over the Grafana LGTM stack (Prometheus + Loki + Grafana + Tempo + Alertmanager + OTel
+Collector) across 14 VMs + 2 VRRP VIPs. Live-verified against the running tier (8 verbs green; 3 gated by a
+documented infra trust-breakage, not adapter bugs).
+
+- **`ObservabilityAdapter`** manages prom-1/2 (Prometheus + Alertmanager mesh), loki-1/2/3 + tempo-1/2/3
+  (memberlist rings on a MinIO S3 backend), grafana-1/2 (active-active, VRRP VIP `.184`), grafana-pg-1/2
+  (PG17 streaming repl, VRRP VIP `.185`), otel-collector-1/2. **No managed Prometheus/Grafana/Loki driver**
+  (NetArchTest).
+- **Access posture (a deliberate divergence from the v0.8.1/0.8.2 build-host-HTTP shape, forced by the live
+  contract):** the service endpoints are probed **over SSH with each node's own `ca.crt`** (always
+  self-consistent), runtime creds come from Vault KV via `INexusVaultClient` (every obs secret field =
+  `value`), and OTel's loopback health is always on-node. Reason: the obs leaves are on the tier's OLD CA
+  generation (the tier was offline during the v0.8.1 Vault greenfield) while the build host now trusts the
+  NEW root — so the build-host CA bundle can't validate them. The diagnose-first probe caught this.
+- **Verbs** — status (14 nodes + VIP holders); health (Prom ready + scrape-targets-up, Alertmanager mesh
+  peers, Loki/Tempo memberlist rings, Grafana `database`=ok, OTel loopback, **Grafana-PG streaming
+  replication**, **MinIO S3 reachable**, both VIPs bound); topology (14 nodes + 2 VIP pseudo-nodes + ring
+  counts + scrape count); **failover** = Grafana / Grafana-PG **VRRP cutover** (`--direction grafana` proven,
+  RTO ≈ 1.2 s); scale-out = Loki/Tempo **memberlist ring** add/remove (the fixed-HA roles → graceful N/A);
+  cert-rotate = build-host `pki_int/observability-server` issue + SSH-push + per-service reload; acl = Grafana
+  users via `/api/admin/users`; backup = graceful actionable N/A (state durable in MinIO EC + PG repl RPO≈0 +
+  dashboards-as-code + ephemeral Prom TSDB).
+- **8 verbs live-verified GREEN; zero adapter code bugs.** The verify surfaced **three infra divergences**
+  (all v0.8.1-greenfield-while-offline casualties, the same class as the swarm tier's Portainer drift):
+  the tier-wide vault-agent broken trust (drove the SSH-local-curl posture), the Grafana admin password drift
+  (`acl` honestly returns 401 + the reconcile command), and the grafana-pg replication split (`health`
+  correctly red). `cert-rotate` / `failover grafana-db` / `acl grant` are implemented but not live-run on the
+  degraded tier (they need the Greg-authorized tier trust re-apply first). See
+  [`docs/verification/0.8.3-observability.md`](./docs/verification/0.8.3-observability.md) + ADR-0024.
+- **AOT 27.59 MB / 30** (unchanged — no new heavy deps). **194/194 tests** (+21 ObservabilityAdapter parser
+  cases). 10 System B demos `DEMO-124..133`.
+
 ## [0.8.2] — 2026-06-19
 
 Phase 0.E: **`SwarmAdapter`** (ClusterId `swarm`) — the **second non-data-tier adapter** and the **most

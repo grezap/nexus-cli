@@ -1,0 +1,53 @@
+{
+  "id": "DEMO-127-observability-failover-grafana",
+  "title": "Observability: Grafana VRRP failover (.184 app VIP cutover)",
+  "description": "Runs `nexus failover-test cluster observability --direction grafana --yes`. Stops keepalived on the live VIP .184 master, polls the VIP onto the backup grafana node, measures the RTO, then restarts keepalived (nopreempt keeps the VIP put).",
+  "prerequisites": {
+    "vmsAlive": [
+      "prom-1",
+      "prom-2",
+      "loki-1",
+      "loki-2",
+      "loki-3",
+      "tempo-1",
+      "tempo-2",
+      "tempo-3",
+      "grafana-1",
+      "grafana-2",
+      "grafana-pg-1",
+      "grafana-pg-2",
+      "otel-collector-1",
+      "otel-collector-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster observability --direction grafana --yes",
+      "waitAfterSeconds": 6,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "vrrp-cutover:grafana",
+        "original primary",
+        "new primary",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "VIP .184 moves grafana-master -> backup, RTO ~1-3s, recovery=recovered; 5-instant timeline table"
+        }
+      ]
+    }
+  ],
+  "whatProves": "ObservabilityAdapter.FailoverAsync performs a keepalived VRRP cutover of the Grafana front-door VIP and measures the RTO; the grafana-db (.185) direction uses the identical code path."
+}

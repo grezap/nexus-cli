@@ -1,0 +1,57 @@
+{
+  "id": "DEMO-125-observability-health",
+  "title": "Observability: full health (LGTM + AM mesh + PG repl + S3 + VIPs)",
+  "description": "Runs `nexus health observability`. Probes Prometheus ready + scrape-targets-up, the Alertmanager gossip mesh peers, the Loki + Tempo memberlist rings, Grafana database=ok, OTel loopback health, the Grafana-PG streaming replication, MinIO S3 reachability, and both VRRP VIPs. Reports honestly — overall is RED while the grafana-pg replication is split (a documented infra divergence, not an adapter fault).",
+  "prerequisites": {
+    "vmsAlive": [
+      "prom-1",
+      "prom-2",
+      "loki-1",
+      "loki-2",
+      "loki-3",
+      "tempo-1",
+      "tempo-2",
+      "tempo-3",
+      "grafana-1",
+      "grafana-2",
+      "grafana-pg-1",
+      "grafana-pg-2",
+      "otel-collector-1",
+      "otel-collector-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus health observability",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 1,
+      "expectedOutputContains": [
+        "prometheus-targets",
+        "alertmanager-mesh",
+        "loki-ring",
+        "tempo-ring",
+        "grafana-health",
+        "grafana-pg-replication",
+        "s3-backend",
+        "vip-grafana"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "most probes green (prom 11/11 up, AM 2 peers ready, loki/tempo 3/3 ring, grafana database=ok, otel 2/2, S3 200, both VIPs bound); grafana-pg-replication RED (split — honest report); overall=red"
+        }
+      ]
+    }
+  ],
+  "whatProves": "ObservabilityAdapter.HealthAsync rolls Prometheus + Alertmanager + Loki + Tempo + Grafana + OTel + Grafana-PG replication + MinIO S3 + the two VRRP VIPs into one report, surfacing the real grafana-pg split rather than hiding it."
+}
