@@ -1,0 +1,50 @@
+{
+  "id": "DEMO-139-lakehouse-scale-out-na",
+  "title": "Lakehouse: scale-out N/A (fixed-size IaC; actionable)",
+  "description": "Runs `nexus scale-out remove lakehouse spark-worker-3 --yes`. None of the lakehouse roles scale at runtime — the MinIO EC set is fixed at 4 (baked at format time), the Spark worker count + the pairs/ensemble are fixed-size IaC. The verb refuses with an actionable message naming the terraform path, never a silent no-op.",
+  "prerequisites": {
+    "vmsAlive": [
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4",
+      "iceberg-rest-1",
+      "iceberg-rest-2",
+      "iceberg-pg-1",
+      "iceberg-pg-2",
+      "spark-master-1",
+      "spark-master-2",
+      "spark-worker-1",
+      "spark-worker-2",
+      "spark-worker-3",
+      "zookeeper-1",
+      "zookeeper-2",
+      "zookeeper-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out remove lakehouse spark-worker-3 --yes",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 2,
+      "expectedOutputContains": [
+        "scale-out is graceful N/A",
+        "erasure set is FIXED at 4",
+        "terraform"
+      ],
+      "observe": [
+        {
+          "where": "stderr",
+          "what": "an actionable N/A: the EC set is fixed at format time; worker/pair/ensemble growth is a terraform/Packer op"
+        }
+      ]
+    }
+  ],
+  "whatProves": "LakehouseAdapter graceful-N/As scale-out for every role with an actionable message (EC set + worker count + pairs/ensemble are fixed-size IaC), never a silent skip."
+}

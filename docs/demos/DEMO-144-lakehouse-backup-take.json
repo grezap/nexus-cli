@@ -1,0 +1,51 @@
+{
+  "id": "DEMO-144-lakehouse-backup-take",
+  "title": "Lakehouse: backup take (mc mirror s3://warehouse)",
+  "description": "Runs `nexus backup take lakehouse --yes`. Mirrors the warehouse bucket (the Iceberg/Spark data) to a node-local dir via `mc mirror` and reports the object count + size — a portable point-in-time copy (the S3 store itself is already EC-durable).",
+  "prerequisites": {
+    "vmsAlive": [
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4",
+      "iceberg-rest-1",
+      "iceberg-rest-2",
+      "iceberg-pg-1",
+      "iceberg-pg-2",
+      "spark-master-1",
+      "spark-master-2",
+      "spark-worker-1",
+      "spark-worker-2",
+      "spark-worker-3",
+      "zookeeper-1",
+      "zookeeper-2",
+      "zookeeper-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup take lakehouse --yes",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "backup take",
+        "warehouse",
+        "objects",
+        "destination"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "GREEN backup take warehouse (N objects @ minio-1:/var/tmp/nexus-lakehouse-backup/warehouse)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "LakehouseAdapter.BackupTakeAsync mc-mirrors the warehouse bucket to a node-local dir and reports the object count + byte size."
+}

@@ -1,0 +1,52 @@
+{
+  "id": "DEMO-140-lakehouse-cert-rotate",
+  "title": "Lakehouse: cert-rotate (vault-agent re-render; MinIO big-bang)",
+  "description": "Runs `nexus cert-rotate lakehouse --yes`. Forces each node vault-agent to re-issue its leaf from pki_int and reloads the service. MinIO is re-certed BIG-BANG (all 4 restarted together — a rolling 1-node re-cert breaks distributed MinIO inter-node mTLS); Spark/Nessie/ZK restart; iceberg-pg is deferred to the PG DR runbook by design.",
+  "prerequisites": {
+    "vmsAlive": [
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4",
+      "iceberg-rest-1",
+      "iceberg-rest-2",
+      "iceberg-pg-1",
+      "iceberg-pg-2",
+      "spark-master-1",
+      "spark-master-2",
+      "spark-worker-1",
+      "spark-worker-2",
+      "spark-worker-3",
+      "zookeeper-1",
+      "zookeeper-2",
+      "zookeeper-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus cert-rotate lakehouse --yes",
+      "waitAfterSeconds": 10,
+      "expectedExitCode": 1,
+      "expectedOutputContains": [
+        "minio-1",
+        "iceberg-rest-1",
+        "spark-master-1",
+        "zookeeper-1",
+        "iceberg-pg-1"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "new leaf serials on the MinIO/Nessie/Spark/ZK nodes (old != new); iceberg-pg rows show the deliberate DR-runbook skip → the verb exits non-zero on that skip"
+        }
+      ]
+    }
+  ],
+  "whatProves": "LakehouseAdapter.RotateCertAsync forces each vault-agent to re-render its pki_int leaf; MinIO restarts big-bang to preserve distributed inter-node mTLS, the others restart per-node, and iceberg-pg is deferred to its DR runbook (the verb exits non-zero on that documented skip)."
+}

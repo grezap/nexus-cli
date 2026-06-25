@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.I%20v0.8.3%20%E2%9C%85%20observability%20adapter%20live-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.L%20v0.8.4%20%E2%9C%85%20lakehouse%20adapter%20live-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,27 +12,38 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.8.3):** **v0.8.3 = `ObservabilityAdapter`** (ClusterId **`observability`**, Phase 0.I)
-> — the **third non-data-tier adapter**: the CLI now manages the Grafana LGTM stack (Prometheus + Loki +
-> Grafana + Tempo + Alertmanager + OTel Collector) across 14 VMs + 2 VRRP VIPs. **Access posture diverges,
-> on purpose, from v0.8.1/0.8.2's build-host-HTTP** — the live probe caught that the obs leaves are on the
-> tier's OLD CA generation (the tier was offline during the v0.8.1 Vault greenfield) while the build host now
-> trusts the NEW root, so the endpoints are probed **over SSH with each node's own `ca.crt`** + runtime creds
-> from Vault KV (every obs secret field = `value`). **No managed Prometheus/Grafana/Loki driver** (NetArchTest).
-> Verbs — status (14 nodes + VIP holders) · health (Prom ready + scrape-targets-up · Alertmanager mesh peers ·
-> Loki/Tempo memberlist rings · Grafana `database`=ok · OTel loopback · **Grafana-PG streaming replication** ·
-> **MinIO S3 reachable** · both VIPs bound) · topology (14 nodes + 2 VIP pseudo-nodes + ring + scrape counts) ·
-> **failover = Grafana/Grafana-PG VRRP cutover** (`--direction grafana` proven, RTO≈1.2 s) · scale-out =
-> Loki/Tempo memberlist ring add/remove (fixed-HA roles → graceful N/A) · cert-rotate (build-host
-> `pki_int/observability-server` issue + SSH-push + per-service reload) · acl (Grafana users via
-> `/api/admin/users`) · backup (graceful N/A — state durable in MinIO EC + PG repl RPO≈0 + dashboards-as-code +
-> ephemeral Prom TSDB). **8 verbs live-verified GREEN; zero adapter code bugs.** The verify surfaced **three
-> infra divergences** (all v0.8.1-greenfield-while-offline casualties): the tier-wide vault-agent broken trust
-> (drove the SSH posture), the Grafana admin password drift (`acl` honestly returns 401 + the reconcile), and
-> the grafana-pg replication split (`health` correctly red) — `cert-rotate`/`failover grafana-db`/`acl grant`
-> are implemented but await the Greg-authorized tier trust re-apply. AOT **27.59 MB / 30**; 194/194 tests. See
-> [`docs/verification/0.8.3-observability.md`](./docs/verification/0.8.3-observability.md) + ADR-0024.
-> Remaining: v0.8.4 Lakehouse → v0.8.5 Harbor.
+> **Current state (v0.8.4):** **v0.8.4 = `LakehouseAdapter`** (ClusterId **`lakehouse`**, Phase 0.L) — the
+> **fourth non-data-tier adapter** and the last big multi-component one: ONE component-aware adapter spanning
+> the three-engine lakehouse (MinIO erasure-coded object store + Iceberg/Nessie REST catalog + Spark ZK-HA)
+> plus the ZooKeeper ensemble, across 16 VMs + 1 VRRP VIP. Same SSH-local-curl posture as v0.8.3 (each node's
+> own `ca`; Nessie mgmt `/q/health` + Spark UI `/json/` are plain HTTP; MinIO admin via the on-node `mc
+> nexuslocal` alias; KV via `INexusVaultClient`, field `value`). **No managed MinIO/Spark/Iceberg/Nessie
+> driver** (NetArchTest). Verbs — status (16 nodes + VIP holder + ALIVE Spark master) · health (MinIO
+> live/cluster + drives · Nessie object-store + catalog · Spark ALIVE + workers · ZK quorum · iceberg-pg
+> replication · VIP) · topology (16 + VIP + ZK roles + Spark master/standby + `spark://` URL) · **failover
+> `--direction spark-master`** = ZooKeeper auto-promotes the STANDBY master (RTO≈31 s; `--direction iceberg-pg`
+> = graceful N/A — a VRRP cutover split-brains the catalog DB) · scale-out = graceful N/A (all roles fixed-size
+> IaC) · **cert-rotate** = vault-agent force-rerender, **MinIO big-bang** + Nessie per-node (Spark/ZK N/A — no
+> rotatable leaf; iceberg-pg DR-deferred) · acl (MinIO policies + users via `mc admin`) · backup (`mc mirror
+> s3://warehouse` round-trip) · chaos (process-kill a MinIO node — EC tolerates 1). **11 verbs live-verified
+> GREEN as-is + the full matrix green post-rebuild.** Diagnosed the same v0.8.1-greenfield casualty class as
+> the obs tier (MinIO new-root but Nessie/iceberg-pg/Spark/ZK old-root → a cross-tier CA split + an iceberg-pg
+> replication split); a Greg-authorized **cold-rebuild of the Iceberg + Spark envs only** (MinIO kept in place
+> — its EC drives hold four cross-tier buckets) fixed both + reconciled a MinIO IAM key drift, and surfaced
+> 2 live-caught adapter bugs (cert-rotate Spark/ZK N/A; iceberg-pg failover N/A). AOT **27.59 MB / 30**;
+> 223/223 tests. See [`docs/verification/0.8.4-lakehouse.md`](./docs/verification/0.8.4-lakehouse.md) +
+> ADR-0025. Remaining: v0.8.5 Harbor.
+>
+> <details><summary>v0.8.3 ObservabilityAdapter — Grafana LGTM tier (sealed)</summary>
+>
+> **v0.8.3 = `ObservabilityAdapter`** (ClusterId **`observability`**, Phase 0.I) — the **third non-data-tier
+> adapter**: the CLI manages the Grafana LGTM stack (Prometheus + Loki + Grafana + Tempo + Alertmanager + OTel
+> Collector) across 14 VMs + 2 VRRP VIPs, probed over SSH with each node's own `ca.crt` (the obs leaves were on
+> the tier's OLD CA generation). status/health/topology/`failover grafana` VRRP cutover (RTO≈1.2 s)/Loki+Tempo
+> ring scale-out/cert-rotate (vault-agent force-rerender)/acl (Grafana org users)/backup graceful N/A. Surfaced
+> the v0.8.1-greenfield trust-breakage class; cold-rebuild-proven. AOT 27.59 MB; 194/194 tests. See
+> `docs/verification/0.8.3-observability.md` + ADR-0024.
+> </details>
 >
 > <details><summary>v0.8.2 SwarmAdapter — orchestration tier (sealed)</summary>
 >
@@ -318,7 +329,7 @@ Nexus.Cli.Adapters may depend on Nexus.Cli.Core.
 Nothing depends on Nexus.Cli.
 ```
 
-ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Twenty ADRs cover framework choice (0001), AOT cadence (0002), layout (0003), auth model (0004), Dapper-on-AOT (0005), hand-rolled vms.yaml reader (0006), SSH.NET over ssh.exe (0007), the v0.5 kafka-failover demo-grade-via-SSH design (0008), the `IClusterAdapter` SPI + extended demo spec (0009), the cross-adapter patterns + Redis exemplar (0010), and the per-adapter records: Mongo + the Vault-KV operator-credential model (0011), Percona Galera/ProxySQL (0012), Patroni PG HA (0013), ClickHouse sharded + Keeper (0014), StarRocks FE quorum + BE (0015), SQL Server FCI / WSFC over Windows-SSH (0016), SQL Server Always On AG + Listener (0017), the per-cluster Kafka adapters + KRaft `StandardAuthorizer` (0018), the **MongoSharded adapter** + its two-headed keyFile auth (0019), and the **Vitess adapter** + its hybrid mTLS-control-plane / vtgate-SQL-plane identity (0020).
+ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Twenty-five ADRs cover framework choice (0001), AOT cadence (0002), layout (0003), auth model (0004), Dapper-on-AOT (0005), hand-rolled vms.yaml reader (0006), SSH.NET over ssh.exe (0007), the v0.5 kafka-failover demo-grade-via-SSH design (0008), the `IClusterAdapter` SPI + extended demo spec (0009), the cross-adapter patterns + Redis exemplar (0010), and the per-adapter records: Mongo + the Vault-KV operator-credential model (0011), Percona Galera/ProxySQL (0012), Patroni PG HA (0013), ClickHouse sharded + Keeper (0014), StarRocks FE quorum + BE (0015), SQL Server FCI / WSFC over Windows-SSH (0016), SQL Server Always On AG + Listener (0017), the per-cluster Kafka adapters + KRaft `StandardAuthorizer` (0018), the **MongoSharded adapter** + its two-headed keyFile auth (0019), the **Vitess adapter** + its hybrid mTLS-control-plane / vtgate-SQL-plane identity (0020), the **Citus adapter** (Citus-sharded PG + Patroni HA per group, 0021), the **Vault + Foundation-AD adapters** (the first non-data-tier adapters; `recover-ha` + the build-host HTTP control plane, 0022), the **Swarm adapter** (the orchestration tier — reuses the Consul/Nomad/Portainer clients, 0023), the **Observability adapter** (the Grafana LGTM tier + the SSH-local-curl access posture, 0024), and the **Lakehouse adapter** (the three-engine lakehouse — MinIO + Iceberg/Nessie + Spark + ZooKeeper — one component-aware adapter, 0025).
 
 ## Roadmap
 
@@ -350,7 +361,9 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Twenty ADRs cover framewo
 | **v0.8.0** | **Full-fleet roll-up** — the milestone marking all 12 data + sharded adapter families sealed + the aggregate AOT re-validated ≤30 MB (no new adapter); **26.71 MB**, 137/137 tests |
 | **v0.8.1** | Phase 0.A-0.D/0.M — the **Vault + Foundation-AD adapters** (the first **non-data-tier** adapters): `VaultAdapter` (ClusterId `vault`; the Vault HA trust root — 3 Raft nodes + vault-transit Shamir custodian; control plane over HTTP from the build host, no managed driver / no shelled `vault`; `vault operator step-down` failover RTO≈2.0s; stop/start-a-STANDBY scale-out; raft-snapshot backup + non-destructive `meta.json` inspect, restore refused; `pki_int/vault-server` cert-rotate standbys-first/active-last; Vault-policy/AppRole acl; process-kill-a-STANDBY chaos; + a NEW **`recover-ha`** verb = the declarative boot-race recovery, the only exposed unseal path) + `FoundationAdAdapter` (ClusterId `foundation-ad`; the 2-DC AD forest over Windows-SSH + gateway health; multi-master mutators graceful actionable N/A); all verbs live-verified (adapter first-try-green; 1 AD-replication `-Server` bug fixed); **27.36 MB**, 159/159 tests |
 | **v0.8.2** | Phase 0.E — the **Swarm adapter** (ClusterId `swarm`; the orchestration tier — Docker Swarm + Nomad + Consul + Portainer over 3 managers + 3 workers; the **most reusable** adapter — wires the v0.1–v0.5 Consul/Nomad/Portainer clients + ClusterStatusService + FailoverTestService into the full SPI; no managed driver; status/health/topology = the 3-way rollup + `docker node ls`; `--direction` failover to consul-leader/nomad-leader/swarm-manager [vmrun suspend] RTO≈2/3/21s; reversible `docker node drain`/`demote` scale-out; consul+nomad snapshot backup round-trip; force-reissue cert-rotate consul-rolling/nomad-parallel; Consul+Nomad acl; nexus-chaos.sh on a worker + docker-restart-after-nft); all verbs live-verified + cold-rebuild-proven (3 bugs fixed); **27.59 MB**, 173/173 tests |
-| v0.8.3+ | the remaining 3 non-data-tier adapters (Observability · Lakehouse · Harbor) |
+| **v0.8.3** | Phase 0.I — the **Observability adapter** (ClusterId `observability`; the Grafana LGTM tier over 14 VMs + 2 VRRP VIPs; SSH-local-curl posture; `failover grafana` VRRP cutover RTO≈1.2s; Loki/Tempo ring scale-out; vault-agent force-rerender cert-rotate; Grafana org-user acl; backup graceful N/A); 8 verbs live-verified + cold-rebuild-proven (2 bugs fixed); **27.59 MB**, 194/194 tests |
+| **v0.8.4** | Phase 0.L — the **Lakehouse adapter** (ClusterId `lakehouse`; ONE component-aware adapter over MinIO EC + Iceberg/Nessie + Spark ZK-HA + ZooKeeper, 16 VMs + 1 VRRP VIP; `failover spark-master` ZK auto-promote RTO≈31s [iceberg-pg = graceful N/A — VRRP cutover split-brains the catalog DB]; scale-out N/A; cert-rotate MinIO-big-bang + Nessie [Spark/ZK N/A]; `mc admin` acl; `mc mirror s3://warehouse` backup; process-kill-a-MinIO-node chaos — EC tolerates 1); 11 verbs live-verified as-is + full matrix green post-rebuild (Iceberg+Spark cold-rebuild fixed the cross-tier CA split + iceberg-pg replication split; 2 bugs fixed); **27.59 MB**, 223/223 tests |
+| v0.8.5 | the last non-data-tier adapter (Harbor registry HA) |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing

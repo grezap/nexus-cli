@@ -1,0 +1,71 @@
+{
+  "id": "DEMO-134-lakehouse-status",
+  "title": "Lakehouse: tier status (16 nodes across MinIO + Iceberg + Spark + ZK)",
+  "description": "Runs `nexus status lakehouse`. One table over the 16 nodes — 4 MinIO EC nodes, 2 Nessie REST catalog instances, the iceberg-pg pair (VIP .151 holder labelled PRIMARY), the 2 ZK-elected Spark masters (the ALIVE leader labelled), 3 Spark workers, and the 3-node ZooKeeper ensemble.",
+  "prerequisites": {
+    "vmsAlive": [
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4",
+      "iceberg-rest-1",
+      "iceberg-rest-2",
+      "iceberg-pg-1",
+      "iceberg-pg-2",
+      "spark-master-1",
+      "spark-master-2",
+      "spark-worker-1",
+      "spark-worker-2",
+      "spark-worker-3",
+      "zookeeper-1",
+      "zookeeper-2",
+      "zookeeper-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus status lakehouse",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "lakehouse",
+        "minio-1",
+        "iceberg-rest-1",
+        "iceberg-pg-1",
+        "spark-master-1",
+        "zookeeper-1",
+        "alive",
+        "leader:"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "16-row table; one Spark master labelled ALIVE leader; iceberg-pg VIP .151 holder labelled PRIMARY; all alive; the ALIVE master named on the leader: line"
+        }
+      ]
+    },
+    {
+      "command": "nexus status lakehouse --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "clusterId",
+        "overallHealth",
+        "members"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "JSON ClusterStatus: 16 members, leader = the ALIVE spark master, Shards null"
+        }
+      ]
+    }
+  ],
+  "whatProves": "LakehouseAdapter.GetStatusAsync classifies all 16 nodes by name-prefix, resolves the iceberg-pg VRRP VIP holder and the ZK-elected ALIVE Spark master dynamically, and rolls them into one table."
+}

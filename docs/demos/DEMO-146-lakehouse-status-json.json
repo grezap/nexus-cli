@@ -1,0 +1,50 @@
+{
+  "id": "DEMO-146-lakehouse-status-json",
+  "title": "Lakehouse: machine-readable status (System B JSON)",
+  "description": "Runs `nexus status lakehouse --json` — the machine-readable ClusterStatus over the 16 nodes for scripting/automation.",
+  "prerequisites": {
+    "vmsAlive": [
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4",
+      "iceberg-rest-1",
+      "iceberg-rest-2",
+      "iceberg-pg-1",
+      "iceberg-pg-2",
+      "spark-master-1",
+      "spark-master-2",
+      "spark-worker-1",
+      "spark-worker-2",
+      "spark-worker-3",
+      "zookeeper-1",
+      "zookeeper-2",
+      "zookeeper-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus status lakehouse --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "\"clusterId\": \"lakehouse\"",
+        "\"members\"",
+        "\"overallHealth\""
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "a single JSON ClusterStatus document: 16 members with role + status, leader = the ALIVE spark master, Shards null"
+        }
+      ]
+    }
+  ],
+  "whatProves": "The --json projection of GetStatusAsync gives a stable machine-readable contract for the lakehouse tier (System B)."
+}

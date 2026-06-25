@@ -1,0 +1,51 @@
+{
+  "id": "DEMO-141-lakehouse-acl-list",
+  "title": "Lakehouse: MinIO policies + users (mc admin)",
+  "description": "Runs `nexus acl lakehouse list`. Lists the MinIO policies and users via the on-node `mc admin policy ls` + `mc admin user ls`. The MinIO root + the nexus-lakehouse-app service identity are flagged protected.",
+  "prerequisites": {
+    "vmsAlive": [
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4",
+      "iceberg-rest-1",
+      "iceberg-rest-2",
+      "iceberg-pg-1",
+      "iceberg-pg-2",
+      "spark-master-1",
+      "spark-master-2",
+      "spark-worker-1",
+      "spark-worker-2",
+      "spark-worker-3",
+      "zookeeper-1",
+      "zookeeper-2",
+      "zookeeper-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus acl lakehouse list",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "policy:readwrite",
+        "policy:readonly",
+        "nexus-lakehouse-app",
+        "protected"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the MinIO policies (readwrite/readonly/consoleAdmin/...) + the service users; nexus-lakehouse-app flagged protected"
+        }
+      ]
+    }
+  ],
+  "whatProves": "LakehouseAdapter.AclAsync lists MinIO policies + users through the on-node mc nexuslocal alias; the root + app identities are revoke-protected."
+}

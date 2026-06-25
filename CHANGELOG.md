@@ -6,6 +6,43 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.4] — 2026-06-25
+
+Phase 0.L: **`LakehouseAdapter`** (ClusterId `lakehouse`) — the **fourth non-data-tier adapter** and the last
+big multi-component one: ONE component-aware adapter spanning the three-engine lakehouse (MinIO erasure-coded
+object store + Iceberg/Nessie REST catalog + Spark ZK-HA) plus the ZooKeeper ensemble, across 16 VMs + 1 VRRP
+VIP. Live-verified against the running tier + cold-rebuild-proven (Iceberg + Spark envs).
+
+- **`LakehouseAdapter`** classifies nodes by name-prefix (minio-/iceberg-rest-/iceberg-pg-/spark-master-/
+  spark-worker-/zookeeper-) and dispatches per component. **No managed MinIO/Spark/Iceberg/Nessie driver**
+  (NetArchTest); same SSH-local-curl access posture as the observability adapter (each node's own ca; Nessie
+  mgmt `/q/health` + Spark UI `/json/` are plain HTTP; MinIO admin via the on-node `mc nexuslocal` alias;
+  KV via `INexusVaultClient`, every lakehouse secret field = `value`).
+- **status** = 16 nodes + the iceberg-pg VIP holder + the ZK-elected ALIVE Spark master. **health** = MinIO
+  `/minio/health/{live,cluster}` + `mc admin info` drives · Nessie `/q/health` per-check (the cross-tier S3
+  object-store canary) + `/iceberg/v1/config` · Spark ALIVE master + aliveworkers + workers · ZK quorum ·
+  iceberg-pg streaming replication · VIP. **topology** = 16 + the VIP pseudo-node + ZK leader/followers +
+  Spark master/standby + the `spark://` URL.
+- **failover `--direction spark-master`** = stop the ALIVE master → ZooKeeper auto-promotes the STANDBY
+  (RTO ≈ 31 s — the live-proven HA drill). **`--direction iceberg-pg` = graceful actionable N/A** (a
+  keepalived VRRP cutover of the catalog-DB pair promotes the standby into a split-brain + the promoted
+  standby's pg_hba rejects Nessie → a DR runbook, not a one-shot). **scale-out** = graceful N/A (EC set +
+  worker count + pairs/ensemble all fixed-size IaC). **backup** = `mc mirror s3://warehouse` round-trip.
+- **cert-rotate** = vault-agent force-rerender, **MinIO big-bang restart** (a rolling 1-node re-cert breaks
+  distributed MinIO inter-node mTLS) + Nessie per-node; **Spark + ZooKeeper graceful N/A** (Spark RPC is
+  shared-secret + AES with only a JVM-truststore CA, no per-node leaf; ZK is backplane-only plaintext);
+  iceberg-pg deferred to its PG DR runbook. **acl** = MinIO policies + users via `mc admin` (root + app
+  protected). **chaos** = process-kill a MinIO node (the EC:2 set tolerates 1) + recover.
+- Diagnosed the v0.8.1-Vault-greenfield casualty class (same as the observability tier): MinIO was already on
+  the new root but Nessie/iceberg-pg/Spark/ZooKeeper were old-root → a **cross-tier CA split** (old-root
+  Nessie's truststore couldn't validate the new-root MinIO S3 leaf — PKIX) + an **iceberg-pg replication
+  split**. A Greg-authorized **cold-rebuild of the Iceberg + Spark envs only** (MinIO kept in place —
+  reformatting its EC drives would wipe the four cross-tier buckets it serves) resolved both; it also surfaced
+  + reconciled a **MinIO IAM key drift** (greenfield-rotated app secret → S3 403; data-preserving `mc admin
+  user add` re-sync) and **2 live-caught adapter bugs** (cert-rotate Spark/ZK N/A; iceberg-pg failover N/A).
+- ADR-0025 + `docs/verification/0.8.4-lakehouse.md` + 13 System B demos (DEMO-134..146). AOT win-x64
+  **27.59 MB / 30**; **223/223 tests** (+18 LakehouseAdapter parser tests).
+
 ## [0.8.3] — 2026-06-22
 
 Phase 0.I: **`ObservabilityAdapter`** (ClusterId `observability`) — the **third non-data-tier adapter**,

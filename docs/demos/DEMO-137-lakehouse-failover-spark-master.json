@@ -1,0 +1,51 @@
+{
+  "id": "DEMO-137-lakehouse-failover-spark-master",
+  "title": "Lakehouse: Spark master failover (ZooKeeper auto-promote, ~30s)",
+  "description": "Runs `nexus failover-test cluster lakehouse --direction spark-master --yes`. Stops nexus-spark-master on the ALIVE leader; ZooKeeper promotes the STANDBY master to ALIVE (and the workers re-register). The stopped master is restarted as the new STANDBY.",
+  "prerequisites": {
+    "vmsAlive": [
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4",
+      "iceberg-rest-1",
+      "iceberg-rest-2",
+      "iceberg-pg-1",
+      "iceberg-pg-2",
+      "spark-master-1",
+      "spark-master-2",
+      "spark-worker-1",
+      "spark-worker-2",
+      "spark-worker-3",
+      "zookeeper-1",
+      "zookeeper-2",
+      "zookeeper-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster lakehouse --direction spark-master --yes",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "spark-master-zk-reelect",
+        "original primary",
+        "new primary",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the ALIVE master is stopped, ZK promotes the standby to ALIVE (RTO ~30s), the old leader restarts as STANDBY; recovery=recovered"
+        }
+      ]
+    }
+  ],
+  "whatProves": "LakehouseAdapter.FailoverAsync (spark-master) stops the ALIVE master and polls the surviving standby until ZooKeeper elects it ALIVE, measuring the RTO; the workers re-register against the new leader."
+}

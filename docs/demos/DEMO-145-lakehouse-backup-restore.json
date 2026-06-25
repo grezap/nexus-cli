@@ -1,0 +1,49 @@
+{
+  "id": "DEMO-145-lakehouse-backup-restore",
+  "title": "Lakehouse: backup restore round-trip (warehouse-restore-verify)",
+  "description": "Runs `nexus backup restore lakehouse warehouse --yes`. Mirrors the node-local backup back into a fresh `warehouse-restore-verify` bucket and counts the restored objects — the integrity round-trip proof.",
+  "prerequisites": {
+    "vmsAlive": [
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4",
+      "iceberg-rest-1",
+      "iceberg-rest-2",
+      "iceberg-pg-1",
+      "iceberg-pg-2",
+      "spark-master-1",
+      "spark-master-2",
+      "spark-worker-1",
+      "spark-worker-2",
+      "spark-worker-3",
+      "zookeeper-1",
+      "zookeeper-2",
+      "zookeeper-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup restore lakehouse warehouse --yes",
+      "waitAfterSeconds": 6,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "backup restore",
+        "items restored"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "GREEN backup restore warehouse — items restored = the same N objects taken"
+        }
+      ]
+    }
+  ],
+  "whatProves": "LakehouseAdapter.BackupRestoreAsync mirrors the node-local backup into a verify bucket and counts the objects (the take/restore round-trip)."
+}

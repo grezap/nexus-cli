@@ -29,6 +29,8 @@ namespace Nexus.Cli.Infrastructure;
 ///     <item>0.7.3 -- CitusAdapter (Phase 0.P Citus-sharded PostgreSQL + Patroni HA)</item>
 ///     <item>0.8.1 -- VaultAdapter + FoundationAdAdapter (first non-data-tier adapters)</item>
 ///     <item>0.8.2 -- SwarmAdapter (Phase 0.E orchestration tier: Swarm + Nomad + Consul + Portainer)</item>
+///     <item>0.8.3 -- ObservabilityAdapter (Phase 0.I Grafana LGTM tier)</item>
+///     <item>0.8.4 -- LakehouseAdapter (Phase 0.L: MinIO + Iceberg/Nessie + Spark + ZooKeeper)</item>
 ///   </list>
 /// </para>
 /// </summary>
@@ -85,6 +87,7 @@ public static class ClusterBootstrapper
             new FoundationAdAdapter(catalog, ssh, sshUser, sshKey),      // 0.8.1 (ClusterId foundation-ad; AD via Windows-SSH + gateway health)
             new SwarmAdapter(catalog, ssh, sshUser, sshKey, vault),      // 0.8.2 (ClusterId swarm; Docker Swarm + Nomad + Consul + Portainer) -- reuses Consul/Nomad/Portainer clients + ClusterStatusService + FailoverTestService
             new ObservabilityAdapter(catalog, ssh, sshUser, sshKey, vault), // 0.8.3 (ClusterId observability; Grafana LGTM: Prometheus + Loki + Grafana + Tempo + Alertmanager + OTel; 14 VMs + 2 VRRP VIPs)
+            new LakehouseAdapter(catalog, ssh, sshUser, sshKey, vault),  // 0.8.4 (ClusterId lakehouse; MinIO EC + Iceberg/Nessie + Spark ZK-HA + ZooKeeper; 16 VMs + 1 VRRP VIP)
         };
         return new ClusterRegistry(adapters);
     }

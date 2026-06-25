@@ -1,0 +1,55 @@
+{
+  "id": "DEMO-135-lakehouse-health",
+  "title": "Lakehouse: full health (MinIO EC + Nessie + Spark + ZK + PG repl)",
+  "description": "Runs `nexus health lakehouse`. Probes MinIO live + cluster + EC drives, the Nessie object-store + catalog checks, the Spark ALIVE master + aliveworkers, the ZooKeeper quorum, the iceberg-pg streaming replication, and the VRRP VIP. On the healed tier all probes are green.",
+  "prerequisites": {
+    "vmsAlive": [
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4",
+      "iceberg-rest-1",
+      "iceberg-rest-2",
+      "iceberg-pg-1",
+      "iceberg-pg-2",
+      "spark-master-1",
+      "spark-master-2",
+      "spark-worker-1",
+      "spark-worker-2",
+      "spark-worker-3",
+      "zookeeper-1",
+      "zookeeper-2",
+      "zookeeper-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus health lakehouse",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "overall",
+        "green",
+        "minio",
+        "nessie",
+        "spark",
+        "zookeeper",
+        "iceberg-pg",
+        "keepalived"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "minio 4/4 live + cluster 200 + 4 drives ok; nessie-config 2/2 + nessie-objectstore 2/2 UP; spark ALIVE + 3/3 workers; ZK 1 leader + 2 followers; iceberg-pg 1 streaming standby; VIP bound; overall green"
+        }
+      ]
+    }
+  ],
+  "whatProves": "LakehouseAdapter.HealthAsync rolls MinIO + Nessie + Spark + ZooKeeper + iceberg-pg replication into one report. The nessie-objectstore probe surfaces the cross-tier S3 trust (DOWN under a CA split, UP once the tier is on the same Vault root as MinIO)."
+}

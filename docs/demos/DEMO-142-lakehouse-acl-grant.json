@@ -1,0 +1,49 @@
+{
+  "id": "DEMO-142-lakehouse-acl-grant",
+  "title": "Lakehouse: MinIO policy attach (grant) round-trip",
+  "description": "Runs `nexus acl lakehouse grant --user <key> --permissions readonly --yes`. Attaches the readonly policy to a MinIO user via `mc admin policy attach`, then re-lists to show the change. (Demo against a throwaway user; never a protected identity.)",
+  "prerequisites": {
+    "vmsAlive": [
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4",
+      "iceberg-rest-1",
+      "iceberg-rest-2",
+      "iceberg-pg-1",
+      "iceberg-pg-2",
+      "spark-master-1",
+      "spark-master-2",
+      "spark-worker-1",
+      "spark-worker-2",
+      "spark-worker-3",
+      "zookeeper-1",
+      "zookeeper-2",
+      "zookeeper-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus acl lakehouse grant --user nexus-acl-demo --permissions readonly --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "verb=list",
+        "nexus-acl-demo"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the readonly policy is attached to the user; the refreshed list includes it (verify with mc admin policy entities)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "LakehouseAdapter.AclAsync grant attaches a MinIO policy to a user (mc admin policy attach) and re-lists; revoke detaches it, with the root + app users detach-protected."
+}

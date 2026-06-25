@@ -1,0 +1,51 @@
+{
+  "id": "DEMO-138-lakehouse-failover-iceberg-pg-na",
+  "title": "Lakehouse: iceberg-pg catalog-DB failover is graceful N/A (actionable)",
+  "description": "Runs `nexus failover-test cluster lakehouse --direction iceberg-pg --yes`. The catalog-DB failover is a graceful actionable N/A (diagnosed live in v0.8.4): a keepalived VRRP cutover of the .151 VIP is not a safe one-shot — the notify_master hook promotes the standby while nopreempt leaves the old primary un-demoted (split-brain), and the promoted standby pg_hba does not admit the Nessie REST hosts, so the catalog front door lands on a PG Nessie cannot use. A real catalog-DB failover is a DR runbook (promote + demote/fence + pg_basebackup re-seed). The verb refuses with the full explanation and points at the spark-master direction.",
+  "prerequisites": {
+    "vmsAlive": [
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4",
+      "iceberg-rest-1",
+      "iceberg-rest-2",
+      "iceberg-pg-1",
+      "iceberg-pg-2",
+      "spark-master-1",
+      "spark-master-2",
+      "spark-worker-1",
+      "spark-worker-2",
+      "spark-worker-3",
+      "zookeeper-1",
+      "zookeeper-2",
+      "zookeeper-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster lakehouse --direction iceberg-pg --yes",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 2,
+      "expectedOutputContains": [
+        "graceful N/A",
+        "split-brain",
+        "pg_basebackup re-seed",
+        "spark-master"
+      ],
+      "observe": [
+        {
+          "where": "stderr",
+          "what": "an actionable N/A: the VRRP cutover promotes the standby into a split-brain + the pg_hba/Nessie mismatch; use --direction spark-master for the live-proven failover"
+        }
+      ]
+    }
+  ],
+  "whatProves": "LakehouseAdapter.FailoverAsync graceful-N/As the iceberg-pg direction — a keepalived VRRP cutover of a PG primary/standby pair is unsafe as an adapter one-shot (split-brain + pg_hba), so the verb explains why and routes to the spark-master HA drill."
+}

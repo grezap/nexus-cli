@@ -1,0 +1,53 @@
+{
+  "id": "DEMO-136-lakehouse-topology",
+  "title": "Lakehouse: topology (16 nodes + VIP + ZK roles + Spark master/standby)",
+  "description": "Runs `nexus topology lakehouse`. Renders the 16 role-annotated nodes, the ZooKeeper leader/follower roles, the Spark ALIVE/STANDBY masters, the iceberg-pg VIP .151 pseudo-node, and the Spark master URL. Not sharded.",
+  "prerequisites": {
+    "vmsAlive": [
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4",
+      "iceberg-rest-1",
+      "iceberg-rest-2",
+      "iceberg-pg-1",
+      "iceberg-pg-2",
+      "spark-master-1",
+      "spark-master-2",
+      "spark-worker-1",
+      "spark-worker-2",
+      "spark-worker-3",
+      "zookeeper-1",
+      "zookeeper-2",
+      "zookeeper-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus topology lakehouse",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "minio-1",
+        "spark-master-url",
+        "VIP 192.168.70.151",
+        "zookeeper",
+        "leader",
+        "follower"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "16 nodes + the VIP pseudo-node + the spark://...:7077 master URL; ZK shows 1 leader + 2 followers; one Spark master ALIVE leader"
+        }
+      ]
+    }
+  ],
+  "whatProves": "LakehouseAdapter.TopologyAsync annotates each node with its role, resolves the ZK ensemble roles + the Spark ALIVE leader + the VIP holder, and appends the multi-master spark:// URL; Shards = null (not data-sharded)."
+}

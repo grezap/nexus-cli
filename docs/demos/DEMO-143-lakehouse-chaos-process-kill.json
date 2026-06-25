@@ -1,0 +1,50 @@
+{
+  "id": "DEMO-143-lakehouse-chaos-process-kill",
+  "title": "Lakehouse: chaos process-kill a MinIO node (EC tolerates 1)",
+  "description": "Runs `nexus chaos lakehouse process-kill --duration 15 --yes`. Process-kills nexus-minio on a MinIO node; the EC:2 set tolerates one lost node (the cluster health stays 200 during the window), then the service restarts and the adapter polls /minio/health/cluster back to 200.",
+  "prerequisites": {
+    "vmsAlive": [
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4",
+      "iceberg-rest-1",
+      "iceberg-rest-2",
+      "iceberg-pg-1",
+      "iceberg-pg-2",
+      "spark-master-1",
+      "spark-master-2",
+      "spark-worker-1",
+      "spark-worker-2",
+      "spark-worker-3",
+      "zookeeper-1",
+      "zookeeper-2",
+      "zookeeper-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus chaos lakehouse process-kill --duration 15 --yes",
+      "waitAfterSeconds": 8,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "process-kill",
+        "minio-4",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "observed-impact during the kill (minio-live 3/4, 1 drive offline) while minio-cluster stays 200 — EC tolerance — then cluster recovered = true"
+        }
+      ]
+    }
+  ],
+  "whatProves": "LakehouseAdapter.ApplyChaosAsync runs the embedded nexus-chaos.sh on a MinIO node (the EC:2 set tolerates one node loss) and recovers via a /minio/health/cluster poll; the VIP holder + ALIVE Spark master are spared."
+}
