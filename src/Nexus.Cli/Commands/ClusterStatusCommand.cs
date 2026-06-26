@@ -127,7 +127,11 @@ public sealed class ClusterStatusCommand : AsyncCommand<ClusterStatusSettings>
 
         if (verbose)
         {
-            AnsiConsole.MarkupLine("[grey]verbose timings: not yet wired (planned v0.2)[/]");
+            if (report.Timings is { } t)
+                AnsiConsole.MarkupLineInterpolated(
+                    $"[grey]timings: consul {t.ConsulMs:F0} ms · nomad {t.NomadMs:F0} ms · portainer {t.PortainerMs:F0} ms[/]");
+            else
+                AnsiConsole.MarkupLine("[grey]timings: unavailable[/]");
         }
     }
 

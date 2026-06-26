@@ -495,7 +495,9 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
         // Create the verify topic, replay the captured file into it, consume it
         // back, and count (the produce->consume round-trip proves the restore).
         var script =
-            $"test -s {file} || {{ echo MISSING-BACKUP; exit 9; }}; " +
+            // -f (exists), NOT -s (exists AND non-empty): a valid backup of an empty
+            // topic is a legitimate 0-byte file and must still restore (as 0 records).
+            $"test -f {file} || {{ echo MISSING-BACKUP; exit 9; }}; " +
             $"sudo {KafkaBin}/kafka-topics.sh --bootstrap-server SSL://{live.Vmnet10}:9092 --command-config {ClientCfg} --create --if-not-exists --topic {verifyTopic} --partitions 3 --replication-factor 3 >/dev/null 2>&1; " +
             $"sudo {KafkaBin}/kafka-console-producer.sh --bootstrap-server SSL://{live.Vmnet10}:9092 --producer.config {ClientCfg} --topic {verifyTopic} < {file} >/dev/null 2>&1; " +
             $"sudo {KafkaBin}/kafka-console-consumer.sh --bootstrap-server SSL://{live.Vmnet10}:9092 --consumer.config {ClientCfg} --topic {verifyTopic} --from-beginning --timeout-ms 15000 2>/dev/null | wc -l";

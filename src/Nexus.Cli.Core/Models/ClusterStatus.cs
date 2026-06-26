@@ -12,4 +12,8 @@ public sealed record ClusterStatusReport(
     Result<ConsulHealth> Consul,
     Result<NomadHealth> Nomad,
     Result<PortainerStatus> Portainer,
-    DateTimeOffset CapturedAtUtc);
+    DateTimeOffset CapturedAtUtc,
+    ComponentTimings? Timings = null);
+
+/// <summary>Per-component fetch latency (ms) for the cluster-status rollup; surfaced by `-v|--verbose`.</summary>
+public sealed record ComponentTimings(double ConsulMs, double NomadMs, double PortainerMs);

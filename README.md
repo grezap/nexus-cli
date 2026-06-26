@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.L.4%20v0.8.5%20%E2%9C%85%20registry%20adapter%20live%20(5%2F5%20non--data)-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-v0.8.6%20%E2%9C%85%20completeness%20pass%20(5%2F5%20non--data%20adapters)-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,7 +12,17 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.8.5):** **v0.8.5 = `RegistryAdapter`** (ClusterId **`registry`**, Phase 0.L.4) — the
+> **Current state (v0.8.6):** **completeness pass** — closed the first batch of the completion backlog INSIDE
+> the CLI (no external-script hops / "planned for vX" stubs): `cluster-status --verbose` now renders real
+> per-component timings; **Redis `acl grant/revoke`** implemented (cluster-wide `ACL SETUSER`/`DELUSER` +
+> injection guard, live-verified); the **`kafka` meta-cluster now delegates** status/health/topology/backup/
+> cert-rotate/acl/chaos to the two per-region adapters and merges (no more `kafka.ps1`/`kafka-acls.sh on a
+> broker` pointers, live-verified east+west); + a live-caught backup bug fixed (`test -s`→`test -f` so an
+> empty-topic backup restores). 272/272 tests; AOT 28.10 MB. See CHANGELOG [0.8.6].
+>
+> <details><summary>v0.8.5 RegistryAdapter — Harbor registry HA (the last non-data-tier adapter; full-fleet coverage)</summary>
+>
+> **v0.8.5 = `RegistryAdapter`** (ClusterId **`registry`**, Phase 0.L.4) — the
 > **fifth and LAST non-data-tier adapter**. **Full `IClusterAdapter` coverage of the fleet is now complete
 > (5/5 non-data tiers: Foundation/Vault · Swarm · Observability · Lakehouse · Registry).** Manages the Harbor
 > container registry HA over 4 VMs + 1 VRRP VIP: 2 stateless Harbor app nodes (RR DNS `registry.nexus.lab`) +
@@ -38,6 +48,8 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 > re-gate the probe on `auth_mode`); **2 legs un-run** (registry-db PG failover = DR re-seed; acl grant/revoke
 > on a real user = OIDC onboarding, `oidc_auth` 403s local-user creation). AOT **28.04 MB / 30**; 243/243 tests.
 > See [`docs/verification/0.8.5-registry.md`](./docs/verification/0.8.5-registry.md) + ADR-0026.
+>
+> </details>
 >
 > <details><summary>v0.8.4 LakehouseAdapter — MinIO + Iceberg/Nessie + Spark + ZooKeeper (sealed)</summary>
 >

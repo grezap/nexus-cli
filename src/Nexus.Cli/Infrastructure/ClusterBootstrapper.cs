@@ -67,12 +67,17 @@ public static class ClusterBootstrapper
         // how NexusBootstrapper holds its Vault client.
         var vault = TryBuildVaultClient();
 
+        // The two real per-region Kafka clusters; the `kafka` meta-cluster delegates its
+        // non-failover verbs to these (status/health/topology/backup/cert-rotate/acl merge).
+        var kafkaEast = new KafkaClusterAdapter("kafka-east", catalog, ssh, sshUser, sshKey); // 0.6.7 (full per-cluster verb surface)
+        var kafkaWest = new KafkaClusterAdapter("kafka-west", catalog, ssh, sshUser, sshKey); // 0.6.7
+
         var adapters = new IClusterAdapter[]
         {
             new RedisAdapter(catalog, ssh, sshUser, sshKey),
-            new KafkaAdapter(kafkaFailover),                                  // 0.5 DR meta-cluster (ClusterId kafka; east<->west MM2 failover)
-            new KafkaClusterAdapter("kafka-east", catalog, ssh, sshUser, sshKey), // 0.6.7 (full per-cluster verb surface)
-            new KafkaClusterAdapter("kafka-west", catalog, ssh, sshUser, sshKey), // 0.6.7
+            new KafkaAdapter(kafkaFailover, kafkaEast, kafkaWest),            // 0.5 DR meta-cluster (ClusterId kafka; east<->west MM2 failover) — non-failover verbs delegate to the two per-region adapters + merge
+            kafkaEast,
+            kafkaWest,
             new KafkaEcosystemAdapter(catalog, ssh, sshUser, sshKey),         // 0.6.7 (ClusterId kafka-ecosystem; observe)
             new MongoAdapter(catalog, ssh, sshUser, sshKey, vault),
             new MongoShardedAdapter(catalog, ssh, sshUser, sshKey, vault), // 0.7.1 (ClusterId mongo-sharded; Phase 0.N)

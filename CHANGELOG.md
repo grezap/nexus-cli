@@ -6,6 +6,34 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.6] — 2026-06-26
+
+Completeness pass (the first batch of the nexus-cli completion backlog) — three previously
+deferred/stubbed verb gaps closed INSIDE nexus-cli (no external-script hops, no "planned for
+vX" stubs), all live-verified, plus a live-caught backup bug fixed.
+
+- **`cluster-status --verbose` timings** (was a `"not yet wired (planned v0.2)"` stub) — `ClusterStatusService`
+  now records per-component fetch latency (`ComponentTimings` on `ClusterStatusReport` via `TimedAsync`), and the
+  command renders `timings: consul N ms · nomad N ms · portainer N ms`. Live-verified (real measured ms).
+- **Redis `acl grant/revoke`** (was `"not implemented … lands in 0.G.1.x"`) — `ACL SETUSER` (grant, with the
+  operator's rules) / `ACL DELUSER` (revoke) applied across **all cluster nodes** (Redis Cluster ACLs are
+  per-node, not replicated) + best-effort `ACL SAVE`; the built-in `default` user is protected; an
+  `IsSafeAclToken` guard blocks ACL-rule injection into the `sudo bash -c '…'` wrapper. **Live-verified** on
+  the 6-node cluster: list · grant (created cluster-wide) · revoke (DELUSER) · protected-default refusal.
+- **KafkaAdapter meta-cluster (`kafka`) delegate-don't-defer** (was 7 verbs punting to `kafka.ps1` /
+  `kafka-acls.sh on a broker`) — status/health/topology/backup take+restore/cert-rotate/acl/chaos/CanResizeVm
+  now **delegate to the two `KafkaClusterAdapter`s (kafka-east + kafka-west) and merge** (health probes
+  region-prefixed `east/`+`west/`; `WorseOf` overall; combined backup-id `<east>||<west>`; chaos routes to the
+  region owning the target). scale-out routes to the per-region ClusterId (no external hop). **Live-verified**
+  across both regions: status/health(green)/topology/acl/backup take+restore all merge; chaos region-routes;
+  cert-rotate delegates correctly (the rotation itself is gated on the kafka tier's pending CA-rollover —
+  it is still old-root, so the new-root Vault PKI issue is correctly refused).
+- **Fixed (live-caught): `KafkaClusterAdapter.BackupRestoreAsync` used `test -s`** (exists AND non-empty), so
+  a valid backup of an **empty** topic (a 0-byte file) spuriously reported `MISSING-BACKUP` → changed to
+  `test -f` (exists). Verified: an empty-topic backup now restores as 0 records.
+- AOT win-x64 **28.10 MB / 30**; **272/272 tests** (+29: `WorseOf`, `SplitBackupId`, `IsSafeAclToken`,
+  `ParseAclList`). NetArchTest clean. See the completion backlog for the remaining gaps.
+
 ## [0.8.5] — 2026-06-26
 
 Phase 0.L.4: **`RegistryAdapter`** (ClusterId `registry`) — the **fifth and LAST non-data-tier adapter**.

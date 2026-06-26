@@ -742,11 +742,59 @@ public sealed class RedisAdapter : IClusterAdapter
 
         if (verb is "grant" or "revoke")
         {
-            // TODO 0.G.1.x: ACL SETUSER / DELUSER. Out of scope for the 0.G.1
-            // framework ship (mutates auth state on a cluster we don't have
-            // yet to validate against).
-            return Result.Fail<AclSnapshot>(
-                $"RedisAdapter.AclAsync verb='{operation.Verb}' not implemented in the 0.G.1 framework ship; lands in 0.G.1.x.");
+            if (string.IsNullOrWhiteSpace(operation.User))
+                return Result.Fail<AclSnapshot>($"acl {verb} requires --user (the Redis ACL username).");
+            var user = operation.User!;
+            if (string.Equals(user, "default", StringComparison.OrdinalIgnoreCase))
+                return Result.Fail<AclSnapshot>("refusing to modify the protected built-in 'default' user.");
+            if (!IsSafeAclToken(user))
+                return Result.Fail<AclSnapshot>($"unsafe Redis ACL username '{user}' (allowed: letters, digits, and . _ -).");
+
+            // grant = ACL SETUSER with the operator's rules; revoke = ACL DELUSER (remove the user).
+            string redisAcl;
+            if (verb == "grant")
+            {
+                if (operation.Permissions is null || operation.Permissions.Count == 0)
+                    return Result.Fail<AclSnapshot>(
+                        "acl grant requires --permissions (Redis ACL SETUSER rules, comma-separated — e.g. "
+                        + "`on,>mypassword,~cache:*,+@read` or `on,nopass,allkeys,allcommands`).");
+                foreach (var tok in operation.Permissions)
+                    if (!IsSafeAclToken(tok))
+                        return Result.Fail<AclSnapshot>($"unsafe Redis ACL rule token '{tok}' (no quotes/spaces; ACL rule chars only).");
+                redisAcl = $"ACL SETUSER {user} {string.Join(' ', operation.Permissions)}";
+            }
+            else
+            {
+                redisAcl = $"ACL DELUSER {user}";
+            }
+
+            // Redis Cluster ACLs are PER-NODE (not replicated like data) → apply on EVERY node,
+            // then best-effort persist (ACL SAVE only writes if an aclfile is configured; harmless otherwise).
+            var nodes = cluster.Value.Nodes;
+            var applied = 0; string? firstErr = null;
+            foreach (var n in nodes)
+            {
+                var t = new SshTarget(n.Vmnet11, 22, _sshUsername, _sshKeyPath);
+                var ex = await _ssh.ExecuteAsync(t, $"{RedisCliPrefix} {redisAcl}'", SshTimeout, cancellationToken).ConfigureAwait(false);
+                var okBody = ex.IsOk && ex.Value!.ExitCode == 0
+                    && !ex.Value.Stdout.Contains("ERR", StringComparison.OrdinalIgnoreCase)
+                    && !ex.Value.Stdout.Contains("WRONGPASS", StringComparison.OrdinalIgnoreCase);
+                if (okBody)
+                {
+                    applied++;
+                    await _ssh.ExecuteAsync(t, $"{RedisCliPrefix} ACL SAVE' 2>/dev/null || true", SshTimeout, cancellationToken).ConfigureAwait(false);
+                }
+                else if (firstErr is null)
+                    firstErr = ex.IsFail ? ex.Error : Tail(ex.Value!.Stdout + ex.Value.Stderr, 200);
+            }
+            if (applied == 0)
+                return Result.Fail<AclSnapshot>($"acl {verb} '{user}' failed on all {nodes.Count} nodes: {firstErr}");
+            if (applied < nodes.Count)
+                return Result.Fail<AclSnapshot>(
+                    $"acl {verb} '{user}' applied on only {applied}/{nodes.Count} nodes — Redis Cluster ACLs are per-node, so this left partial state. Re-run to converge. First error: {firstErr}");
+
+            // Re-list from the first node to confirm the change.
+            return await AclAsync(new AclOperation("list"), cancellationToken).ConfigureAwait(false);
         }
 
         return Result.Fail<AclSnapshot>($"unknown ACL verb '{operation.Verb}'; expected list|describe|grant|revoke");
@@ -875,6 +923,24 @@ public sealed class RedisAdapter : IClusterAdapter
             users.Add(new AclUser(name, perms, enabled));
         }
         return users;
+    }
+
+    /// <summary>
+    /// Validate a Redis ACL username or SETUSER rule token. Permits the redis ACL
+    /// rule charset (letters/digits + <c>. _ - &gt; &lt; ~ + @ * &amp; | : / = ! % #</c>) and
+    /// rejects anything that could break the <c>sudo bash -c '…'</c> single-quote wrapper
+    /// (quotes, whitespace, <c>$ ; ` \</c>, control chars) — defence against ACL-rule injection.
+    /// </summary>
+    internal static bool IsSafeAclToken(string token)
+    {
+        if (string.IsNullOrEmpty(token)) return false;
+        foreach (var c in token)
+        {
+            var ok = char.IsLetterOrDigit(c) || c is '.' or '_' or '-' or '>' or '<' or '~'
+                or '+' or '@' or '*' or '&' or '|' or ':' or '/' or '=' or '!' or '%' or '#';
+            if (!ok) return false;
+        }
+        return true;
     }
 
     private static string Tail(string s, int n)

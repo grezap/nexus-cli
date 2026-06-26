@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Nexus.Cli.Core;
 using Nexus.Cli.Core.Abstractions;
 using Nexus.Cli.Core.Models;
@@ -22,15 +23,15 @@ public sealed class ClusterStatusService : IClusterStatusService
 
     public async Task<ClusterStatusReport> GetStatusAsync(CancellationToken cancellationToken)
     {
-        var consulTask = _consul.GetHealthAsync(cancellationToken);
-        var nomadTask = _nomad.GetHealthAsync(cancellationToken);
-        var portainerTask = _portainer.GetStatusAsync(cancellationToken);
+        var consulTask = TimedAsync(_consul.GetHealthAsync(cancellationToken));
+        var nomadTask = TimedAsync(_nomad.GetHealthAsync(cancellationToken));
+        var portainerTask = TimedAsync(_portainer.GetStatusAsync(cancellationToken));
 
         await Task.WhenAll(consulTask, nomadTask, portainerTask).ConfigureAwait(false);
 
-        var consul = consulTask.Result;
-        var nomad = nomadTask.Result;
-        var portainer = portainerTask.Result;
+        var (consul, consulMs) = consulTask.Result;
+        var (nomad, nomadMs) = nomadTask.Result;
+        var (portainer, portainerMs) = portainerTask.Result;
 
         var overall = ComputeOverall(consul, nomad, portainer);
 
@@ -39,7 +40,16 @@ public sealed class ClusterStatusService : IClusterStatusService
             Consul: consul,
             Nomad: nomad,
             Portainer: portainer,
-            CapturedAtUtc: DateTimeOffset.UtcNow);
+            CapturedAtUtc: DateTimeOffset.UtcNow,
+            Timings: new ComponentTimings(consulMs, nomadMs, portainerMs));
+    }
+
+    /// <summary>Await a component fetch and record its wall-clock latency (ms).</summary>
+    private static async Task<(T Result, double Ms)> TimedAsync<T>(Task<T> task)
+    {
+        var start = Stopwatch.GetTimestamp();
+        var r = await task.ConfigureAwait(false);
+        return (r, Stopwatch.GetElapsedTime(start).TotalMilliseconds);
     }
 
     private static HealthLevel ComputeOverall(

@@ -159,4 +159,39 @@ public class KafkaAdapterParseTests
         svc.HttpPort.Should().Be(0);
         svc.HealthPath.Should().BeNull();
     }
+
+    // === KafkaAdapter meta delegation helpers (v0.8.6) ======================
+    // The `kafka` meta-cluster merges the two per-region adapters; the merged
+    // health is the WORST of the two regions, and backup ids are combined.
+
+    [Theory]
+    [InlineData("green", "green", "green")]
+    [InlineData("green", "yellow", "yellow")]
+    [InlineData("yellow", "green", "yellow")]
+    [InlineData("green", "red", "red")]
+    [InlineData("red", "yellow", "red")]
+    [InlineData("yellow", "red", "red")]
+    public void WorseOf_returns_the_worse_health(string a, string b, string expected) =>
+        KafkaAdapter.WorseOf(a, b).Should().Be(expected);
+
+    [Fact]
+    public void SplitBackupId_splits_the_combined_east_west_id()
+    {
+        var (east, west) = KafkaAdapter.SplitBackupId("east-topics-20260626||west-topics-20260626");
+        east.Should().Be("east-topics-20260626");
+        west.Should().Be("west-topics-20260626");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not-a-combined-id")]      // no '||' separator
+    [InlineData("||west-only")]            // empty east half
+    [InlineData("east-only||")]            // empty west half
+    public void SplitBackupId_returns_nulls_for_non_combined_ids(string? id)
+    {
+        var (east, west) = KafkaAdapter.SplitBackupId(id);
+        east.Should().BeNull();
+        west.Should().BeNull();
+    }
 }
