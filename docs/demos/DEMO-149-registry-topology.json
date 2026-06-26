@@ -1,0 +1,46 @@
+{
+  "id": "DEMO-149-registry-topology",
+  "title": "Registry: topology (4 nodes + VIP + datastore backends)",
+  "description": "Runs `nexus topology registry`. Renders the 2 Harbor app nodes (with component counts), the PG primary/replica + Redis roles, the registry-db.nexus.lab VIP .119 pseudo-node, and the MinIO s3://harbor blob-store backend. Not sharded.",
+  "prerequisites": {
+    "vmsAlive": [
+      "registry-1",
+      "registry-2",
+      "registry-pg-1",
+      "registry-pg-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus topology registry",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "registry-1",
+        "harbor-app",
+        "datastore: PG primary",
+        "VIP 192.168.70.119",
+        "registry-db.nexus.lab",
+        "blob-store",
+        "MinIO s3://harbor"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "4 nodes + the VIP pseudo-node (-> the PG primary) + the MinIO s3://harbor blob-store info node; app nodes annotated 8/8 components"
+        }
+      ]
+    }
+  ],
+  "whatProves": "RegistryAdapter.TopologyAsync annotates each node with its role + the live datastore roles, appends the VRRP VIP + the MinIO blob-store backend as pseudo-nodes; Shards = null (Harbor is not data-sharded)."
+}

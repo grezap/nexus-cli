@@ -1,0 +1,43 @@
+{
+  "id": "DEMO-153-registry-acl-list",
+  "title": "Registry: Harbor users + project/robot scope (acl list)",
+  "description": "Runs `nexus acl registry list`. Lists the Harbor users via /api/v2.0/users (admin auth from Vault KV) and surfaces the project + robot-account counts. Under OIDC SSO (auth_mode=oidc_auth) users onboard on login, so a freshly-rebuilt tier shows the scope summary with no onboarded users yet; the built-in admin is revoke-protected.",
+  "prerequisites": {
+    "vmsAlive": [
+      "registry-1",
+      "registry-2",
+      "registry-pg-1",
+      "registry-pg-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus acl registry list",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "verb=list",
+        "harbor scope",
+        "projects",
+        "robot accounts"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the Harbor users (sysadmin flag shown) + a scope pseudo-row \"(harbor scope: N projects, M robot accounts)\"; admin flagged protected when present"
+        }
+      ]
+    }
+  ],
+  "whatProves": "RegistryAdapter.AclAsync lists Harbor users through /api/v2.0/users (admin from Vault KV nexus/registry/harbor-admin) and enriches with project + robot counts; the built-in admin is revoke-protected."
+}

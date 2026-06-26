@@ -1,0 +1,43 @@
+{
+  "id": "DEMO-159-registry-supply-chain",
+  "title": "Registry: the Harbor supply chain (push -> S3 blob -> Trivy -> cosign)",
+  "description": "Demonstrates the Harbor supply chain the cluster bootstrap proves end-to-end: a docker push to registry.nexus.lab lands its blobs in MinIO s3://harbor, Trivy scans the artifact on push (scan_status Success), and cosign signs + verifies it. `nexus health registry` then shows the registry + trivy components healthy and the s3-backend canary green.",
+  "prerequisites": {
+    "vmsAlive": [
+      "registry-1",
+      "registry-2",
+      "registry-pg-1",
+      "registry-pg-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus health registry",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "harbor-components",
+        "8/8 components healthy",
+        "s3-backend",
+        "minio.nexus.lab:9000/health = 200"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "the registry + trivy components are part of the 8/8 healthy checklist; s3-backend 200 confirms blobs are reachable on the MinIO S3 store"
+        }
+      ]
+    }
+  ],
+  "whatProves": "The registry tier carries the platform supply chain: image blobs in MinIO EC, Trivy CVE scan on push, cosign signatures, behind Vault OIDC SSO. The adapter health surfaces the component checklist + the S3 backend that holds the layers."
+}

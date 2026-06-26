@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-0.L%20v0.8.4%20%E2%9C%85%20lakehouse%20adapter%20live-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-0.L.4%20v0.8.5%20%E2%9C%85%20registry%20adapter%20live%20(5%2F5%20non--data)-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,7 +12,36 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.8.4):** **v0.8.4 = `LakehouseAdapter`** (ClusterId **`lakehouse`**, Phase 0.L) — the
+> **Current state (v0.8.5):** **v0.8.5 = `RegistryAdapter`** (ClusterId **`registry`**, Phase 0.L.4) — the
+> **fifth and LAST non-data-tier adapter**. **Full `IClusterAdapter` coverage of the fleet is now complete
+> (5/5 non-data tiers: Foundation/Vault · Swarm · Observability · Lakehouse · Registry).** Manages the Harbor
+> container registry HA over 4 VMs + 1 VRRP VIP: 2 stateless Harbor app nodes (RR DNS `registry.nexus.lab`) +
+> a PostgreSQL 17 / Redis datastore pair behind VRRP VIP `.119`; blobs in MinIO `s3://harbor`, SSO via Vault
+> OIDC. The adapter resolves the vms.yaml `platform-tools` cluster but **filters to the four `registry-*`
+> nodes** (the unbuilt prefect/unleash/marquez/backstage reservations are excluded). Same SSH-local-curl
+> posture (Harbor `/api/v2.0/*` over each node's own `ca`; admin pw from Vault KV `nexus/registry/harbor-admin`
+> field `value`); **no managed Harbor/Npgsql/Redis driver** (NetArchTest). Verbs — status (4 nodes; leader =
+> VIP holder) · health (Harbor 8-component checklist + `/systeminfo` auth_mode + PG streaming repl + Redis
+> master/replica + the MinIO `s3://harbor` backend canary + VRRP VIP) · topology (4 + VIP + blob-store) ·
+> **failover `--direction registry-db`** = VRRP cutover (peer promotes PG + re-masters Redis; **PG re-attach
+> of the demoted primary is a DR re-seed** — keepalived `demote.sh` re-attaches Redis only — so live-run is a
+> DR runbook, mirrors lakehouse iceberg-pg; the app tier is RR-DNS, no VIP) · scale-out = graceful N/A
+> (ADR-0036 2+2 HA) · **backup** = `pg_dump` the Harbor metadata DB round-trip (49 tables; blobs EC-durable in
+> MinIO, not snapshotted) · cert-rotate = vault-agent force-rerender + nginx-container restart (app) / PG ssl
+> reload (datastore), VIP holder last (4 nodes, 0 errors) · acl = Harbor users via `/api/v2.0/users` + sysadmin
+> grant/revoke (admin protected) + project/robot counts · chaos = process-kill docker on an app node (RR pair
+> tolerates one). **status/health/topology/scale-out/backup take+restore/acl/cert-rotate/chaos all live-verified
+> GREEN.** The **cold-rebuild (CA rollover) folded in** put both Harbor + MinIO on the new Vault root (resolving
+> the cross-tier CA split) and surfaced + reconciled the **MinIO root-password KV drift** (greenfield rotated
+> KV; the running MinIO never adopted it → reconciled KV → the running MinIO, Greg-consented, data-preserving);
+> `smoke-0.L.4` ALL PASSED. **1 live-caught bug** (the unauthenticated `/systeminfo` omits `harbor_version` →
+> re-gate the probe on `auth_mode`); **2 legs un-run** (registry-db PG failover = DR re-seed; acl grant/revoke
+> on a real user = OIDC onboarding, `oidc_auth` 403s local-user creation). AOT **28.04 MB / 30**; 243/243 tests.
+> See [`docs/verification/0.8.5-registry.md`](./docs/verification/0.8.5-registry.md) + ADR-0026.
+>
+> <details><summary>v0.8.4 LakehouseAdapter — MinIO + Iceberg/Nessie + Spark + ZooKeeper (sealed)</summary>
+>
+> **v0.8.4 = `LakehouseAdapter`** (ClusterId **`lakehouse`**, Phase 0.L) — the
 > **fourth non-data-tier adapter** and the last big multi-component one: ONE component-aware adapter spanning
 > the three-engine lakehouse (MinIO erasure-coded object store + Iceberg/Nessie REST catalog + Spark ZK-HA)
 > plus the ZooKeeper ensemble, across 16 VMs + 1 VRRP VIP. Same SSH-local-curl posture as v0.8.3 (each node's
@@ -32,7 +61,9 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 > — its EC drives hold four cross-tier buckets) fixed both + reconciled a MinIO IAM key drift, and surfaced
 > 2 live-caught adapter bugs (cert-rotate Spark/ZK N/A; iceberg-pg failover N/A). AOT **27.59 MB / 30**;
 > 223/223 tests. See [`docs/verification/0.8.4-lakehouse.md`](./docs/verification/0.8.4-lakehouse.md) +
-> ADR-0025. Remaining: v0.8.5 Harbor.
+> ADR-0025.
+>
+> </details>
 >
 > <details><summary>v0.8.3 ObservabilityAdapter — Grafana LGTM tier (sealed)</summary>
 >

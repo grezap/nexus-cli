@@ -1,0 +1,60 @@
+{
+  "id": "DEMO-150-registry-failover-dr",
+  "title": "Registry: datastore failover is a DR operation (graceful, actionable)",
+  "description": "Runs `nexus failover-test cluster registry --direction registry-db --yes`. The adapter performs the VRRP cutover (stop keepalived on the .119 holder; the peer promotes PG + re-masters Redis via the keepalived notify scripts) and measures the RTO — but the keepalived demote.sh re-attaches Redis only, NOT PostgreSQL, so the demoted node stays a second PG primary (split-brain by design, like the lakehouse iceberg-pg pair). A real registry-db failover is therefore a DR runbook (promote + fence + pg_basebackup re-seed of the old primary). Live execution was deferred at v0.8.5 to avoid degrading the freshly-rebuilt datastore; the app tier needs no VIP (RR DNS, clients retry).",
+  "prerequisites": {
+    "vmsAlive": [
+      "registry-1",
+      "registry-2",
+      "registry-pg-1",
+      "registry-pg-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster registry --direction registry-db --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "vrrp-cutover:registry-db",
+        "original primary",
+        "new primary",
+        "pg_basebackup",
+        "re-sync"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "VIP moves to the peer + PG promotes there + Redis re-masters (RTO measured); the recovery hint notes the old primary must re-sync as a PG standby via pg_basebackup — the DR step demote.sh does not auto-do"
+        }
+      ]
+    },
+    {
+      "command": "nexus failover-test cluster registry --direction harbor --yes",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 2,
+      "expectedOutputContains": [
+        "NO VIP",
+        "round-robin DNS",
+        "registry-db"
+      ],
+      "observe": [
+        {
+          "where": "stderr",
+          "what": "the app pair has no VIP — an actionable N/A routing the operator to --direction registry-db"
+        }
+      ]
+    }
+  ],
+  "whatProves": "RegistryAdapter.FailoverAsync drives the registry-db VRRP cutover (VIP move + PG promote + Redis re-master) and reports the RTO; it refuses an app-tier \"failover\" (RR-DNS, no VIP). The PG re-attach of the demoted primary is a documented DR re-seed, mirroring lakehouse iceberg-pg."
+}

@@ -1,0 +1,43 @@
+{
+  "id": "DEMO-156-registry-backup-take",
+  "title": "Registry: backup take (pg_dump the Harbor metadata DB)",
+  "description": "Runs `nexus backup take registry`. pg_dumps the Harbor metadata DB (registry — projects, repositories, users, robots, replication rules) on the PG primary to a node-local gzip and reports the table count + size. Image blobs are EC-durable in MinIO s3://harbor; Redis is ephemeral cache — neither is adapter-snapshotted.",
+  "prerequisites": {
+    "vmsAlive": [
+      "registry-1",
+      "registry-2",
+      "registry-pg-1",
+      "registry-pg-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup take registry",
+      "waitAfterSeconds": 6,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "backup take registry",
+        "tables",
+        "destination",
+        "registry-pg-1"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "GREEN backup take registry (N tables @ registry-pg-1:/var/tmp/nexus-registry-backup/registry.sql.gz)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "RegistryAdapter.BackupTakeAsync pg_dumps the registry DB on the current PG primary to a node-local gzip and reports the table count + byte size — the adapter-ownable authoritative Harbor metadata."
+}

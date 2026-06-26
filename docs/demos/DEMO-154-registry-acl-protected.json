@@ -1,0 +1,42 @@
+{
+  "id": "DEMO-154-registry-acl-protected",
+  "title": "Registry: acl revoke admin is refused (break-glass protection)",
+  "description": "Runs `nexus acl registry revoke --user admin --yes`. The built-in Harbor admin is the break-glass operator identity; the adapter refuses to demote it (an actionable refusal, never a silent allow).",
+  "prerequisites": {
+    "vmsAlive": [
+      "registry-1",
+      "registry-2",
+      "registry-pg-1",
+      "registry-pg-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus acl registry revoke --user admin --yes",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 2,
+      "expectedOutputContains": [
+        "refusing to demote",
+        "admin",
+        "break-glass"
+      ],
+      "observe": [
+        {
+          "where": "stderr",
+          "what": "an actionable refusal: the protected built-in admin is never demoted"
+        }
+      ]
+    }
+  ],
+  "whatProves": "RegistryAdapter.AclAsync revoke/grant manage the Harbor sysadmin flag via PUT /api/v2.0/users/{id}/sysadmin; the built-in admin is protected (refused). Onboarded (OIDC) users are the grant/revoke targets — local-user creation is disabled in oidc_auth mode."
+}

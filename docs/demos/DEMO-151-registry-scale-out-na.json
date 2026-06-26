@@ -1,0 +1,43 @@
+{
+  "id": "DEMO-151-registry-scale-out-na",
+  "title": "Registry: scale-out N/A (fixed 2+2 HA per ADR-0036; actionable)",
+  "description": "Runs `nexus scale-out add registry --role harbor --yes`. The registry HA shape is FIXED by ADR-0036: a 2-node Harbor app pair behind round-robin DNS + a 2-node PostgreSQL/Redis datastore pair behind a VRRP VIP. Capacity scales by image-layer storage in MinIO (grow the lakehouse EC pool) and by vertical resize, not by adding registry nodes. The verb refuses with an actionable message naming the terraform path, never a silent no-op.",
+  "prerequisites": {
+    "vmsAlive": [
+      "registry-1",
+      "registry-2",
+      "registry-pg-1",
+      "registry-pg-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus scale-out add registry --role harbor --yes",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 2,
+      "expectedOutputContains": [
+        "scale-out is graceful N/A",
+        "ADR-0036",
+        "round-robin DNS",
+        "terraform"
+      ],
+      "observe": [
+        {
+          "where": "stderr",
+          "what": "an actionable N/A: the 2+2 HA is the ADR-0036 standard; growth is image-layer storage in MinIO + vertical scale-up, or a terraform op"
+        }
+      ]
+    }
+  ],
+  "whatProves": "RegistryAdapter graceful-N/As scale-out add/remove with an actionable message (the 2+2 RR-DNS/VRRP HA is fixed IaC), never a silent skip."
+}

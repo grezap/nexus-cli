@@ -1,0 +1,47 @@
+{
+  "id": "DEMO-148-registry-health",
+  "title": "Registry: full health (Harbor components + PG/Redis repl + S3 + VIP)",
+  "description": "Runs `nexus health registry`. Probes the Harbor /api/v2.0/health component checklist (core/db/redis/registry/registryctl/jobservice/portal/trivy) on both app nodes, the systeminfo auth_mode (OIDC SSO), the PostgreSQL streaming replication, the Redis master/replica link, the MinIO s3://harbor backend, and the VRRP VIP. On the healed tier all probes are green.",
+  "prerequisites": {
+    "vmsAlive": [
+      "registry-1",
+      "registry-2",
+      "registry-pg-1",
+      "registry-pg-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus health registry",
+      "waitAfterSeconds": 6,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "overall",
+        "green",
+        "harbor-app",
+        "harbor-components",
+        "pg-replication",
+        "redis-replication",
+        "s3-backend",
+        "vip-registry-db"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "harbor-app 2/2 healthy; harbor-components 8/8 healthy; harbor-systeminfo auth_mode=oidc_auth; pg-replication 1 streaming standby; redis master + 1 linked replica; s3-backend minio 200; VIP .119 bound; overall green"
+        }
+      ]
+    }
+  ],
+  "whatProves": "RegistryAdapter.HealthAsync rolls the Harbor component checklist + PG streaming replication + Redis replication + the MinIO S3 backend + the VRRP VIP into one report. The s3-backend probe is the cross-tier trust canary (200 only when Harbor + MinIO share the same Vault root — the v0.8.5 rebuild put both on new-root)."
+}

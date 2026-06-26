@@ -1,0 +1,42 @@
+{
+  "id": "DEMO-155-registry-chaos-process-kill",
+  "title": "Registry: chaos process-kill an app node (RR pair tolerates one)",
+  "description": "Runs `nexus chaos registry process-kill --target registry-2 --duration 30 --yes`. Process-kills docker on an app node (the Harbor compose stack drops there); the round-robin DNS pair keeps serving from registry-1 + the datastore/VIP stay up; the adapter restarts docker + `docker compose up -d` and polls Harbor health back to healthy.",
+  "prerequisites": {
+    "vmsAlive": [
+      "registry-1",
+      "registry-2",
+      "registry-pg-1",
+      "registry-pg-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus chaos registry process-kill --target registry-2 --duration 30 --yes",
+      "waitAfterSeconds": 12,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "process-kill",
+        "registry-2",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "observed-impact during the kill shows harbor-app 1/2 healthy (registry-2 down) while pg/redis/s3/VIP stay green; then cluster recovered = true"
+        }
+      ]
+    }
+  ],
+  "whatProves": "RegistryAdapter.ApplyChaosAsync runs the embedded nexus-chaos.sh (process-kill = docker on an app node), then recovers via docker restart + compose up + a Harbor health poll; the VRRP VIP holder is spared (refused as a target)."
+}

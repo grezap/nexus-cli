@@ -186,6 +186,7 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 | **swarm** | ✅ 06-19 | ✅ 06-19⁴⁴ | ✅ 06-19⁴⁵ | ✅ 06-19⁴⁶ | ✅ 06-19⁴⁷ | ✅ gen | ✅ 06-19⁴⁸ | ✅ 06-19⁴⁹ | ✅ 06-19⁵⁰ | ✅ list+grant+revoke⁵¹ |
 | **observability** | ✅ 06-22 | ✅ 06-23⁵² | ✅ 06-22⁵³ | ✅ 06-23⁵⁴ | ✅ 06-22⁵⁵ | ✅ gen | n/a⁵⁶ | ✅ 06-23⁵⁷ | ✅ 06-22 | ✅ list+grant+revoke⁵⁸ |
 | **lakehouse** | ✅ 06-24 | ✅ 06-25⁵⁹ | ✅ 06-24⁶⁰ | ✅ 06-25⁶¹ | n/a⁶² | ✅ gen | ✅ 06-24⁶³ | ✅ 06-25⁶⁴ | ✅ 06-24⁶⁵ | ✅ list+grant+revoke⁶⁶ |
+| **registry** | ✅ 06-26 | ✅ 06-26⁶⁷ | ✅ 06-26⁶⁸ | ⏸ DR⁶⁹ | n/a⁷⁰ | ✅ gen | ✅ 06-26⁷¹ | ✅ 06-26⁷² | ✅ 06-26⁷³ | ✅ list+grant+revoke⁷⁴ |
 
 > The **`vault`** cluster also has a bespoke **`recover-ha`** verb (not a matrix column) — the declarative
 > boot-race recovery via the `IRecoverableCluster` capability: unseal vault-transit from the Shamir key file
@@ -301,6 +302,22 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 
 ⁶⁶ lakehouse `acl` = **MinIO policies + users** via the on-node `mc nexuslocal` alias. `list`/`describe` parse `mc admin policy ls` + `mc admin user ls --json`; `grant --user <key> --permissions <policy>` = `mc admin policy attach` (default `readwrite`); `revoke` = `mc admin policy detach`. The MinIO root + the `nexus-lakehouse-app` service identity are detach-protected. (`CanResizeVm` refuses the iceberg-pg VIP holder + the ALIVE Spark master.)
 
+⁶⁷ registry `health` rolls the whole Harbor tier into one report: the Harbor `/api/v2.0/health` component checklist (**8/8** healthy — core/database/redis/registry/registryctl/jobservice/portal/trivy) ×2 app nodes + `/api/v2.0/systeminfo` `auth_mode` (= **`oidc_auth`**, the Vault-OIDC SSO signal) + the registry-pg streaming replication (1 streaming standby) + the Redis master/replica link + the **MinIO `s3://harbor` blob-backend canary** (HTTP 200) + the keepalived VRRP VIP `.119`. Endpoints are probed **over SSH with each node's own `/etc/nexus-registry/tls/ca.crt`** (Harbor HTTPS :443 via nginx); the Harbor admin password comes from Vault KV `nexus/registry/harbor-admin` (field `value`) via `INexusVaultClient`. **One live-caught bug fixed here:** the UNAUTHENTICATED `/systeminfo` omits `harbor_version` (admin-only), so the probe was re-gated on `auth_mode` (the meaningful unauthenticated SSO signal) → green.
+
+⁶⁸ registry `topology` = the 4 `registry-*` nodes (harbor-app ×2 RR-DNS `registry.nexus.lab`; registry-pg primary+replica) + the `.119` VIP pseudo-node (`registry-db.nexus.lab`, live holder) + the MinIO `s3://harbor` blob-store. Shards = null (not data-sharded). The vms.yaml cluster is `platform-tools`; the adapter filters to the four `registry-*` members (the unbuilt prefect/unleash/marquez/backstage reservations classify `other` and are excluded).
+
+⁶⁹ registry `failover-test cluster registry --direction registry-db` is **code-verified but DR-deferred** (honest, precedented — the lakehouse iceberg-pg + obs grafana-db pattern): the keepalived `demote.sh` re-attaches **Redis** but **not PostgreSQL**, so a VRRP cutover of `.119` promotes the peer's PG while leaving the demoted node a second PG primary (split-brain by design) → a real registry-db failover is a DR runbook (promote + fence + `pg_basebackup` re-seed). The VRRP+promote+Redis code path was verified against the live keepalived scripts; live execution was deferred to avoid degrading the freshly-rebuilt datastore. The **app tier needs no failover** (RR-DNS `registry.nexus.lab`; clients retry) — the verb refuses an app-direction with that pointer.
+
+⁷⁰ registry `scale-out` = graceful actionable **N/A** (ADR-0036): the 2-node app pair (RR-DNS) + 2-node datastore pair (VRRP) is the fixed-HA standard; capacity scales by MinIO EC storage + vertical `scale-up`, not by adding registry nodes. Add capacity by adding the VM + overlay in `nexus-infra-registry` and re-applying.
+
+⁷¹ registry `backup` = **`pg_dump` of the Harbor metadata DB** (`registry`: projects, repos, artifacts, users, robots, replication rules) on the PG primary → node-local gzip (49 tables); `restore` reloads into a throwaway `registry_restore_verify` DB and counts tables (a non-destructive round-trip, 49 tables, dropped). Blobs are EC-durable in MinIO `s3://harbor` and Redis is ephemeral cache — neither is adapter-snapshotted (the same "durable elsewhere" framing as obs/lakehouse). The adapter-ownable authoritative state is the Harbor **metadata**.
+
+⁷² registry `cert-rotate` **forces each node's vault-agent to re-render its `pki_int` leaf** (the Swarm/obs `cp -a`+`rm bundle.pem` idiom: restart `nexus-vault-agent` → poll the re-render → restore the `.bak` if absent), then reloads per role: **nginx container restart** on the app nodes (picks up `harbor.crt`), **PG ssl reload** on the datastore nodes; the **VIP holder LAST**. Live-proven: fresh leaf serials on all **4 nodes**, 0 errors, ≈ 28.7 s (app nodes first, VIP holder `registry-pg-1` last).
+
+⁷³ registry `chaos` runs the embedded `nexus-chaos.sh` on a **non-VIP node** by default (process-kill = `docker` on a Harbor app node → the RR pair tolerates one loss, `health` shows harbor-app 1/2); recovery = docker restart + `docker compose up -d` + a health poll. The datastore VIP holder + the PG primary are spared unless explicitly targeted. Live-proven: docker killed on registry-2 → impact observed → recovered; datastore/VIP/S3 unaffected.
+
+⁷⁴ registry `acl` = **Harbor users** via `/api/v2.0/users` (admin from Vault KV); `list`/`describe` enrich each user with project + robot-account counts; `grant`/`revoke` toggle the **sysadmin flag** (`PUT /users/{id}/sysadmin`); the built-in `admin` is revoke-protected (break-glass). The grant/revoke API path, user-resolution, and the protected-admin guard are all verified; toggling a **real** target is deferred because Harbor in `oidc_auth` mode returns **403 on local-user creation** (users onboard via the AD→Vault-OIDC browser flow) — the same partial-proof as the obs `acl`.
+
 ⁵⁸ observability `acl` = Grafana **org** users via `/api/org/users` (admin basic-auth from Vault KV `value`; the `admin` login is revoke-protected); `grant`/`revoke` = PATCH `/api/org/users/<id> {role:Admin|Viewer}`. **Cold-rebuild-caught fix:** `/api/admin/users` 404s under basic auth even for a Grafana server admin (the server-admin route is hidden), so the verb uses the org-scoped endpoints. Pre-rebuild `acl list` correctly reported the Grafana admin-password drift (HTTP 401, with the `grafana-cli admin reset-admin-password <kv-value>` reconcile — a v0.8.1-greenfield casualty); the cold-rebuild re-initialised Grafana's admin from the current KV, so `list`/`grant`/`revoke` are now green. (`CanResizeVm` refuses the current `.184`/`.185` VIP holders.)
 
 ---
@@ -343,6 +360,11 @@ $vmrun = 'C:/Program Files/VMware/VMware Workstation/vmrun.exe'
 'iceberg-pg-1','iceberg-pg-2','iceberg-rest-1','iceberg-rest-2',
 'spark-master-1','spark-master-2','spark-worker-1','spark-worker-2','spark-worker-3' |
   % { & $vmrun start "H:\VMS\NexusPlatform\08-spark\$_\$_.vmx" nogui; Start-Sleep 4 }
+# registry (4 VMs, tier 09-platform) + the 4 lakehouse MinIO nodes (Harbor's s3://harbor blob backend) —
+# MinIO MUST be up first; then the datastore pair (PG + Redis + VIP), then the Harbor app pair:
+'minio-1','minio-2','minio-3','minio-4' | % { & $vmrun start "H:\VMS\NexusPlatform\08-spark\$_\$_.vmx" nogui; Start-Sleep 4 }
+'registry-pg-1','registry-pg-2','registry-1','registry-2' |
+  % { & $vmrun start "H:\VMS\NexusPlatform\09-platform\$_\$_.vmx" nogui; Start-Sleep 4 }
 ```
 Then **always** run §3.2 (the boot-race recovery) before expecting Vault-backed services. (mongo-sharded
 needs `VAULT_*` set — the keyFile / operator password is read from Vault KV `nexus/oltp/mongo/keyfile`;
@@ -350,7 +372,9 @@ citus needs `VAULT_*` too — the operator password is read from Vault KV `nexus
 **swarm** needs `VAULT_*` too — the Consul/Nomad mgmt tokens are read from Vault KV
 `nexus/swarm/{consul,nomad}-bootstrap-token`. NOTE: if the swarm tier has been **offline > 168 h**, Consul
 refuses to rejoin [`server_rejoin_age_max`] — cold-rebuild it via `pwsh scripts/swarm.ps1 cycle` in
-nexus-infra-swarm-nomad, which also re-bootstraps + re-seeds those tokens.)
+nexus-infra-swarm-nomad, which also re-bootstraps + re-seeds those tokens. **registry** needs `VAULT_*`
+too — the Harbor admin password is read from Vault KV `nexus/registry/harbor-admin` (field `value`) — and
+its 4 lakehouse MinIO nodes must be up for the `s3://harbor` blob-backend health canary.)
 
 ### §3.2 TROUBLESHOOTING — "cluster verb returns nothing / cluster-status empty"
 The diagnostic ladder (run top-down; each rung names the fix):

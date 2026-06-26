@@ -1,0 +1,44 @@
+{
+  "id": "DEMO-152-registry-cert-rotate",
+  "title": "Registry: cert-rotate (vault-agent re-render; nginx restart / PG reload)",
+  "description": "Runs `nexus cert-rotate registry --yes`. Forces each node vault-agent to re-issue its leaf from pki_int and reloads the service — the Harbor app nodes restart the nginx container (picks up the new harbor.crt), the datastore nodes reload PostgreSQL (ssl, no failover). App nodes first, the VRRP VIP holder LAST (minimise blast radius).",
+  "prerequisites": {
+    "vmsAlive": [
+      "registry-1",
+      "registry-2",
+      "registry-pg-1",
+      "registry-pg-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus cert-rotate registry --yes",
+      "waitAfterSeconds": 30,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "cert-rotate ok",
+        "registry-1",
+        "registry-2",
+        "registry-pg-1",
+        "registry-pg-2"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "all 4 nodes show a fresh leaf serial (old != new), 0 errors; registry-pg-1 (the VIP holder) rotated last"
+        }
+      ]
+    }
+  ],
+  "whatProves": "RegistryAdapter.RotateCertAsync forces each vault-agent to re-render its pki_int leaf, then reloads per role (nginx container restart on app nodes, PG ssl reload on datastore nodes), ordering the VIP holder last."
+}

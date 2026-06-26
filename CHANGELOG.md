@@ -6,6 +6,46 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.5] — 2026-06-26
+
+Phase 0.L.4: **`RegistryAdapter`** (ClusterId `registry`) — the **fifth and LAST non-data-tier adapter**.
+Full `IClusterAdapter` coverage of the platform is now complete (5/5 non-data tiers: Foundation/Vault,
+Swarm, Observability, Lakehouse, **Registry**). Manages the Harbor container registry HA over 4 VMs +
+1 VRRP VIP; live-verified against the rebuilt tier + cold-rebuild-proven (CA rollover to the new Vault root).
+
+- **`RegistryAdapter`** resolves the vms.yaml cluster `platform-tools` and **filters to the four
+  `registry-*` nodes** (`ClassifyRole` → `harbor` / `registry-pg`; the unbuilt prefect/unleash/marquez/
+  backstage reservations classify `other`, excluded). Same SSH-local-curl posture as the obs/lakehouse
+  adapters: the Harbor API (HTTPS :443) is probed over SSH with each node's own `ca.crt`; the Harbor admin
+  password from Vault KV `nexus/registry/harbor-admin` (field `value`) via `INexusVaultClient`; PG/Redis/
+  VRRP/chaos/cert over node SSH. **No managed Harbor/Npgsql/Redis driver** (NetArchTest).
+- **status** (4 nodes: harbor-app ×2 + datastore primary+vip/replica; leader = VIP holder) · **health**
+  (Harbor `/api/v2.0/health` component checklist 8/8 + `/systeminfo` auth_mode=oidc_auth + PG streaming
+  replication + Redis master/replica + the MinIO `s3://harbor` backend canary + the VRRP VIP) · **topology**
+  (4 nodes + VIP pseudo-node + MinIO blob-store; not sharded).
+- **failover `--direction registry-db`** = VRRP cutover of the `.119` VIP (peer promotes PG + re-masters
+  Redis; RTO measured) — but PG re-attach of the demoted primary is a **DR re-seed** (keepalived `demote.sh`
+  re-attaches Redis only), so live execution is a DR runbook (mirrors lakehouse iceberg-pg); the app tier
+  has no VIP (RR DNS) → app-direction refused. **scale-out** = graceful actionable N/A (ADR-0036 2+2 HA;
+  grow via MinIO EC + `scale-up`). **backup take/restore** = `pg_dump` the Harbor metadata DB (`registry`)
+  round-trip into a verify DB (49 tables; blobs EC-durable in MinIO, Redis ephemeral — not snapshotted).
+  **cert-rotate** = vault-agent force-rerender + nginx-container restart (app) / PG ssl reload (datastore),
+  VIP holder last (4 nodes, fresh serials, 0 errors). **acl** = Harbor users via `/api/v2.0/users` +
+  sysadmin grant/revoke (admin protected) + project/robot counts. **chaos** = `nexus-chaos.sh` process-kill
+  (docker on an app node; RR pair tolerates one) + recover.
+- **Cold-rebuild (CA rollover, folded in):** the tier was found operationally broken (Harbor down, PG split,
+  old-root agents); the from-zero rebuild put both Harbor + MinIO on the new Vault root, resolving the
+  cross-tier CA split. Surfaced + reconciled the **MinIO root-password KV drift** (greenfield rotated KV;
+  running MinIO never adopted it → `mc` signature mismatch on the bucket step → reconciled **KV → the running
+  MinIO's actual root**, Greg-consented, data-preserving, new KV-v2 version) + the `nexus-lakehouse-app` IAM
+  key. vmrun_path x86→non-x86 fixed in `nexus-infra-registry`. `smoke-0.L.4` ALL PASSED.
+- **1 live-caught adapter bug fixed:** the `harbor-systeminfo` probe gated on `harbor_version`, which the
+  UNAUTHENTICATED `/systeminfo` omits → re-gated on `auth_mode` (the SSO signal) → green.
+- **2 verbs intentionally un-run** (honest, precedented): registry-db PG failover (DR re-seed by design),
+  acl grant/revoke on a real user (Harbor `oidc_auth` mode 403s local-user creation → needs OIDC onboarding).
+- AOT win-x64 **28.04 MB / 30**; **243/243 tests** (+16 `RegistryAdapterParseTests`). ADR-0026. See
+  [`docs/verification/0.8.5-registry.md`](./docs/verification/0.8.5-registry.md).
+
 ## [0.8.4] — 2026-06-25
 
 Phase 0.L: **`LakehouseAdapter`** (ClusterId `lakehouse`) — the **fourth non-data-tier adapter** and the last

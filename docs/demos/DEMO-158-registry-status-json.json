@@ -1,0 +1,42 @@
+{
+  "id": "DEMO-158-registry-status-json",
+  "title": "Registry: machine-readable status (System B JSON)",
+  "description": "Runs `nexus status registry --json` — the machine-readable ClusterStatus over the 4 registry nodes for scripting/automation.",
+  "prerequisites": {
+    "vmsAlive": [
+      "registry-1",
+      "registry-2",
+      "registry-pg-1",
+      "registry-pg-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus status registry --json",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "\"clusterId\": \"registry\"",
+        "\"members\"",
+        "\"overallHealth\""
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "a single JSON ClusterStatus document: 4 members with role + status, leader = the VIP-holding PG primary, Shards null"
+        }
+      ]
+    }
+  ],
+  "whatProves": "The --json projection of GetStatusAsync gives a stable machine-readable contract for the registry tier (System B)."
+}

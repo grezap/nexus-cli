@@ -1,0 +1,46 @@
+{
+  "id": "DEMO-147-registry-status",
+  "title": "Registry: tier status (Harbor app pair + PG/Redis datastore + VIP)",
+  "description": "Runs `nexus status registry`. One table over the 4 registry-* nodes — registry-1/2 (Harbor app HA, RR DNS registry.nexus.lab) + registry-pg-1/2 (PostgreSQL 17 + Redis datastore HA; the VRRP VIP .119 holder labelled primary+vip). The unbuilt future platform-tools (prefect/unleash/marquez/backstage) in the same vms.yaml cluster are filtered out.",
+  "prerequisites": {
+    "vmsAlive": [
+      "registry-1",
+      "registry-2",
+      "registry-pg-1",
+      "registry-pg-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus status registry",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "registry",
+        "registry-1",
+        "registry-pg-1",
+        "harbor-app",
+        "datastore/primary+vip",
+        "alive",
+        "leader:"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "4-row table; registry-1/2 = harbor-app; registry-pg-1 = datastore/primary+vip; registry-pg-2 = datastore/replica; all alive; leader = the VIP-holding PG primary"
+        }
+      ]
+    }
+  ],
+  "whatProves": "RegistryAdapter.GetStatusAsync resolves the platform-tools cluster, classifies only the registry-* nodes (harbor / registry-pg), probes the Harbor /api/v2.0/health per app node + the PG recovery role + the VRRP VIP holder, and rolls them into one table."
+}

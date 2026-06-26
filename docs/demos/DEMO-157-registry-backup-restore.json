@@ -1,0 +1,41 @@
+{
+  "id": "DEMO-157-registry-backup-restore",
+  "title": "Registry: backup restore round-trip (registry_restore_verify)",
+  "description": "Runs `nexus backup restore registry registry --yes`. Reloads the node-local dump into a throwaway registry_restore_verify DB and counts the restored tables — the non-destructive integrity round-trip — then drops the verify DB.",
+  "prerequisites": {
+    "vmsAlive": [
+      "registry-1",
+      "registry-2",
+      "registry-pg-1",
+      "registry-pg-2",
+      "minio-1",
+      "minio-2",
+      "minio-3",
+      "minio-4"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT"
+    ]
+  },
+  "steps": [
+    {
+      "command": "nexus backup restore registry registry --yes",
+      "waitAfterSeconds": 4,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "backup restore registry",
+        "items restored"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "GREEN backup restore registry — items restored = the same N tables taken (loaded into registry_restore_verify, counted, dropped)"
+        }
+      ]
+    }
+  ],
+  "whatProves": "RegistryAdapter.BackupRestoreAsync reloads the gzip dump into a verify DB, counts the public tables, and drops it — the take/restore round-trip proof (blobs stay in MinIO; live data untouched)."
+}
