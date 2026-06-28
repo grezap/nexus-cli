@@ -19,11 +19,13 @@ namespace Nexus.Cli.Adapters.Cluster;
 /// AD is multi-master, so its mutating surface is intentionally narrow:
 /// status/health/topology + acl (AD users/groups) + backup take (a non-
 /// destructive <c>ntdsutil ifm</c> database snapshot — the AD analogue of the
-/// Vault raft-snapshot verb). The genuinely risky/terraform verbs — failover
-/// (no DC failover; FSMO move/seize), DC add/remove, authoritative restore
-/// (console-only DSRM), an unguarded NTDS cert rotation / chaos kill — return a
-/// graceful, ACTIONABLE "not applicable" pointing at the right out-of-band
-/// tool, never a silent stub.
+/// Vault raft-snapshot verb) + failover (a GRACEFUL <c>Move-ADDirectoryServer
+/// OperationMasterRole</c> FSMO transfer-and-back, the planned-maintenance
+/// drill). The genuinely risky/terraform verbs — DC add/remove, authoritative
+/// restore (console-only DSRM), an unguarded NTDS cert rotation / chaos kill,
+/// and FSMO <i>seize</i> (permanent-loss last resort) — return a graceful,
+/// ACTIONABLE "not applicable" pointing at the right out-of-band tool, never a
+/// silent stub.
 /// </para>
 /// <para>
 /// DC IPs are infra canon, NOT the catalog value: vms.yaml records dc-nexus at
@@ -363,13 +365,178 @@ public sealed class FoundationAdAdapter : IClusterAdapter
         return null;
     }
 
-    // === Graceful, ACTIONABLE N/A for the multi-master / terraform mutators ==
-    public Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken) =>
-        Task.FromResult(Result.Fail<FailoverResult>(
-            "Active Directory is MULTI-MASTER — there is no DC failover. A single DC loss is transparent: the surviving DC keeps "
-            + "serving auth + DNS (proven by smoke-0.M: kill dc-nexus → auth + DNS continue on dc-nexus-2). To relocate the FSMO "
-            + "roles use `Move-ADDirectoryServerOperationMasterRole` (graceful transfer) or, only on permanent DC loss, "
-            + "`ntdsutil` seize (manual, last resort) — both deliberately NOT wired as a runtime verb."));
+    // === FailoverAsync (graceful FSMO role transfer + transfer-back) =========
+    // AD is multi-master, so there is no "DC failover" in the data-tier sense
+    // (a single DC loss is transparent — the surviving DC keeps serving auth +
+    // DNS, proven by smoke-0.M). What IS the meaningful operator drill is the
+    // graceful relocation of the FSMO single-master roles to the other DC (what
+    // you do to a surviving DC when planning maintenance on the role holder).
+    // This wires that as `Move-ADDirectoryServerOperationMasterRole` (a GRACEFUL
+    // online transfer — both DCs up + replicating; NOT `ntdsutil` seize, which
+    // stays a manual permanent-loss last resort). Mirrors the failover-test
+    // recover pattern: move the roles holder→target, verify, then move them
+    // BACK (unless --no-recover). Requires ≥2 reachable DCs (the recipient).
+    //
+    // Scope = the 4 roles a Domain Admin + Enterprise Admin can relocate — the
+    // realistic "evacuate this DC for maintenance" set. SchemaMaster is
+    // DELIBERATELY excluded: transferring it requires Schema Admins membership
+    // (kept restricted by AD design — schema changes are rare + dangerous), and
+    // the schema master is never part of a routine maintenance failover. (Live-
+    // caught 2026-06-29: an all-5 batch run as Domain/Enterprise Admin moves the
+    // first 4 then aborts "Access is denied" on SchemaMaster, leaving a SPLIT
+    // placement — so we scope to exactly what the operator identity can move,
+    // keeping the transfer atomic.)
+    private static readonly string[] FsmoRoleNames =
+        ["PDCEmulator", "RIDMaster", "InfrastructureMaster", "DomainNamingMaster"];
+
+    public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
+    {
+        var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        if (status.IsFail) return Result.Fail<FailoverResult>(status.Error!);
+        var aliveDcs = status.Value!.Members.Where(m => m.Role is "dc" or "pdc" && m.Status == "alive").ToList();
+        if (aliveDcs.Count < 2)
+            return Result.Fail<FailoverResult>(
+                "graceful FSMO transfer needs ≥2 reachable domain controllers (the role recipient); only "
+                + $"{(aliveDcs.Count == 1 ? aliveDcs[0].Hostname : "no DC")} is up — power on dc-nexus-2 first. "
+                + "(On PERMANENT DC loss, seize with `ntdsutil` — a manual last resort, never a runtime verb.)");
+
+        // Current FSMO holder = the PDC member (in this forest one DC holds all 5).
+        var holderName = status.Value!.Leader;
+        var original = aliveDcs.FirstOrDefault(m => string.Equals(m.Hostname, holderName, StringComparison.OrdinalIgnoreCase))
+                       ?? aliveDcs[0];
+
+        // Target = explicit --node, else the other alive DC.
+        ClusterMember? target;
+        if (!string.IsNullOrWhiteSpace(request.TargetNode))
+        {
+            target = aliveDcs.FirstOrDefault(m => string.Equals(m.Hostname, request.TargetNode, StringComparison.OrdinalIgnoreCase));
+            if (target is null) return Result.Fail<FailoverResult>($"--node '{request.TargetNode}' is not a reachable DC.");
+        }
+        else
+        {
+            target = aliveDcs.FirstOrDefault(m => !string.Equals(m.Hostname, original.Hostname, StringComparison.OrdinalIgnoreCase));
+        }
+        if (target is null || string.Equals(target.Hostname, original.Hostname, StringComparison.OrdinalIgnoreCase))
+            return Result.Fail<FailoverResult>("no distinct FSMO transfer target (current holder is the only candidate).");
+
+        var origIp = DcIp(original.Hostname);
+        var targetIp = DcIp(target.Hostname);
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var sw = Stopwatch.StartNew();
+        var preFlightAt = sw.Elapsed;
+
+        // Inject: graceful transfer of the operator-movable roles to the target.
+        var moveTo = await MoveFsmoAsync(targetIp, target.Hostname, cancellationToken).ConfigureAwait(false);
+        var injectedAt = sw.Elapsed;
+        if (moveTo.IsFail) return Result.Fail<FailoverResult>($"FSMO transfer to {target.Hostname} failed: {moveTo.Error}");
+        var heldByTarget = await FsmoRolesHeldByAsync(targetIp, target.Hostname, cancellationToken).ConfigureAwait(false);
+        var newLeaderAt = sw.Elapsed;
+        if (heldByTarget.IsFail) return Result.Fail<FailoverResult>(heldByTarget.Error!);
+        if (!heldByTarget.Value)
+            return Result.Fail<FailoverResult>($"FSMO move reported OK but {target.Hostname} does not hold the transferred roles.");
+
+        string recovery, hint;
+        var recoveryAt = newLeaderAt;
+        var healthyAt = newLeaderAt;
+        if (request.NoRecover)
+        {
+            recovery = "skipped";
+            hint = $"FSMO roles left on {target.Hostname} (--no-recover). Transfer back with "
+                   + $"`failover-test cluster foundation-ad --node {original.Hostname}`.";
+        }
+        else
+        {
+            var moveBack = await MoveFsmoAsync(origIp, original.Hostname, cancellationToken).ConfigureAwait(false);
+            recoveryAt = sw.Elapsed;
+            if (moveBack.IsFail)
+            {
+                recovery = "failed";
+                hint = $"FSMO moved to {target.Hostname} but transfer BACK to {original.Hostname} failed: {moveBack.Error}. "
+                       + "Transfer manually with `Move-ADDirectoryServerOperationMasterRole`.";
+            }
+            else
+            {
+                var heldByOrig = await FsmoRolesHeldByAsync(origIp, original.Hostname, cancellationToken).ConfigureAwait(false);
+                healthyAt = sw.Elapsed;
+                recovery = (heldByOrig.IsOk && heldByOrig.Value) ? "recovered" : "failed";
+                hint = recovery == "recovered"
+                    ? $"graceful FSMO transfer drill complete — {FsmoRoleNames.Length} roles (SchemaMaster excluded — needs Schema Admins) moved {original.Hostname}→{target.Hostname} and back; "
+                      + "AD served auth + DNS throughout (multi-master; transfers are online)."
+                    : $"transfer back issued but {original.Hostname} does not hold the transferred roles — verify with `netdom query fsmo`.";
+            }
+        }
+        sw.Stop();
+
+        return Result.Ok(new FailoverResult(
+            Scenario: "ad-fsmo-transfer",
+            OriginalPrimary: original.Hostname,
+            NewPrimary: target.Hostname,
+            Rto: newLeaderAt - injectedAt,
+            Recovery: recovery,
+            RecoveryHint: hint,
+            Timeline: new FailoverTimeline(preFlightAt, injectedAt, newLeaderAt, recoveryAt, healthyAt),
+            StartedAtUtc: startedAt));
+    }
+
+    private static string DcIp(string name) =>
+        Dcs.FirstOrDefault(d => string.Equals(d.Name, name, StringComparison.OrdinalIgnoreCase))?.Ip ?? name;
+
+    /// <summary>Graceful online transfer of all 5 FSMO roles to <paramref name="targetName"/> (run on the target DC).</summary>
+    private async Task<Result<bool>> MoveFsmoAsync(string dcIp, string targetName, CancellationToken ct)
+    {
+        var roles = string.Join(",", FsmoRoleNames);
+        var nameEsc = targetName.Replace("'", "''");
+        var ps =
+            "$ErrorActionPreference='Stop';"
+            + $"try {{ Move-ADDirectoryServerOperationMasterRole -Identity '{nameEsc}' -OperationMasterRole {roles} -Confirm:$false; Write-Output 'MOVE_OK' }}"
+            + " catch { Write-Output ('MOVE_ERR:'+$_.Exception.Message) }";
+        var r = await WinPsAsync(dcIp, ps, ct, TimeSpan.FromMinutes(3)).ConfigureAwait(false);
+        if (r.IsFail) return Result.Fail<bool>(r.Error!);
+        return r.Value!.Contains("MOVE_OK", StringComparison.Ordinal)
+            ? Result.Ok(true)
+            : Result.Fail<bool>(Tail(r.Value, 220));
+    }
+
+    /// <summary>True iff every role in <see cref="FsmoRoleNames"/> is held by <paramref name="holderName"/> (queried from <paramref name="dcIp"/>).</summary>
+    private async Task<Result<bool>> FsmoRolesHeldByAsync(string dcIp, string holderName, CancellationToken ct)
+    {
+        var ps =
+            "$ErrorActionPreference='SilentlyContinue';"
+            + "$d=Get-ADDomain; $f=Get-ADForest;"
+            + "Write-Output ('FSMO|'+$d.PDCEmulator+'|'+$d.RIDMaster+'|'+$d.InfrastructureMaster+'|'+$f.SchemaMaster+'|'+$f.DomainNamingMaster)";
+        var r = await WinPsAsync(dcIp, ps, ct).ConfigureAwait(false);
+        if (r.IsFail) return Result.Fail<bool>(r.Error!);
+        var holders = ParseFsmoHolders(r.Value!);
+        if (holders is null) return Result.Fail<bool>($"could not read FSMO holders: {Tail(r.Value!, 180)}");
+        return Result.Ok(FsmoRoleNames.All(role =>
+            holders.TryGetValue(role, out var h)
+            && (string.Equals(h, holderName, StringComparison.OrdinalIgnoreCase)
+                || h.StartsWith(holderName + ".", StringComparison.OrdinalIgnoreCase))));
+    }
+
+    /// <summary>Parse a role→holder-FQDN map from a `FSMO|pdc|rid|infra|schema|naming` line.</summary>
+    internal static Dictionary<string, string>? ParseFsmoHolders(string stdout)
+    {
+        foreach (var line in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var t = line.Trim();
+            if (!t.StartsWith("FSMO|", StringComparison.Ordinal)) continue;
+            var p = t.Split('|');
+            if (p.Length < 6 || p.Skip(1).Take(5).Any(x => x.Trim().Length == 0)) continue;
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["PDCEmulator"] = p[1].Trim(),
+                ["RIDMaster"] = p[2].Trim(),
+                ["InfrastructureMaster"] = p[3].Trim(),
+                ["SchemaMaster"] = p[4].Trim(),
+                ["DomainNamingMaster"] = p[5].Trim(),
+            };
+        }
+        return null;
+    }
+
+    // === Graceful, ACTIONABLE N/A for the remaining terraform mutators =======
 
     public Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<ScaleOutResult>(

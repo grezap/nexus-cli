@@ -111,6 +111,41 @@ public class FoundationAdAdapterParseTests
         FoundationAdAdapter.ParseIfmResult("IFM_OK|notanumber|x").Should().BeNull();
     }
 
+    // === ParseFsmoHolders (Get-ADDomain/Get-ADForest FSMO line) ============
+
+    [Fact]
+    public void ParseFsmoHolders_maps_all_five_roles()
+    {
+        var h = FoundationAdAdapter.ParseFsmoHolders(
+            "FSMO|dc-nexus.nexus.lab|dc-nexus.nexus.lab|dc-nexus.nexus.lab|dc-nexus.nexus.lab|dc-nexus.nexus.lab");
+        h.Should().NotBeNull();
+        h!.Should().HaveCount(5);
+        h!["PDCEmulator"].Should().Be("dc-nexus.nexus.lab");
+        h!["DomainNamingMaster"].Should().Be("dc-nexus.nexus.lab");
+    }
+
+    [Fact]
+    public void ParseFsmoHolders_maps_split_placement_per_role()
+    {
+        // PDC/RID/Infra on dc-nexus-2; Schema/Naming on dc-nexus (the exact split
+        // an all-5 batch leaves when SchemaMaster is denied).
+        var h = FoundationAdAdapter.ParseFsmoHolders(
+            "FSMO|dc-nexus-2.nexus.lab|dc-nexus-2.nexus.lab|dc-nexus-2.nexus.lab|dc-nexus.nexus.lab|dc-nexus.nexus.lab");
+        h.Should().NotBeNull();
+        h!["PDCEmulator"].Should().Be("dc-nexus-2.nexus.lab");
+        h!["InfrastructureMaster"].Should().Be("dc-nexus-2.nexus.lab");
+        h!["SchemaMaster"].Should().Be("dc-nexus.nexus.lab");
+        h!["DomainNamingMaster"].Should().Be("dc-nexus.nexus.lab");
+    }
+
+    [Fact]
+    public void ParseFsmoHolders_null_on_noise()
+    {
+        FoundationAdAdapter.ParseFsmoHolders("").Should().BeNull();
+        FoundationAdAdapter.ParseFsmoHolders("FSMO|onlytwo|fields").Should().BeNull();
+        FoundationAdAdapter.ParseFsmoHolders("FSMO|a||c|d|e").Should().BeNull(); // empty holder field
+    }
+
     // === Sanitize (operator tag -> backup-id slug) =========================
 
     [Theory]

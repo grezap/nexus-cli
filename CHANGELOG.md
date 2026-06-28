@@ -19,8 +19,20 @@ deferred verbs INSIDE the adapter, no out-of-band hops).
   2026-06-28** against the running `dc-nexus`: `backup take foundation-ad` → GREEN, **96.0 MiB** `ntds.dit`,
   ~12 s. `backup restore` stays a deliberate N/A — authoritative restore is the console-only DSRM path
   (Server 2025 blocks `ntdsutil` ConsoleMode over SSH).
-- AOT win-x64 **28.13 MB / 30**; **278/278 tests** (+6: `ParseIfmResult` ×2, `Sanitize` ×4). Pre-flight
-  proved the DC SSH session runs **elevated** (full admin token), so `ntdsutil` needs no extra elevation hop.
+- **FoundationAD `failover-test` (GAP #7)** (was a graceful N/A pointing at `Move-ADDirectoryServerOperationMasterRole`)
+  — now a real **graceful FSMO transfer drill**: relocates the 4 operator-movable FSMO roles
+  (PDCEmulator/RIDMaster/InfrastructureMaster/DomainNamingMaster) from the current holder to the other DC,
+  verifies the target holds them, then transfers them BACK (`--no-recover` leaves them moved; `--node` picks
+  the target). Mirrors the failover-test recover pattern (original→new→recovered timeline). Requires ≥2
+  reachable DCs. **SchemaMaster is deliberately excluded** — moving it needs Schema Admins (restricted by AD
+  design); **live-caught 2026-06-29** that an all-5 batch run as Domain/Enterprise Admin moves the first 4
+  then aborts `Access is denied` on SchemaMaster, leaving a SPLIT placement → the verb scopes to exactly what
+  the operator identity can move, keeping the transfer atomic (the split was detected + fully restored during
+  bring-up). **Live-verified 2026-06-29** with dc-nexus-2 powered on: 4 roles dc-nexus→dc-nexus-2 and back,
+  recovered ~6.8 s, all 5 FSMO consolidated back on dc-nexus afterward.
+- AOT win-x64 **28.14 MB / 30**; **281/281 tests** (+9: `ParseIfmResult` ×2, `Sanitize` ×4, `ParseFsmoHolders` ×3).
+  Pre-flight proved both DC SSH sessions run **elevated** (full admin token), so `ntdsutil`/FSMO transfers need
+  no extra elevation hop.
 
 ## [0.8.6] — 2026-06-26
 
