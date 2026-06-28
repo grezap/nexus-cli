@@ -17,11 +17,13 @@ namespace Nexus.Cli.Adapters.Cluster;
 /// health view over Linux-SSH.
 /// <para>
 /// AD is multi-master, so its mutating surface is intentionally narrow:
-/// status/health/topology + acl (AD users/groups). The risky/terraform verbs —
-/// failover (no DC failover; FSMO move/seize), DC add/remove, system-state
-/// backup, an unguarded NTDS cert rotation / chaos kill — return a graceful,
-/// ACTIONABLE "not applicable" pointing at the right out-of-band tool, never a
-/// silent stub.
+/// status/health/topology + acl (AD users/groups) + backup take (a non-
+/// destructive <c>ntdsutil ifm</c> database snapshot — the AD analogue of the
+/// Vault raft-snapshot verb). The genuinely risky/terraform verbs — failover
+/// (no DC failover; FSMO move/seize), DC add/remove, authoritative restore
+/// (console-only DSRM), an unguarded NTDS cert rotation / chaos kill — return a
+/// graceful, ACTIONABLE "not applicable" pointing at the right out-of-band
+/// tool, never a silent stub.
 /// </para>
 /// <para>
 /// DC IPs are infra canon, NOT the catalog value: vms.yaml records dc-nexus at
@@ -73,10 +75,10 @@ public sealed class FoundationAdAdapter : IClusterAdapter
     private SshTarget T(string ip) => new(ip, 22, _sshUsername, _sshKeyPath);
 
     /// <summary>Run a PowerShell script on a Windows DC via EncodedCommand. Trimmed stdout on exit 0.</summary>
-    private async Task<Result<string>> WinPsAsync(string ip, string ps, CancellationToken ct)
+    private async Task<Result<string>> WinPsAsync(string ip, string ps, CancellationToken ct, TimeSpan? timeout = null)
     {
         var b64 = Convert.ToBase64String(Encoding.Unicode.GetBytes(ps));
-        var r = await _ssh.ExecuteAsync(T(ip), $"powershell -NoProfile -EncodedCommand {b64}", WinTimeout, ct).ConfigureAwait(false);
+        var r = await _ssh.ExecuteAsync(T(ip), $"powershell -NoProfile -EncodedCommand {b64}", timeout ?? WinTimeout, ct).ConfigureAwait(false);
         if (r.IsFail) return Result.Fail<string>($"ssh(win) to {ip} failed: {r.Error}");
         if (r.Value!.ExitCode != 0)
             return Result.Fail<string>($"remote PowerShell on {ip} exit {r.Value.ExitCode}: {Tail((r.Value.Stdout + "\n" + r.Value.Stderr).Trim(), 300)}");
@@ -380,11 +382,86 @@ public sealed class FoundationAdAdapter : IClusterAdapter
             "removing a domain controller requires graceful demotion (Uninstall-ADDSDomainController) + AD metadata cleanup, "
             + "an out-of-band terraform/ntdsutil operation (handbook §1m) — never a runtime drop, which would orphan the AD topology."));
 
-    public Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken) =>
-        Task.FromResult(Result.Fail<BackupResult>(
-            "AD is continuously replicated to dc-nexus-2 (multi-master = a live logical hot standby; RPO≈0). A point-in-time "
-            + "system-state backup = `wbadmin start systemstatebackup` / `ntdsutil ifm` ON the DC (out-of-band), not a runtime "
-            + "verb. Recovery from a single DC loss needs no backup — the surviving DC reseeds a rebuilt partner."));
+    // === BackupTakeAsync (ntdsutil IFM -- verifiable AD database artifact) ===
+    // A point-in-time copy of the AD database (ntds.dit + registry hives)
+    // created via `ntdsutil ifm create full` ON a reachable DC. This is the AD
+    // analogue of the Vault raft-snapshot verb. It is NON-DESTRUCTIVE: IFM
+    // mounts a VSS snapshot and copies it out; the live directory is untouched
+    // (multi-master AD already gives RPO≈0 via replication, but a point-in-time
+    // database artifact is what a backup verb must produce). Prefers a NON-PDC
+    // DC to keep the snapshot load off the PDC emulator (the "back up from a
+    // secondary" hygiene the data adapters follow). The artifact stays on the
+    // DC; restore is the console-only DSRM authoritative-restore path
+    // ([[feedback_ntdsutil_dsrm_console_mode_ssh]]) -- BackupRestoreAsync below
+    // stays a graceful N/A.
+    public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
+    {
+        var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        if (status.IsFail) return Result.Fail<BackupResult>(status.Error!);
+
+        // Choose an alive DC, preferring a non-PDC; map the name back to the
+        // hardcoded reality IP (ADR-0039) rather than the AD-reported address.
+        var aliveDcs = status.Value!.Members
+            .Where(m => m.Role is "dc" or "pdc" && m.Status == "alive")
+            .ToList();
+        var chosen = aliveDcs.FirstOrDefault(m => m.Role == "dc") ?? aliveDcs.FirstOrDefault();
+        if (chosen is null)
+            return Result.Fail<BackupResult>("no reachable domain controller to take an IFM backup from.");
+        var dcIp = Dcs.FirstOrDefault(d => string.Equals(d.Name, chosen.Hostname, StringComparison.OrdinalIgnoreCase))?.Ip
+                   ?? chosen.IpAddress;
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var sw = Stopwatch.StartNew();
+        var backupId = string.IsNullOrWhiteSpace(request.Tag)
+            ? $"ad-ifm-{startedAt:yyyyMMdd-HHmmss}"
+            : $"ad-{Sanitize(request.Tag!)}-{startedAt:yyyyMMdd-HHmmss}";
+        var dest = $@"C:\nexus-backups\ad\{backupId}";
+
+        // Non-interactive batch (no DSRM password prompt). Verify by the
+        // ntds.dit artifact, not by parsing ntdsutil's chatty stdout.
+        var ps =
+            "$ErrorActionPreference='Stop';"
+            + $"$dest='{dest}';"
+            + "if (Test-Path $dest) { Remove-Item -Recurse -Force $dest };"
+            + "New-Item -ItemType Directory -Force -Path $dest | Out-Null;"
+            + "$null = & ntdsutil \"activate instance ntds\" \"ifm\" \"create full $dest\" \"quit\" \"quit\" 2>&1;"
+            + "$dit = Get-ChildItem -Recurse -Path $dest -Filter ntds.dit -ErrorAction SilentlyContinue | Select-Object -First 1;"
+            + "if (-not $dit) { Write-Output 'IFM_ERR'; exit 1 };"
+            + "Write-Output ('IFM_OK|' + $dit.Length + '|' + $dit.FullName)";
+        // IFM is heavier than a status query (VSS snapshot + DB copy) -- allow up to 5 min.
+        var r = await WinPsAsync(dcIp, ps, cancellationToken, TimeSpan.FromMinutes(5)).ConfigureAwait(false);
+        sw.Stop();
+        if (r.IsFail) return Result.Fail<BackupResult>($"ntdsutil ifm on {chosen.Hostname} failed: {r.Error}");
+        var parsed = ParseIfmResult(r.Value!);
+        if (parsed is null)
+            return Result.Fail<BackupResult>($"ntdsutil ifm on {chosen.Hostname} did not produce an ntds.dit: {Tail(r.Value!, 220)}");
+
+        return Result.Ok(new BackupResult(
+            BackupId: backupId,
+            Destination: $"{chosen.Hostname}:{parsed.Value.Path} (ntdsutil IFM full copy of the AD database; "
+                + "restore is the console-only DSRM authoritative-restore path, not a runtime verb).",
+            SizeBytes: parsed.Value.Size,
+            Duration: sw.Elapsed,
+            StartedAtUtc: startedAt));
+    }
+
+    /// <summary>Parse `IFM_OK|&lt;size&gt;|&lt;path&gt;` from the ntdsutil IFM result line.</summary>
+    internal static (long Size, string Path)? ParseIfmResult(string stdout)
+    {
+        foreach (var line in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var t = line.Trim();
+            if (!t.StartsWith("IFM_OK|", StringComparison.Ordinal)) continue;
+            var p = t.Split('|');
+            if (p.Length >= 3 && long.TryParse(p[1].Trim(), out var size) && p[2].Trim().Length > 0)
+                return (size, p[2].Trim());
+        }
+        return null;
+    }
+
+    /// <summary>Backup-id-safe slug for an operator tag (alnum + dash/underscore).</summary>
+    internal static string Sanitize(string s) =>
+        new string(s.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_').ToArray());
 
     public Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<RestoreResult>(

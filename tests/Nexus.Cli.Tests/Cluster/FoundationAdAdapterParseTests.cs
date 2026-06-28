@@ -90,4 +90,34 @@ public class FoundationAdAdapterParseTests
         FoundationAdAdapter.ParseAclUser("NO_USER").Should().BeNull();
         FoundationAdAdapter.ParseAclUser("").Should().BeNull();
     }
+
+    // === ParseIfmResult (ntdsutil ifm create full) =========================
+
+    [Fact]
+    public void ParseIfmResult_reads_size_and_path()
+    {
+        var r = FoundationAdAdapter.ParseIfmResult(
+            "IFM media created successfully\nIFM_OK|100663296|C:\\nexus-backups\\ad\\ad-ifm-20260628-200000\\Active Directory\\ntds.dit");
+        r.Should().NotBeNull();
+        r!.Value.Size.Should().Be(100663296);
+        r.Value.Path.Should().EndWith("ntds.dit");
+    }
+
+    [Fact]
+    public void ParseIfmResult_null_on_error_or_noise()
+    {
+        FoundationAdAdapter.ParseIfmResult("IFM_ERR").Should().BeNull();
+        FoundationAdAdapter.ParseIfmResult("").Should().BeNull();
+        FoundationAdAdapter.ParseIfmResult("IFM_OK|notanumber|x").Should().BeNull();
+    }
+
+    // === Sanitize (operator tag -> backup-id slug) =========================
+
+    [Theory]
+    [InlineData("nightly", "nightly")]
+    [InlineData("pre upgrade 2026", "preupgrade2026")]
+    [InlineData("weekly_full-1", "weekly_full-1")]
+    [InlineData("../../etc", "etc")]
+    public void Sanitize_keeps_only_id_safe_chars(string input, string expected)
+        => FoundationAdAdapter.Sanitize(input).Should().Be(expected);
 }

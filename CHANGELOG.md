@@ -6,6 +6,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Completion backlog, batch 2 (continuing the nexus-cli completeness pass — closing the FoundationAD
+deferred verbs INSIDE the adapter, no out-of-band hops).
+
+- **FoundationAD `backup take` (GAP #8)** (was a graceful N/A pointing at out-of-band `wbadmin`/`ntdsutil`)
+  — now a real **`ntdsutil ifm create full`** on a reachable DC: a non-destructive point-in-time copy of the
+  AD database (`ntds.dit` + registry hives) under `C:\nexus-backups\ad\<id>`, the AD analogue of the Vault
+  raft-snapshot verb. Chooses an alive DC, **preferring a non-PDC** when ≥2 are up (keeps the snapshot load
+  off the PDC emulator — the "back up from a secondary" hygiene the data adapters follow), falling back to the
+  sole reachable DC. Verified by the resulting `ntds.dit` artifact (size + path), not ntdsutil's chatty stdout;
+  `WinPsAsync` gained an optional timeout (IFM allowed up to 5 min vs the 60 s status default). **Live-verified
+  2026-06-28** against the running `dc-nexus`: `backup take foundation-ad` → GREEN, **96.0 MiB** `ntds.dit`,
+  ~12 s. `backup restore` stays a deliberate N/A — authoritative restore is the console-only DSRM path
+  (Server 2025 blocks `ntdsutil` ConsoleMode over SSH).
+- AOT win-x64 **28.13 MB / 30**; **278/278 tests** (+6: `ParseIfmResult` ×2, `Sanitize` ×4). Pre-flight
+  proved the DC SSH session runs **elevated** (full admin token), so `ntdsutil` needs no extra elevation hop.
+
 ## [0.8.6] — 2026-06-26
 
 Completeness pass (the first batch of the nexus-cli completion backlog) — three previously
