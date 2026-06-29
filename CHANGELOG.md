@@ -30,6 +30,13 @@ deferred verbs INSIDE the adapter, no out-of-band hops).
   the operator identity can move, keeping the transfer atomic (the split was detected + fully restored during
   bring-up). **Live-verified 2026-06-29** with dc-nexus-2 powered on: 4 roles dc-nexus→dc-nexus-2 and back,
   recovered ~6.8 s, all 5 FSMO consolidated back on dc-nexus afterward.
+- **FoundationAD `chaos` (GAP #10) — classified GENUINE N/A** (was already N/A; now with hard live evidence +
+  a sharper refusal message). A meaningful DC chaos stops ADDS/NTDS, which also stops **Netlogon** and severs the
+  domain secure channel OpenSSH authenticates `nexusadmin` through — so the chaos **self-fences the adapter's own
+  recovery path**: live-proven 2026-06-29 that an in-adapter NTDS stop on the non-PDC dc-nexus-2 left it
+  `Permission denied (publickey)`, and recovery required an out-of-band `vmrun reset` (outside ADR-0009's
+  SSH-shell-out architecture; dc-nexus-2 was fully restored). The 2-DC HA is validated out-of-band by smoke-0.M
+  (host-kill of a DC → auth + DNS continue on the survivor). This is a sanctioned refusal, not a skip.
 - AOT win-x64 **28.14 MB / 30**; **281/281 tests** (+9: `ParseIfmResult` ×2, `Sanitize` ×4, `ParseFsmoHolders` ×3).
   Pre-flight proved both DC SSH sessions run **elevated** (full admin token), so `ntdsutil`/FSMO transfers need
   no extra elevation hop.

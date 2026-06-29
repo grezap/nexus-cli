@@ -22,8 +22,10 @@ namespace Nexus.Cli.Adapters.Cluster;
 /// Vault raft-snapshot verb) + failover (a GRACEFUL <c>Move-ADDirectoryServer
 /// OperationMasterRole</c> FSMO transfer-and-back, the planned-maintenance
 /// drill). The genuinely risky/terraform verbs — DC add/remove, authoritative
-/// restore (console-only DSRM), an unguarded NTDS cert rotation / chaos kill,
-/// and FSMO <i>seize</i> (permanent-loss last resort) — return a graceful,
+/// restore (console-only DSRM), an unguarded NTDS cert rotation, FSMO
+/// <i>seize</i> (permanent-loss last resort), and chaos (stopping ADDS severs
+/// the Netlogon channel SSH auth rides on → the adapter can't recover the DC
+/// it stranded; see <see cref="ApplyChaosAsync"/>) — return a graceful,
 /// ACTIONABLE "not applicable" pointing at the right out-of-band tool, never a
 /// silent stub.
 /// </para>
@@ -641,10 +643,25 @@ public sealed class FoundationAdAdapter : IClusterAdapter
             + "restart, ADR-0015) — not wired here to avoid an unguarded NTDS restart on the live auth plane. Vault's own "
             + "listener certs rotate via `nexus cert-rotate vault`."));
 
+    // === ApplyChaosAsync — graceful, evidence-based N/A ======================
+    // GENUINE N/A for an SSH-managed adapter, not a stub. A meaningful DC chaos
+    // means taking the directory service down — but `Stop-Service NTDS` also
+    // stops Netlogon (a dependent), which severs the DC's domain secure channel,
+    // and OpenSSH authenticates the domain `nexusadmin` THROUGH that channel.
+    // So the moment the chaos lands, the adapter can no longer SSH back in to
+    // recover it (live-proven 2026-06-29: an in-adapter NTDS stop on the non-PDC
+    // dc-nexus-2 left it `Permission denied (publickey)` — recovery required an
+    // out-of-band `vmrun reset`, outside the SSH-shell-out architecture
+    // [ADR-0009]). The verb would therefore strand the very DC it "tests". The
+    // 2-DC HA property it would demonstrate is already validated out-of-band by
+    // smoke-0.M (host-level kill of a DC → auth + DNS continue on the survivor).
     public Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<ChaosOutcome>(
-            "chaos on a live domain controller is out of scope — an unguarded ADDS/Netlogon kill risks the auth plane. The "
-            + "2-DC HA is validated by smoke-0.M (host-level kill of dc-nexus → auth + DNS continue on dc-nexus-2)."));
+            "chaos on a domain controller is a genuine N/A for this SSH-managed adapter: a meaningful DC chaos stops "
+            + "ADDS/NTDS, which also stops Netlogon and severs the domain secure channel OpenSSH uses to authenticate "
+            + "`nexusadmin` — so the chaos self-fences the adapter's own recovery path (it cannot SSH back in to restart "
+            + "the service; recovery needs an out-of-band `vmrun reset`). The 2-DC HA is validated out-of-band by "
+            + "smoke-0.M (host-level kill of a DC → auth + DNS continue on the survivor)."));
 
     // === CanResizeVm =======================================================
     public bool CanResizeVm(string vmName, string role)
