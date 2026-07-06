@@ -1,7 +1,7 @@
 {
   "id": "DEMO-19-redis-backup-restore",
   "title": "Redis: restore from a backup",
-  "description": "Restores a prior `backup take` snapshot. DESTRUCTIVE: overwrites existing cluster data. scp's the per-shard .rdb back, stops redis-server, replaces dump.rdb, restarts. STUBBED in v0.6.0.",
+  "description": "Restores a prior `backup take` snapshot. DESTRUCTIVE: overwrites existing cluster data. scp's the per-shard .rdb back, stops redis-server, replaces dump.rdb, restarts. Live-verified 2026-06-05.",
   "prerequisites": {
     "vmsAlive": ["redis-1", "redis-2", "redis-3", "redis-4", "redis-5", "redis-6", "nexus-gateway"],
     "envVars": ["NEXUS_SSH_KEY"]
@@ -18,5 +18,5 @@
       ]
     }
   ],
-  "whatProves": "Round-trip backup -> destroy data -> restore -> verify keys returned works end-to-end. (Stubbed in v0.6.0; lands in 0.G.1.x.)"
+  "whatProves": "Round-trip backup -> destroy data -> restore -> verify keys returned works end-to-end."
 }

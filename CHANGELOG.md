@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.7] — 2026-07-06
+
 Completion backlog, batch 3 (scale-up + swarm restore + kafka resize-gate — closing the last of the
 "big" nexus-cli GAPs INSIDE the tool, no out-of-band hops).
 
@@ -43,6 +45,16 @@ Completion backlog, batch 3 (scale-up + swarm restore + kafka resize-gate — cl
   `kafka-east`). **Live-verified on kafka-east:** `scale-up` the controller-leader (kafka-east-1) is refused
   ("…pass --force-primary"); a follower (kafka-east-2) passes the gate (→ no-op skipped). Locked with a
   resolution unit test.
+- **Docs + demos for the batch-3 verbs (System B + handbook + System A):** new `docs/demos/`
+  `DEMO-160-scale-up-disk-deb13` (the honest deb13 root-not-last warning), `DEMO-161-kafka-resize-gate`
+  (the controller-leader safety gate + `--force-primary`), `DEMO-162-swarm-restore-confirm-destructive`
+  (guard refusal + GREEN self-restore); rewrote `DEMO-17-redis-scale-up` (de-stubbed → the real cpu/ram
+  round-trip live-verified on redis-1) and `demo-0.6.7-kafka-east-scale-up`; updated `DEMO-118-swarm-backup`'s
+  restore step to the guarded message. Handbook: rewrote the §1 `scale-up` reference, added the swarm
+  `--confirm-destructive` note to §1 `backup restore` + footnote ⁴⁸, and added **§3.5** step-by-step
+  playbooks (input · expected · where-observed · output · prereqs) for all three. (Also de-stubbed the
+  stale "STUBBED in v0.6.0" language on DEMO-15/16/18/19/21 — those redis verbs were live-verified 06-05.)
+  System A: `nexus-platform-plan` DEMO-28 (SRE vertical-capacity tour).
 - AOT win-x64 **28.25 MB / 30**; **310/310 tests** (+29: VmrunVmResizer resolution/parse/edit/gate/disk +
   2 kafka resolution cases).
 

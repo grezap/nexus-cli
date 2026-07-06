@@ -1,0 +1,38 @@
+{
+  "id": "DEMO-160-scale-up-disk-deb13",
+  "title": "scale-up --disk: honest deb13 root-not-last warning (no false success)",
+  "description": "The disk path of scale-up (GAP #13, batch 3). scale-up --disk grows the backing .vmdk offline via `vmware-vdiskmanager -x`, restarts, then runs a SAFE in-guest filesystem extend: `growpart --dry-run` gates the extend and the code NEVER repartitions a live boot disk. The stock deb13 template lays swap AFTER root, so root is not the last partition -> growpart's dry-run correctly reports no adjacent free space -> the guest FS is left untouched and the result says so PLAINLY (Outcome ok, with a clear warning). This is the anti-false-success path: the disk space is present at the vmdk level but the verb does not pretend the filesystem grew. Live-verified 2026-07-05 on redis-1 (40 -> 42 GB vmdk grow; guest lsblk confirms the larger disk; growpart --dry-run detected root-not-last -> honest 'not auto-extended' warning). FOLLOW-UP already shipped: the deb13 packer preseed now drops the swap partition (2 GB /swapfile instead) so root is the single growable partition and future clones auto-extend.",
+  "prerequisites": {
+    "vmsAlive": ["redis-1", "redis-2", "redis-3", "redis-4", "redis-5", "redis-6"],
+    "envVars": ["NEXUS_SSH_KEY", "NEXUS_VMS_YAML", "NEXUS_VMRUN"],
+    "smokeGate": "nexus-infra-oltp smoke-0.G.1 ALL GREEN; redis-1 is a live replica (or pass --force-primary); build host = Windows with vmware-vdiskmanager on PATH"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.81 \"lsblk -bdno SIZE $(findmnt -no SOURCE / | sed -E 's|/dev/||; s|[0-9]+$||') 2>/dev/null | head -1; echo '---'; findmnt -no SIZE /\"",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "the pre-grow disk size (~40 GiB) and the root filesystem size -- baseline before the resize" }
+      ]
+    },
+    {
+      "command": "nexus scale-up redis-1 --disk 42 --yes --json",
+      "waitAfterSeconds": 90,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["\"outcome\":\"ok\"", "\"newDiskGb\":42", "NOT auto-extended"],
+      "observe": [
+        { "where": "stdout", "what": "JSON: outcome=ok, oldDiskGb ~40 -> newDiskGb 42, AND outcomeReason = 'vmdk grown to 42 GB, but the in-guest root filesystem was NOT auto-extended: root partition ... a swap/extended partition likely follows it (root is not the last partition ...)'. The verb does NOT falsely claim the FS grew." }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.81 \"lsblk | grep -E 'disk|part'; echo '---'; findmnt -no SIZE /\"",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "the DISK is now ~42 GiB (the vmdk grow took effect) but the root FS size is UNCHANGED -- matching the honest warning. The extra space is present at the block level; a growable-root template (root-last / swapfile) would let scale-up auto-extend it." }
+      ]
+    }
+  ],
+  "whatProves": "scale-up --disk grows the vmdk safely and, when the guest layout cannot be extended in place (deb13 swap-after-root), leaves the filesystem alone and reports it honestly (Outcome ok + warning) rather than faking a resize -- the never-repartition-a-live-boot-disk safety contract."
+}

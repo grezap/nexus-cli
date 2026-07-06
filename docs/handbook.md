@@ -107,12 +107,27 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
   *(Redis live-verified 2026-06-05.)*
 
 ### `scale-up <vm> [--cpu N] [--ram MB] [--disk GB] [--force-primary]` — GENERIC
-- **What it does:** **vertical** resize of a single VM — vmrun stop → edit `.vmx` CPU/RAM → start →
-  (disk) guest `lvextend`/`resize2fs`. Cluster-aware: each adapter's `CanResizeVm` **refuses a
-  current primary** unless `--force-primary`.
-- **Input:** vm name; `--cpu`/`--ram`/`--disk`; `--force-primary`. **Output:** old→new sizing.
-- **Where observed:** stdout; `nexus infrastructure status <cluster>`. **Mutating** (reboots the VM).
-- **Prereqs:** Windows build host (vmrun). Generic `IVmResizer` — not per-adapter.
+- **What it does:** **vertical** resize of a single VM (`VmrunVmResizer`, GAP #13 — fully implemented
+  batch 3). CPU/RAM: `vmrun stop` → an **atomic `.vmx` edit** (`numvcpus`/`memsize`) → **cold** start
+  (a suspend would not apply the edits). Disk: **`vmware-vdiskmanager -x`** grows the backing `.vmdk`
+  offline (grow-only), then a **SAFE** in-guest FS extend — `growpart --dry-run` gates it (auto-installs
+  `cloud-guest-utils`), handles plain-partition (`growpart`+`resize2fs`) **and** LVM
+  (`growpart`+`pvresize`+`lvextend -r`), Windows (`Resize-Partition`). **Never repartitions a live boot
+  disk:** when root is not the last partition (the **deb13 default swap-after-root layout**), the vmdk
+  grows but the guest FS is left alone and the result says so plainly (Outcome `ok` + a warning) — no
+  false success.
+- **Cluster-aware gate:** resolves the VM's owning adapter (`ResolveOwningAdapterId` — 1:1 by vms.yaml
+  cluster, plus the documented splits: `sqlserver`/`sqlserver-ag` by `sql-ag` prefix,
+  `foundation`→`vault`/`foundation-ad`, `platform-tools`→`registry`; edge/workstations = no gate),
+  warms its status, and consults `CanResizeVm`. **Refuses the current write-primary/leader** (or a
+  cluster it can't reach to prove otherwise) unless `--force-primary`.
+- **Input:** vm name; ≥1 of `--cpu`/`--ram`(MB, ×4)/`--disk`(GB); `--force-primary`; `--yes` (skips the
+  interactive confirm — required non-interactively). **Output:** `resource | old | new` table (cpu / ram
+  (MB) / disk (GB)) + Outcome (`ok`/`skipped`/`failed`) + reason. `--json` → `{vmName, outcome,
+  outcomeReason, old/newCpu, old/newRamMb, old/newDiskGb, durationSec}`.
+- **Where observed:** stdout; the guest (`nproc`/`free -m`/`lsblk`); VMware Workstation library.
+  **Mutating** (cold-restarts the VM). **Prereqs:** Windows build host (vmrun + vmware-vdiskmanager,
+  resolved by `VmrunPaths`); `NEXUS_VMS_YAML`; SSH to the guest for a disk grow. **Playbook: §3.5.**
 
 ### `backup take <cluster> [--tag T]` / `backup restore <cluster> <id> [--yes]` — MUTATOR
 - **What it does:** engine-native dump (Redis `BGSAVE`; Mongo `mongodump`; Patroni `pg_basebackup`;
@@ -123,15 +138,19 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
   · size · duration / items-restored.
 - **Where observed:** stdout; the snapshot file on the node. **Proves:** data can be captured and
   restored intact. **restore is DESTRUCTIVE.** *(Redis live-verified 2026-06-05.)*
+- **`swarm` restore is double-gated (GAP #11, batch 3):** `consul`/`nomad snapshot restore` OVERWRITE
+  the live Consul KV + Nomad jobs in place, so `backup restore swarm <id>` additionally requires
+  **`--confirm-destructive`** on top of `--yes` — refused (exit 2) without it, pointing at the DR runbook
+  for isolated-cluster recovery. **Playbook: §3.5.** *(live-verified 2026-07-06.)*
 
 ### `cert-rotate <cluster> [--yes]` — ROTATE
 - **What it does:** forces a fresh TLS leaf per node (re-issue via Vault Agent) and reloads the
   engine; reports old→new serial per node.
 - **Input:** cluster id; `--yes`. **Output:** per-node old/new serial table.
 - **Where observed:** stdout; `sudo openssl x509 -in /etc/nexus-<engine>/tls/server.crt -serial`.
-- **Proves:** certs rotate without downtime. *(Redis: verb runs across all 6 nodes; KNOWN ISSUE —
-  a bare Vault-Agent restart only re-renders near expiry, so serials came back UNCHANGED. Fix
-  pending: force re-issue (remove the rendered leaf, then restart so the Agent must re-issue).)*
+- **Proves:** certs rotate without downtime. *(Redis: FIXED v0.6.0 — the verb force-re-issues a fresh
+  leaf via the node's own Vault token, because a bare Vault-Agent restart re-uses the cached `pkiCert`
+  leaf and won't rotate; see §3.3. Live-verified across all 6 nodes.)*
 - **Prereqs:** §0 + Vault unsealed. **Mutating** (brief per-node TLS reload).
 
 ### `chaos <cluster> <scenario> [--duration S] [--intensity N] [--yes]` — MUTATOR
@@ -145,7 +164,7 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 - **Output:** scenario · target · observed impact · recovered? **Where observed:** stdout +
   `nexus health <cluster>` during the window; on-node `nexus-chaos.sh status`.
 - **Proves:** the cluster degrades + self-heals as designed. **Mutating; self-reverting.**
-  *(Implementation in progress — helper authored, adapter wiring pending.)*
+  *(Live-verified across the fleet — see the `chaos` column in §2.)*
 
 ### `acl <cluster> <list|describe|grant|revoke> [--user U] [--perms …]` — READ + MUTATOR
 - **What it does:** inspects (list/describe) or mutates (grant/revoke) the engine's access control.
@@ -194,6 +213,12 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 > returns a graceful "not applicable".⁴³
 
 ✅ live-verified · ⚠ coded, fix pending · ⏳ pending · n/a not-applicable (graceful). Dates = live-verify date.
+
+> **`scale-up ✅ gen`** = the per-cluster scale-up demo is generator-emitted. `scale-up` is a **generic**
+> verb (`VmrunVmResizer`), not per-adapter, so it shares one column across every tier. As of **batch 3
+> (GAP #13)** it is **fully implemented and live-verified** (redis-1, 2026-07-05: cpu/ram round-trip +
+> the deb13 root-not-last disk warning) — see §1 `scale-up` and the **§3.5** playbooks. Its cluster-safety
+> gate is exercised on Kafka's controller-leader (**§3.5.3**, `DEMO-161`).
 ¹ an FCI is a fixed 2-node shared-storage instance — `scale-out` returns a skip-with-explanation (grow via `sqlserver-ag` or `scale-up`).
 ² AG `scale-out add` re-seeds a replica via **manual seeding** (also the named recovery command for a drifted/NOT_HEALTHY secondary).
 ³ kafka failover = a controlled **controller-leader move** (`kafka-metadata-quorum`, RTO ≈ 4.5 s) — complements the cross-region `failover-test cluster kafka` MM2 DR drill (the `kafka` meta-cluster row).
@@ -266,7 +291,7 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 
 ⁴⁷ swarm scale-out = **reversible drain** (not `docker node rm`): `remove <node>` = `docker node update --availability drain` (+ `docker node demote` for managers, guarded by "not the raft leader AND ≥2 managers Ready") + `nomad node drain -enable -self`; `add --role <manager|worker>` re-`active`s (+ `promote`s) + re-enables Nomad eligibility on the drained node. Growing the fixed 3-manager + 3-worker fleet is a terraform op (documented in the OutcomeReason).
 
-⁴⁸ swarm backup = `consul snapshot save` + **`consul snapshot inspect`** (the round-trip verify) + `consul kv export` + `nomad operator snapshot save` on a manager → downloaded to `~/.nexus/backups/swarm/<id>/` (+ best-effort Portainer boltdb copy). `backup restore` is **deliberately refused** on the live cluster (`consul`/`nomad … snapshot restore` overwrite the live KV + job state in place — the DR runbook restores onto an isolated cluster).
+⁴⁸ swarm backup = `consul snapshot save` + **`consul snapshot inspect`** (the round-trip verify) + `consul kv export` + `nomad operator snapshot save` on a manager → downloaded to `~/.nexus/backups/swarm/<id>/` (+ best-effort Portainer boltdb copy). `backup restore` is **guarded (GAP #11, batch 3)**: `consul`/`nomad … snapshot restore` overwrite the live KV + job state in place, so it requires an explicit **`--confirm-destructive`** on top of `--yes` (refused, exit 2, without it); with it, it uploads the snapshots and restores online against the leader, counting restored KV keys + jobs. To recover onto an ISOLATED cluster instead, follow the DR runbook. Live-verified 2026-07-06; playbook §3.5.4, demo `DEMO-162`.
 
 ⁴⁹ swarm `cert-rotate` **force-reissues** each node's pki_int leaves: the vault-agent templates use the `pkiCert` function, which **persists + reuses** the leaf across restarts, so a bare `systemctl restart nexus-vault-agent` does NOT rotate — the verb `cp -a`+`rm`s the rendered bundle (with a `.bak` restore safety) so `pkiCert` re-issues on the next render, then restarts the services: **consul ROLLING** (workers → non-leader managers → leader) and **nomad PARALLEL big-bang** across all six ([[feedback_nomad_tls_rolling_restart_must_be_parallel]] — a rolling flip strands the first TLS node and raft can't elect). New vs old wire serials (via `openssl s_client`) prove the rotation.
 
@@ -714,3 +739,69 @@ The diagnostic ladder (run top-down; each rung names the fix):
 ### §3.4 AOT size gate
 ≤30 MB (linux-x64 + win-x64) for the 0.G line (ADR-0024). `pwsh -File scripts/cli.ps1 size-check`.
 Recorded per release in `docs/verification/0.G.N-<cluster>.md`.
+
+### §3.5 Batch-3 verb playbooks (scale-up · swarm guarded restore · kafka resize-gate)
+
+Human-readable mirrors of the batch-3 System B demos (input · expected · **where observed** · output ·
+prerequisites). Each was live-verified on the dates noted; the JSON demos are the auto-runnable form.
+
+#### §3.5.1 `scale-up` — vertical CPU/RAM resize (round-trip) · demo `DEMO-17-redis-scale-up`
+- **Prereqs:** the target's OLTP tier up (redis 6 VMs); Windows build host with `vmrun`; `NEXUS_VMS_YAML`,
+  `NEXUS_SSH_KEY`. The target must be a **live replica** (or pass `--force-primary`) — vms.yaml labels
+  redis-1 the shard1 primary by design, but Redis Cluster roles drift; the gate reads the live role.
+- **Step 1 — confirm the live role.** Input: `nexus status redis --json`. Expected: the target's
+  `role` is `replica`. Observed: **stdout**.
+- **Step 2 — resize up.** Input: `nexus scale-up redis-1 --cpu 4 --ram 3072 --yes --json`. Expected:
+  `"outcome":"ok"`, `"oldCpu":2`→`"newCpu":4`, `"oldRamMb":2048`→`"newRamMb":3072`, `durationSec` ~30–60.
+  Observed: **stdout** (the JSON), the guest (`ssh nexusadmin@192.168.70.81 'nproc; free -m'` → 4 CPUs /
+  ~3072 MB), the **VMware Workstation library** (redis-1 = 4 proc / 3 GB).
+- **Step 3 — resize back down.** Input: `nexus scale-up redis-1 --cpu 2 --ram 2048 --yes --json`.
+  Expected: `"newCpu":2`, `"newRamMb":2048` (re-running with the same values → `"outcome":"skipped"`).
+- **Proves:** a real, bidirectional vertical resizer (atomic `.vmx` edit + cold restart) that resizes a
+  replica with no impact to the shard's surviving primary. **Live-verified 2026-07-05 on redis-1.**
+
+#### §3.5.2 `scale-up --disk` — honest deb13 root-not-last warning · demo `DEMO-160-scale-up-disk-deb13`
+- **Prereqs:** as §3.5.1 + `vmware-vdiskmanager` on PATH (resolved by `VmrunPaths`).
+- **Step 1 — baseline.** Input: `ssh nexusadmin@192.168.70.81 'lsblk; findmnt -no SIZE /'`. Observed:
+  **stdout** — disk ~40 GiB, root FS size.
+- **Step 2 — grow the disk.** Input: `nexus scale-up redis-1 --disk 42 --yes --json`. Expected:
+  `"outcome":"ok"`, `"newDiskGb":42`, and `outcomeReason` = *"vmdk grown to 42 GB, but the in-guest root
+  filesystem was NOT auto-extended: root … a swap/extended partition likely follows it (root is not the
+  last partition …)"*. Observed: **stdout**.
+- **Step 3 — confirm honesty.** Input: `ssh … 'lsblk; findmnt -no SIZE /'`. Expected: the **disk** is
+  ~42 GiB but the **root FS is unchanged** — matching the warning. Observed: **stdout**.
+- **Proves:** the vmdk grows but the guest FS is left alone and reported truthfully (Outcome `ok` +
+  warning) rather than faking a resize — the never-repartition-a-live-boot-disk contract. **Follow-up
+  shipped:** deb13 preseed now uses a swapfile so root is the single growable partition; future clones
+  auto-extend. **Live-verified 2026-07-05 on redis-1 (40→42 GB).**
+
+#### §3.5.3 `scale-up` cluster-safety gate — refuse the Kafka controller-leader · demo `DEMO-161-kafka-resize-gate`
+- **Prereqs:** kafka-east 3 VMs up; `VAULT_ADDR`/`VAULT_TOKEN`/`VAULT_CACERT`. kafka-east-1 is the
+  current controller-leader (KRaft leadership drifts — else target the leader from step 1).
+- **Step 1 — identify the leader.** Input: `nexus status kafka-east --json`. Expected: exactly one member
+  `role=controller-leader`. Observed: **stdout**.
+- **Step 2 — attempt to resize the leader.** Input: `nexus scale-up kafka-east-1 --ram 6144 --yes --json`.
+  Expected: **REFUSED, exit 2** — *"'kafka-east-1' is the current primary/leader of cluster 'kafka-east';
+  resizing it now would disrupt the write window. Fail over first, or pass --force-primary to override."*
+  The VM is **not** powered off. Observed: **stdout**. (The meta `kafka` adapter routes the gate to the
+  region owner by vm-name match; locked by a unit test.)
+- **Follower + override (documented, not auto-run — it cold-restarts a live broker):** a controller
+  **follower** passes the gate — `nexus scale-up kafka-east-2 --ram <same-as-current> --yes` → `skipped`;
+  and `--force-primary` overrides the leader refusal: `nexus scale-up kafka-east-1 --ram 6144
+  --force-primary --yes`.
+- **Proves:** scale-up refuses to power-cycle the KRaft controller-leader (protecting the write window)
+  and honours `--force-primary`. **Live-verified 2026-07-06 on kafka-east.**
+
+#### §3.5.4 Swarm guarded `backup restore --confirm-destructive` · demo `DEMO-162-swarm-restore-confirm-destructive`
+- **Prereqs:** swarm 6 VMs up (smoke-0.E.4e GREEN); `VAULT_*`; Consul/Nomad ACL bootstrap tokens in KV;
+  `pwsh` on PATH. **DESTRUCTIVE** — overwrites live Consul KV + Nomad jobs in place.
+- **Step 1 — the guard.** Input: `nexus backup restore swarm <any-id> --yes` (no
+  `--confirm-destructive`). Expected: **REFUSED, exit 2** — *"swarm restore OVERWRITES the live Consul KV
+  + Nomad job state in place — refused without an explicit opt-in. Re-run with --confirm-destructive …"*.
+  The guard fires ahead of the backup-id lookup, so even a bogus id is refused. Observed: **stdout**.
+- **Step 2 — the GREEN restore (self-restore of a fresh snapshot).** Input (pwsh captures the take's id):
+  `pwsh -NoProfile -Command "$j=(nexus backup take swarm --tag restoredemo --json | ConvertFrom-Json).backupId; nexus backup restore swarm $j --yes --confirm-destructive; exit $LASTEXITCODE"`.
+  Expected: a GREEN `backup restore …` with `items restored : N` (restored Consul KV keys + Nomad jobs).
+  Observed: **stdout**; on a manager, `consul kv export | grep -c key` matches the count.
+- **Proves:** a real, guarded, online restore — refused without the extra opt-in, GREEN with it (runs
+  `consul`/`nomad snapshot restore` against the leader). **Live-verified 2026-07-06 on the swarm tier.**

@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-v0.8.6%20%E2%9C%85%20completeness%20pass%20(5%2F5%20non--data%20adapters)-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-v0.8.7%20%E2%9C%85%20completion%20backlog%20batch%203%20(scale--up%20%2B%20swarm%20restore%20%2B%20kafka%20gate)-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0.L.4) — a single ≤25 MB Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,13 +12,24 @@ The operator surface for the **NexusPlatform lab** (88 VMs built through Phase 0
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.8.6):** **completeness pass** — closed the first batch of the completion backlog INSIDE
-> the CLI (no external-script hops / "planned for vX" stubs): `cluster-status --verbose` now renders real
+> **Current state (v0.8.7):** **completion backlog, batch 3** — closed the last of the "big" gaps INSIDE the
+> CLI (no out-of-band hops): **`scale-up`** taken from skeleton to a full vertical resizer (`VmrunVmResizer` —
+> atomic `.vmx` cpu/ram edit + cold restart; `vmware-vdiskmanager -x` disk grow + a SAFE guest FS extend that
+> **never repartitions a live boot disk**, with an honest deb13 root-not-last warning); its **cluster-safety
+> gate** refuses the write-primary/KRaft controller-leader unless `--force-primary`; and **swarm `backup
+> restore`** became a real guarded restore behind `--confirm-destructive`. Batch 2 also landed the FoundationAD
+> `backup take` (`ntdsutil ifm create full`) + `failover-test` (graceful FSMO transfer of the 4 movable roles).
+> All live-verified; **310/310 tests; AOT 28.25 MB**. See CHANGELOG [0.8.7].
+>
+> <details><summary>v0.8.6 completeness pass — cluster-status timings + Redis acl + kafka meta delegation</summary>
+>
+> **v0.8.6 = completeness pass (batch 1)** — closed the first batch of the completion backlog INSIDE
+> the CLI (no external-script hops / "planned for vX" stubs): `cluster-status --verbose` renders real
 > per-component timings; **Redis `acl grant/revoke`** implemented (cluster-wide `ACL SETUSER`/`DELUSER` +
-> injection guard, live-verified); the **`kafka` meta-cluster now delegates** status/health/topology/backup/
-> cert-rotate/acl/chaos to the two per-region adapters and merges (no more `kafka.ps1`/`kafka-acls.sh on a
-> broker` pointers, live-verified east+west); + a live-caught backup bug fixed (`test -s`→`test -f` so an
-> empty-topic backup restores). 272/272 tests; AOT 28.10 MB. See CHANGELOG [0.8.6].
+> injection guard, live-verified); the **`kafka` meta-cluster delegates** status/health/topology/backup/
+> cert-rotate/acl/chaos to the two per-region adapters and merges (live-verified east+west); + a live-caught
+> backup bug fixed (`test -s`→`test -f` so an empty-topic backup restores). 272/272 tests; AOT 28.10 MB.
+> </details>
 >
 > <details><summary>v0.8.5 RegistryAdapter — Harbor registry HA (the last non-data-tier adapter; full-fleet coverage)</summary>
 >
@@ -406,7 +417,9 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Twenty-five ADRs cover fr
 | **v0.8.2** | Phase 0.E — the **Swarm adapter** (ClusterId `swarm`; the orchestration tier — Docker Swarm + Nomad + Consul + Portainer over 3 managers + 3 workers; the **most reusable** adapter — wires the v0.1–v0.5 Consul/Nomad/Portainer clients + ClusterStatusService + FailoverTestService into the full SPI; no managed driver; status/health/topology = the 3-way rollup + `docker node ls`; `--direction` failover to consul-leader/nomad-leader/swarm-manager [vmrun suspend] RTO≈2/3/21s; reversible `docker node drain`/`demote` scale-out; consul+nomad snapshot backup round-trip; force-reissue cert-rotate consul-rolling/nomad-parallel; Consul+Nomad acl; nexus-chaos.sh on a worker + docker-restart-after-nft); all verbs live-verified + cold-rebuild-proven (3 bugs fixed); **27.59 MB**, 173/173 tests |
 | **v0.8.3** | Phase 0.I — the **Observability adapter** (ClusterId `observability`; the Grafana LGTM tier over 14 VMs + 2 VRRP VIPs; SSH-local-curl posture; `failover grafana` VRRP cutover RTO≈1.2s; Loki/Tempo ring scale-out; vault-agent force-rerender cert-rotate; Grafana org-user acl; backup graceful N/A); 8 verbs live-verified + cold-rebuild-proven (2 bugs fixed); **27.59 MB**, 194/194 tests |
 | **v0.8.4** | Phase 0.L — the **Lakehouse adapter** (ClusterId `lakehouse`; ONE component-aware adapter over MinIO EC + Iceberg/Nessie + Spark ZK-HA + ZooKeeper, 16 VMs + 1 VRRP VIP; `failover spark-master` ZK auto-promote RTO≈31s [iceberg-pg = graceful N/A — VRRP cutover split-brains the catalog DB]; scale-out N/A; cert-rotate MinIO-big-bang + Nessie [Spark/ZK N/A]; `mc admin` acl; `mc mirror s3://warehouse` backup; process-kill-a-MinIO-node chaos — EC tolerates 1); 11 verbs live-verified as-is + full matrix green post-rebuild (Iceberg+Spark cold-rebuild fixed the cross-tier CA split + iceberg-pg replication split; 2 bugs fixed); **27.59 MB**, 223/223 tests |
-| v0.8.5 | the last non-data-tier adapter (Harbor registry HA) |
+| **v0.8.5** | Phase 0.L.4 — the **Registry adapter** (ClusterId `registry`; Harbor registry HA — the last non-data-tier adapter, completing full-fleet `IClusterAdapter` coverage); all verbs live-verified + cold-rebuild-proven; **28.04 MB**, 243/243 tests |
+| **v0.8.6** | **Completion backlog, batch 1** — `cluster-status --verbose` timings + **Redis `acl grant/revoke`** + the **`kafka` meta-cluster delegates** to the two per-region adapters and merges; 1 live-caught backup bug fixed (`test -s`→`test -f`); **28.10 MB**, 272/272 tests |
+| **v0.8.7** | **Completion backlog, batches 2–3** — **`scale-up`** skeleton → full vertical resizer (`VmrunVmResizer`: atomic `.vmx` cpu/ram edit + cold restart; `vmware-vdiskmanager -x` disk grow + a SAFE guest FS extend that never repartitions a live boot disk, honest deb13 root-not-last warning) with a cluster-safety gate (refuses the write-primary/controller-leader unless `--force-primary`); **swarm `backup restore`** guarded behind `--confirm-destructive`; **kafka resize-gate** (controller-leader); FoundationAD **`backup take`** (`ntdsutil ifm`) + **`failover-test`** (graceful FSMO transfer); demos/playbooks/handbook §3.5 for all; **28.25 MB**, 310/310 tests |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing

@@ -1,0 +1,31 @@
+{
+  "id": "DEMO-161-kafka-resize-gate",
+  "title": "scale-up gate: refuse the Kafka controller-leader (--force-primary override)",
+  "description": "The cluster-safety gate of scale-up (GAP #4, batch 3) shown on Kafka. scale-up resolves a broker VM to its per-region adapter (kafka-east-1 -> the `kafka-east` KafkaClusterAdapter; the meta `kafka` adapter delegates CanResizeVm to the region owning the VM) and gates on the KRaft controller-leader: KafkaClusterAdapter.CanResizeVm returns false when the target's live role is `controller-leader`, so a resize of the leader is refused (it would power-cycle the controller / write window). A follower/non-leader broker passes the gate; --force-primary is the explicit override. This demo only exercises the NON-destructive refusal path (a real follower resize would cold-restart a live broker -- see the handbook playbook for the follower + override commands). Live-verified 2026-07-06 on kafka-east: scale-up of the controller-leader (kafka-east-1) was refused ('... pass --force-primary'); a follower (kafka-east-2) passed the gate.",
+  "prerequisites": {
+    "vmsAlive": ["kafka-east-1", "kafka-east-2", "kafka-east-3"],
+    "envVars": ["NEXUS_SSH_KEY", "NEXUS_VMS_YAML", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"],
+    "smokeGate": "nexus-infra-kafka smoke-0.H.2 ALL GREEN; kafka-east-1 is the CURRENT controller-leader (KRaft leadership drifts -- if not, target the leader shown in step 1)"
+  },
+  "steps": [
+    {
+      "command": "nexus status kafka-east --json",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["controller-leader"],
+      "observe": [
+        { "where": "stdout", "what": "exactly one member has role=controller-leader (the KRaft quorum leader); the other controllers are controller-follower. This is the role the gate reads via CanResizeVm. A follower here is eligible for a no-force resize." }
+      ]
+    },
+    {
+      "command": "nexus scale-up kafka-east-1 --ram 6144 --yes --json",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 2,
+      "expectedOutputContains": ["write window", "--force-primary"],
+      "observe": [
+        { "where": "stdout", "what": "REFUSED: \"'kafka-east-1' is the current primary/leader of cluster 'kafka-east'; resizing it now would disrupt the write window. Fail over first, or pass --force-primary to override.\" Exit code 2 -- the VM is NOT powered off. The meta adapter routed the gate to kafka-east via the vm-name region match; the resolution is locked by a unit test." }
+      ]
+    }
+  ],
+  "whatProves": "scale-up's cluster-safety gate is Kafka-aware: it resolves a broker to its region adapter and refuses to power-cycle the KRaft controller-leader (protecting the write window), returning exit 2 without touching the VM. A controller-follower passes the gate (a no-force resize proceeds); --force-primary overrides the refusal on the leader -- both shown in the handbook playbook."
+}

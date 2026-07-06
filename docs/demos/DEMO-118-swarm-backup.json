@@ -41,16 +41,16 @@
       "waitAfterSeconds": 2,
       "expectedExitCode": 2,
       "expectedOutputContains": [
-        "intentionally NOT exposed",
-        "isolated cluster"
+        "OVERWRITES",
+        "--confirm-destructive"
       ],
       "observe": [
         {
-          "where": "stderr",
-          "what": "restore is deliberately refused on the live cluster (would overwrite live KV/jobs)"
+          "where": "stdout",
+          "what": "restore is GUARDED (GAP #11, batch 3): refused without an explicit --confirm-destructive opt-in (would overwrite live Consul KV / Nomad jobs). The full guarded round-trip is DEMO-162."
         }
       ]
     }
   ],
-  "whatProves": "SwarmAdapter.BackupTakeAsync captures + round-trip-verifies the Consul/Nomad raft snapshots to a build-host file; BackupRestoreAsync refuses a live in-place restore (DR runbook on an isolated cluster)."
+  "whatProves": "SwarmAdapter.BackupTakeAsync captures + round-trip-verifies the Consul/Nomad raft snapshots to a build-host file; BackupRestoreAsync now performs a REAL in-place restore but only behind --confirm-destructive (refused here without it -- see DEMO-162 for the GREEN path)."
 }

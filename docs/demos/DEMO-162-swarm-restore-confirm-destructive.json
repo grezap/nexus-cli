@@ -1,0 +1,32 @@
+{
+  "id": "DEMO-162-swarm-restore-confirm-destructive",
+  "title": "Swarm: guarded backup restore behind --confirm-destructive (GAP #11)",
+  "description": "swarm `backup restore` used to be a hard refusal; batch 3 makes it a REAL restore behind an explicit --confirm-destructive flag (on top of --yes). SwarmAdapter.BackupRestoreAsync refuses without ConfirmDestructive (pointing at the DR runbook), and with it uploads the take's consul.snap / nomad.snap to a manager and runs `consul snapshot restore` + `nomad operator snapshot restore` online against the leader, counting restored Consul KV keys + Nomad jobs. Step 1 proves the guard (refused, exit 2). Step 2 proves the GREEN path by taking a fresh snapshot and restoring THAT SAME snapshot in place -- an idempotent self-restore (identical KV/jobs), exactly what was live-verified 2026-07-06. DESTRUCTIVE by design: it overwrites live Consul KV + Nomad job state (here with identical data). Recovering an ISOLATED cluster from a DIFFERENT backup follows the DR runbook (handbook 3).",
+  "prerequisites": {
+    "vmsAlive": ["swarm-manager-1", "swarm-manager-2", "swarm-manager-3", "swarm-worker-1", "swarm-worker-2", "swarm-worker-3"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT"],
+    "smokeGate": "nexus-infra-swarm-nomad smoke-0.E.4e ALL GREEN; pwsh on PATH (step 2 captures the take's backupId); Consul/Nomad ACL bootstrap tokens seeded in Vault KV"
+  },
+  "steps": [
+    {
+      "command": "nexus backup restore swarm swarm-guard-check --yes",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 2,
+      "expectedOutputContains": ["OVERWRITES", "--confirm-destructive"],
+      "observe": [
+        { "where": "stdout", "what": "REFUSED before touching the cluster: 'swarm restore OVERWRITES the live Consul KV + Nomad job state in place -- refused without an explicit opt-in. Re-run with --confirm-destructive (in addition to --yes) ...'. Exit 2. The guard fires ahead of the backup-id lookup, so even a bogus id is refused." }
+      ]
+    },
+    {
+      "command": "pwsh -NoProfile -Command \"$j=(nexus backup take swarm --tag restoredemo --json | ConvertFrom-Json).backupId; Write-Host TAKE=$j; nexus backup restore swarm $j --yes --confirm-destructive; exit $LASTEXITCODE\"",
+      "waitAfterSeconds": 12,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["TAKE=swarm-restoredemo-", "items restored"],
+      "observe": [
+        { "where": "stdout", "what": "TAKE=swarm-restoredemo-<timestamp> (the id from the fresh take), then a GREEN 'backup restore swarm-restoredemo-...' rule with 'items restored : N' = restored Consul KV keys + Nomad jobs. The consul/nomad snapshot restore ran online against the leader." },
+        { "where": "ssh nexusadmin@<swarm-manager> 'export CONSUL_HTTP_ADDR=... ; consul kv export | grep -c key'", "what": "the Consul KV key count matches the restored count -- the restore actually replaced state (with the identical fresh snapshot)" }
+      ]
+    }
+  ],
+  "whatProves": "swarm backup restore is a real, guarded, online restore: refused without --confirm-destructive (exit 2, no cluster change), and with it runs consul + nomad snapshot restore against the leader and reports the restored item count. The extra opt-in prevents an accidental in-place overwrite of the live orchestration tier."
+}

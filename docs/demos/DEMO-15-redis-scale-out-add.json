@@ -1,7 +1,7 @@
 {
   "id": "DEMO-15-redis-scale-out-add",
   "title": "Redis: scale-out add a 4th shard replica pair",
-  "description": "Adds a new shard (or a replica to an existing shard) via `nexus scale-out add redis`. Clones a new VM from the oltp-node template, installs redis-server, joins the cluster, reshards slots. STUBBED in v0.6.0; demo will fail with a clear 'lands in 0.G.1.x' message until the substantive add-node logic ships.",
+  "description": "Adds a new shard (or a replica to an existing shard) via `nexus scale-out add redis`. Clones a new VM from the oltp-node template, installs redis-server, joins the cluster, reshards slots. Live-verified 2026-06-05.",
   "prerequisites": {
     "vmsAlive": ["redis-1", "redis-2", "redis-3", "redis-4", "redis-5", "redis-6"],
     "envVars": ["NEXUS_SSH_KEY", "NEXUS_VMRUN_PATH"]
@@ -18,5 +18,5 @@
       ]
     }
   ],
-  "whatProves": "Redis Cluster can grow horizontally via `redis-cli --cluster add-node` + reshard. (Stubbed in v0.6.0; lands in 0.G.1.x.)"
+  "whatProves": "Redis Cluster can grow horizontally via `redis-cli --cluster add-node` + reshard."
 }

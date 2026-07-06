@@ -1,7 +1,7 @@
 {
   "id": "DEMO-21-redis-chaos",
   "title": "Redis: chaos -- network-partition a single node",
-  "description": "Injects a network partition on a single Redis node via nftables rules + observes whether the cluster heals + re-converges. STUBBED in v0.6.0 (chaos tooling lands in 0.G.x).",
+  "description": "Injects a network partition on a single Redis node via nftables rules + observes whether the cluster heals + re-converges. Live-verified 2026-06-05.",
   "prerequisites": {
     "vmsAlive": ["redis-1", "redis-2", "redis-3", "redis-4", "redis-5", "redis-6"],
     "envVars": ["NEXUS_SSH_KEY"]
@@ -18,5 +18,5 @@
       ]
     }
   ],
-  "whatProves": "Redis Cluster tolerates a single-node network partition; gossip protocol re-converges within seconds of the partition lifting. (Stubbed in v0.6.0; chaos tooling lands in 0.G.x.)"
+  "whatProves": "Redis Cluster tolerates a single-node network partition; gossip protocol re-converges within seconds of the partition lifting."
 }

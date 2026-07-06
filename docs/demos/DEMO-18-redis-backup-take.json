@@ -1,7 +1,7 @@
 {
   "id": "DEMO-18-redis-backup-take",
   "title": "Redis: take a backup",
-  "description": "Snapshots the cluster via BGSAVE on every shard primary; scp's the RDB to the NFS export on nexus-gateway. STUBBED in v0.6.0.",
+  "description": "Snapshots the cluster via BGSAVE on every shard primary; scp's the RDB to the NFS export on nexus-gateway. Live-verified 2026-06-05.",
   "prerequisites": {
     "vmsAlive": ["redis-1", "redis-2", "redis-3", "redis-4", "redis-5", "redis-6", "nexus-gateway"],
     "envVars": ["NEXUS_SSH_KEY"]
@@ -18,5 +18,5 @@
       ]
     }
   ],
-  "whatProves": "Per-shard BGSAVE + scp to gateway NFS is recoverable; the backup id is durable across CLI invocations. (Stubbed in v0.6.0; lands in 0.G.1.x.)"
+  "whatProves": "Per-shard BGSAVE + scp to gateway NFS is recoverable; the backup id is durable across CLI invocations."
 }

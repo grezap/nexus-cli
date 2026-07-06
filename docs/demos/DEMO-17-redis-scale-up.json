@@ -1,22 +1,42 @@
 {
   "id": "DEMO-17-redis-scale-up",
-  "title": "Redis: scale-up a replica VM (RAM)",
-  "description": "Vertically resizes a Redis replica VM. The IVmResizer powers off via vmrun, edits the .vmx (`memsize`), restarts, and verifies. Cluster-aware -- refuses primaries unless --force-primary. STUBBED in v0.6.0 (the full vmrun stop + .vmx edit + start sequence lands in 0.G.1.x).",
+  "title": "Redis: scale-up a replica VM (CPU + RAM, round-trip)",
+  "description": "Vertically resizes a Redis VM with the FULLY-IMPLEMENTED scale-up verb (GAP #13, batch 3). The VmrunVmResizer powers off via vmrun, makes an atomic .vmx edit (numvcpus / memsize), cold-starts, and reports old->new. It is cluster-aware: it resolves redis's owning adapter, warms its status, and consults RedisAdapter.CanResizeVm -- refusing the current write-primary unless --force-primary. NOTE: vms.yaml labels redis-1 the shard1 primary BY DESIGN, but Redis Cluster master/replica roles drift at runtime; the gate reads the LIVE role. Step 1 confirms the live role before resizing (resize a node only while it is a replica, or pass --force-primary). Live-verified 2026-07-05 on redis-1: cpu 2->4->2, ram 2048->3072->2048 (guest nproc=4, MemTotal ~3 GB), then a clean scale-DOWN back.",
   "prerequisites": {
     "vmsAlive": ["redis-1", "redis-2", "redis-3", "redis-4", "redis-5", "redis-6"],
-    "envVars": ["NEXUS_SSH_KEY", "NEXUS_VMRUN_PATH"]
+    "envVars": ["NEXUS_SSH_KEY", "NEXUS_VMS_YAML", "NEXUS_VMRUN"],
+    "smokeGate": "nexus-infra-oltp smoke-0.G.1 ALL GREEN; build host = Windows (vmrun + vmware-vdiskmanager on PATH via VmrunPaths)"
   },
   "steps": [
     {
-      "command": "nexus scale-up redis-2 --ram 4096 --yes",
-      "waitAfterSeconds": 5,
+      "command": "nexus status redis --json",
+      "waitAfterSeconds": 2,
       "expectedExitCode": 0,
-      "expectedOutputContains": ["scale-up", "ok"],
+      "expectedOutputContains": ["redis-1", "replica"],
       "observe": [
-        { "where": "stdout", "what": "old/new table: ram (MB) 2048 -> 4096; outcome=ok; duration ~30-60s (graceful guest shutdown + restart)" },
-        { "where": "VMware Workstation Pro library", "what": "redis-2's settings show 4 GB RAM" }
+        { "where": "stdout", "what": "the live role of each node; confirm the resize target (redis-1) is currently a REPLICA -> the cluster-safety gate will allow the resize. If it is a live master, fail it over first or pass --force-primary." }
+      ]
+    },
+    {
+      "command": "nexus scale-up redis-1 --cpu 4 --ram 3072 --yes --json",
+      "waitAfterSeconds": 60,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["\"outcome\":\"ok\"", "\"newCpu\":4", "\"newRamMb\":3072"],
+      "observe": [
+        { "where": "stdout", "what": "JSON: outcome=ok; oldCpu 2 -> newCpu 4; oldRamMb 2048 -> newRamMb 3072; durationSec ~30-60 (graceful guest shutdown + atomic .vmx edit + cold start)" },
+        { "where": "ssh nexusadmin@192.168.70.81 'nproc; free -m'", "what": "guest now reports 4 CPUs and MemTotal ~3072 MB -- the .vmx edit took effect on cold boot" },
+        { "where": "VMware Workstation Pro library", "what": "redis-1 settings show 4 processors + 3 GB RAM" }
+      ]
+    },
+    {
+      "command": "nexus scale-up redis-1 --cpu 2 --ram 2048 --yes --json",
+      "waitAfterSeconds": 60,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["\"outcome\":\"ok\"", "\"newCpu\":2", "\"newRamMb\":2048"],
+      "observe": [
+        { "where": "stdout", "what": "scale-DOWN back to 2 CPU / 2048 MB (right-sized per feedback_prefer_less_memory) -- resize is bidirectional and idempotent; re-running with the same values returns outcome=skipped" }
       ]
     }
   ],
-  "whatProves": "scale-up is cluster-aware (refused primary without --force-primary) and idempotent (re-running with same size = no-op). (Stubbed in v0.6.0; lands in 0.G.1.x.)"
+  "whatProves": "scale-up is a real, bidirectional vertical resizer (cpu + ram via atomic .vmx edit + cold restart) and is cluster-aware: it resizes a Redis replica with no impact to the shard's surviving primary, and would refuse the live write-primary without --force-primary."
 }

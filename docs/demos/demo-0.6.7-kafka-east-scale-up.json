@@ -1,7 +1,7 @@
 {
   "id": "demo-0.6.7-kafka-east-scale-up",
-  "title": "Kafka east scale-up: refuse the leader",
-  "description": "CanResizeVm refuses the current controller-leader (would disrupt the write window) and allows followers.",
+  "title": "Kafka east scale-up: refuse the controller-leader",
+  "description": "scale-up's cluster-safety gate on Kafka (GAP #4, batch 3 -- now fully implemented, not a stub). KafkaClusterAdapter.CanResizeVm refuses the current controller-leader (a resize would power-cycle the KRaft controller / write window) and allows followers. The meta `kafka` adapter delegates CanResizeVm to the region owning the VM. Superset demo with the actual refusal output: DEMO-161-kafka-resize-gate. Live-verified 2026-07-06 on kafka-east.",
   "prerequisites": {
     "vmsAlive": [
       "kafka-east-1",
@@ -25,10 +25,10 @@
       "observe": [
         {
           "where": "stdout",
-          "what": "the leader is identified; scale-up of a follower is allowed, the leader refused"
+          "what": "the controller-leader is identified; a scale-up of a follower is allowed, the leader refused (exit 2 with a --force-primary hint -- see DEMO-161)"
         }
       ]
     }
   ],
-  "whatProves": "scale-up honors the leader-safety guard via CanResizeVm."
+  "whatProves": "scale-up honors the controller-leader safety guard via CanResizeVm (fully implemented in batch 3; refusal output shown in DEMO-161)."
 }
