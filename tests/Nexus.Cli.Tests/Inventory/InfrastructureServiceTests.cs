@@ -221,6 +221,12 @@ public class InfrastructureServiceTests
             => Task.FromResult(Result.Fail<bool>("unavailable"));
         public Task<Result<bool>> ResumeAsync(string vmx, CancellationToken ct)
             => Task.FromResult(Result.Fail<bool>("unavailable"));
+        public Task<Result<bool>> StopAsync(string vmx, bool hard, CancellationToken ct)
+            => Task.FromResult(Result.Fail<bool>("unavailable"));
+        public Task<Result<bool>> StartAsync(string vmx, CancellationToken ct)
+            => Task.FromResult(Result.Fail<bool>("unavailable"));
+        public Task<Result<bool>> GrowVirtualDiskAsync(string vmdk, int newSizeGb, CancellationToken ct)
+            => Task.FromResult(Result.Fail<bool>("unavailable"));
     }
 
     private sealed class RecordingVmrun : IVmrunClient
@@ -228,6 +234,9 @@ public class InfrastructureServiceTests
         private readonly IReadOnlySet<string> _running;
         public List<string> SuspendCalls { get; } = new();
         public List<string> ResumeCalls { get; } = new();
+        public List<string> StopCalls { get; } = new();
+        public List<string> StartCalls { get; } = new();
+        public List<(string Vmdk, int Gb)> GrowCalls { get; } = new();
 
         public RecordingVmrun(IReadOnlySet<string>? running = null)
             => _running = running ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -246,6 +255,24 @@ public class InfrastructureServiceTests
         public Task<Result<bool>> ResumeAsync(string vmx, CancellationToken ct)
         {
             ResumeCalls.Add(vmx);
+            return Task.FromResult(Result.Ok(true));
+        }
+
+        public Task<Result<bool>> StopAsync(string vmx, bool hard, CancellationToken ct)
+        {
+            StopCalls.Add(vmx);
+            return Task.FromResult(Result.Ok(true));
+        }
+
+        public Task<Result<bool>> StartAsync(string vmx, CancellationToken ct)
+        {
+            StartCalls.Add(vmx);
+            return Task.FromResult(Result.Ok(true));
+        }
+
+        public Task<Result<bool>> GrowVirtualDiskAsync(string vmdk, int newSizeGb, CancellationToken ct)
+        {
+            GrowCalls.Add((vmdk, newSizeGb));
             return Task.FromResult(Result.Ok(true));
         }
     }

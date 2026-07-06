@@ -146,7 +146,8 @@ public sealed record BackupResult(
 
 public sealed record RestoreRequest(
     string BackupId,
-    string? AtTimestamp = null);            // for point-in-time-recovery; null = restore to backup completion time
+    string? AtTimestamp = null,             // for point-in-time-recovery; null = restore to backup completion time
+    bool ConfirmDestructive = false);       // extra opt-in for adapters whose restore overwrites LIVE state in place (e.g. Swarm consul/nomad snapshot restore)
 
 public sealed record RestoreResult(
     string BackupId,

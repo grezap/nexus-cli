@@ -708,17 +708,72 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
             StartedAtUtc: startedAt));
     }
 
-    public Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
+    public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
-        // `consul snapshot restore` / `nomad operator snapshot restore` REPLACE the
-        // live KV + job state of the running orchestration tier. Surfacing that as a
-        // one-liner against the live cluster is too dangerous; the take-time
-        // `consul snapshot inspect` already proves the snapshot is restorable.
-        return Task.FromResult(Result.Fail<RestoreResult>(
-            "restore is intentionally NOT exposed for the live orchestration tier — `consul snapshot restore` / "
-            + "`nomad operator snapshot restore` overwrite the live KV + job state in place. Backups are verified "
-            + "non-destructively at take time (consul snapshot inspect). To recover, follow the DR runbook (handbook §3) "
-            + "on an isolated cluster, never the live one."));
+        // GUARD: `consul snapshot restore` / `nomad operator snapshot restore` REPLACE
+        // the live KV + job state of the running orchestration tier in place. Require
+        // an EXPLICIT --confirm-destructive (on top of the command's --yes) before
+        // touching the live cluster.
+        if (!request.ConfirmDestructive)
+            return Result.Fail<RestoreResult>(
+                "swarm restore OVERWRITES the live Consul KV + Nomad job state in place — refused without an explicit opt-in. "
+                + "Re-run with --confirm-destructive (in addition to --yes) once certain. Backups are verified non-destructively "
+                + "at take time (consul snapshot inspect); to recover onto an ISOLATED cluster instead, follow the DR runbook (handbook §3).");
+
+        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nexus", "backups", "swarm", request.BackupId);
+        var consulSnapLocal = Path.Combine(dir, "consul.snap");
+        var nomadSnapLocal = Path.Combine(dir, "nomad.snap");
+        if (!File.Exists(consulSnapLocal) && !File.Exists(nomadSnapLocal))
+            return Result.Fail<RestoreResult>($"backup '{request.BackupId}' not found under {dir} (expected consul.snap / nomad.snap from a prior `backup take swarm`).");
+
+        var nodesR = Nodes();
+        if (nodesR.IsFail) return Result.Fail<RestoreResult>(nodesR.Error!);
+        var (managers, _) = nodesR.Value;
+        var svcR = await ServicesAsync(cancellationToken).ConfigureAwait(false);
+        if (svcR.IsFail) return Result.Fail<RestoreResult>(svcR.Error!);
+        var s = svcR.Value!;
+        var via = await PickManagerAsync(s, managers, cancellationToken).ConfigureAwait(false);
+        var ip = via.Vmnet11;
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var sw = Stopwatch.StartNew();
+        var consulEnv = $"CONSUL_HTTP_ADDR=https://127.0.0.1:{ConsulPort} CONSUL_CACERT={ConsulCa} CONSUL_HTTP_TOKEN='{s.ConsulToken}'";
+        var nomadEnv = $"NOMAD_ADDR=https://127.0.0.1:{NomadPort} NOMAD_CACERT={NomadCa} NOMAD_TOKEN='{s.NomadToken}'";
+        var remoteConsul = $"/tmp/restore-{request.BackupId}-consul.snap";
+        var remoteNomad = $"/tmp/restore-{request.BackupId}-nomad.snap";
+        long items = 0;
+
+        // 1. Consul: upload snapshot + `consul snapshot restore` (online, to the leader).
+        if (File.Exists(consulSnapLocal))
+        {
+            var bytes = await File.ReadAllBytesAsync(consulSnapLocal, cancellationToken).ConfigureAwait(false);
+            var up = await _ssh.UploadBytesAsync(T(ip), bytes, remoteConsul, SshTimeout, cancellationToken).ConfigureAwait(false);
+            if (up.IsFail) return Result.Fail<RestoreResult>($"upload consul.snap to {via.Name} failed: {up.Error}");
+            var rr = await _ssh.ExecuteAsync(T(ip), $"export {consulEnv}; consul snapshot restore {remoteConsul} 2>&1", SshTimeout, cancellationToken).ConfigureAwait(false);
+            if (rr.IsFail || rr.Value!.ExitCode != 0)
+                return Result.Fail<RestoreResult>($"consul snapshot restore failed on {via.Name}: {(rr.IsFail ? rr.Error : Tail(rr.Value!.Stdout + rr.Value.Stderr, 300))}");
+            var cnt = await _ssh.ExecuteAsync(T(ip), $"export {consulEnv}; consul kv export 2>/dev/null | grep -c '\"key\"'", SshTimeout, cancellationToken).ConfigureAwait(false);
+            if (cnt.IsOk && long.TryParse(cnt.Value!.Stdout.Trim(), out var k)) items += k;
+        }
+
+        // 2. Nomad: upload snapshot + `nomad operator snapshot restore` (online).
+        if (File.Exists(nomadSnapLocal))
+        {
+            var bytes = await File.ReadAllBytesAsync(nomadSnapLocal, cancellationToken).ConfigureAwait(false);
+            var up = await _ssh.UploadBytesAsync(T(ip), bytes, remoteNomad, SshTimeout, cancellationToken).ConfigureAwait(false);
+            if (up.IsFail) return Result.Fail<RestoreResult>($"upload nomad.snap to {via.Name} failed: {up.Error}");
+            var rr = await _ssh.ExecuteAsync(T(ip), $"export {nomadEnv}; nomad operator snapshot restore {remoteNomad} 2>&1", SshTimeout, cancellationToken).ConfigureAwait(false);
+            if (rr.IsFail || rr.Value!.ExitCode != 0)
+                return Result.Fail<RestoreResult>($"nomad operator snapshot restore failed on {via.Name}: {(rr.IsFail ? rr.Error : Tail(rr.Value!.Stdout + rr.Value.Stderr, 300))}");
+            var cnt = await _ssh.ExecuteAsync(T(ip), $"export {nomadEnv}; nomad job status 2>/dev/null | tail -n +2 | grep -c .", SshTimeout, cancellationToken).ConfigureAwait(false);
+            if (cnt.IsOk && long.TryParse(cnt.Value!.Stdout.Trim(), out var j)) items += j;
+        }
+
+        // 3. Cleanup remote temp snapshots.
+        await _ssh.ExecuteAsync(T(ip), $"sudo rm -f {remoteConsul} {remoteNomad}; echo CLEAN", SshTimeout, cancellationToken).ConfigureAwait(false);
+        sw.Stop();
+
+        return Result.Ok(new RestoreResult(request.BackupId, items, sw.Elapsed, startedAt));
     }
 
     // === RotateCertAsync (vault-agent re-render; consul rolling, nomad parallel) ===

@@ -126,6 +126,12 @@ public static class ClusterBootstrapper
     {
         var catalog = new VmsYamlCatalog();
         var vmrun = new VmrunProcessClient();
-        return new VmrunVmResizer(catalog, vmrun, registry);
+        var ssh = new SshNetClient();
+        var sshKey = SshKeyDiscovery.Resolve()
+            ?? throw new InvalidOperationException(SshKeyDiscovery.UnavailableMessage());
+        var sshUser = Environment.GetEnvironmentVariable(SshUserEnvVar);
+        if (string.IsNullOrWhiteSpace(sshUser))
+            sshUser = DefaultSshUser;
+        return new VmrunVmResizer(catalog, vmrun, registry, ssh, sshUser, sshKey);
     }
 }

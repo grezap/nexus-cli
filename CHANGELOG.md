@@ -6,6 +6,46 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Completion backlog, batch 3 (scale-up + swarm restore + kafka resize-gate — closing the last of the
+"big" nexus-cli GAPs INSIDE the tool, no out-of-band hops).
+
+- **`scale-up` / `VmrunVmResizer` (GAP #13) — the biggest gap, taken from skeleton to a full verb.**
+  Vertical resize of a VM: CPU/RAM via `vmrun stop` → an **atomic `.vmx` edit** (`numvcpus`/`memsize`) →
+  cold start; disk via **`vmware-vdiskmanager -x`** grow + a **safe** in-guest filesystem extend. New
+  `IVmrunClient.StopAsync`/`StartAsync`/`GrowVirtualDiskAsync`; `BuildVmResizer` now wires an `ISshClient`
+  for the guest-side grow. `VmrunPaths.ResolveVdiskManager()` locates vmware-vdiskmanager alongside vmrun.
+  - **Cluster-aware safety gate:** resolves the owning adapter for the target VM — 1:1 by vms.yaml cluster,
+    plus the documented splits (`sqlserver`/`sqlserver-ag`, `vault`/`foundation-ad`, `registry`↔`platform-tools`)
+    — warms its status, and consults `CanResizeVm`. Refuses the current write-primary/leader unless
+    `--force-primary`; VMs with no data-cluster adapter (edge/workstations) skip the gate. If the cluster
+    can't be reached to prove the VM isn't the primary, it refuses (force to override).
+  - **Disk grow is SAFE + honest:** `growpart --dry-run` gates the in-guest extend (installs
+    `cloud-guest-utils` if missing); handles LVM + plain-partition; **never repartitions a live boot disk**.
+    When root isn't the last partition (the **deb13 default swap-after-root layout**), the vmdk grows but the
+    guest FS is left untouched and reported accurately (Outcome `ok`, with a clear warning) — no false success.
+  - **Live-verified on redis-1:** cpu 2→4 + ram 2048→3072 (guest `nproc`=4, MemTotal ~3 GB), then a scale-DOWN
+    4→2 / 3072→2048; disk 40→41→42 GB vmdk grow (guest `lsblk` confirms; `growpart --dry-run` correctly detects
+    the root-not-last layout → honest "not auto-extended" warning). **FOLLOW-UP:** revise the deb13 packer
+    template so root is growable (root-last / swapfile) — until then `--disk` grows the vmdk but the deb13
+    guest root FS needs a manual/repartition extend.
+- **Swarm guarded `backup restore` (GAP #11)** (was a hard refusal) — now a real restore behind an explicit
+  **`--confirm-destructive`** flag (on top of `--yes`): uploads the take's `consul.snap`/`nomad.snap` back to a
+  manager and runs `consul snapshot restore` + `nomad operator snapshot restore` (online, to the leader),
+  counting restored Consul KV keys + Nomad jobs. `RestoreRequest` gained `ConfirmDestructive`; refuses without
+  it (points at the DR runbook for isolated-cluster recovery). **Live-verified** on the swarm tier: the guard
+  refuses without the flag; with it, restoring a just-taken snapshot runs GREEN. *(Recovering the tier for the
+  verify surfaced a Consul `server_rejoin_age_max` >7-day-off freeze — fixed non-destructively via a config
+  override; FOLLOW-UP: bake `server_rejoin_age_max` into the swarm consul template so a >7-day-off bring-up
+  doesn't freeze.)*
+- **Kafka resize-gate (GAP #4)** — the meta `KafkaAdapter` delegates `CanResizeVm` to the per-region adapters
+  (from batch-1 v0.8.6) and `KafkaClusterAdapter` gates on the **controller-leader** (`Role != "controller-leader"`,
+  requires a warmed status); the scale-up flow resolves a broker VM to its per-region adapter (`kafka-east-1` →
+  `kafka-east`). **Live-verified on kafka-east:** `scale-up` the controller-leader (kafka-east-1) is refused
+  ("…pass --force-primary"); a follower (kafka-east-2) passes the gate (→ no-op skipped). Locked with a
+  resolution unit test.
+- AOT win-x64 **28.25 MB / 30**; **310/310 tests** (+29: VmrunVmResizer resolution/parse/edit/gate/disk +
+  2 kafka resolution cases).
+
 Completion backlog, batch 2 (continuing the nexus-cli completeness pass — closing the FoundationAD
 deferred verbs INSIDE the adapter, no out-of-band hops).
 

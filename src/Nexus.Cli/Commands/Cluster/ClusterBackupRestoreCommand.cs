@@ -42,7 +42,7 @@ public sealed class ClusterBackupRestoreCommand : AsyncCommand<ClusterBackupRest
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromMinutes(60));
-            var request = new RestoreRequest(settings.BackupId, settings.At);
+            var request = new RestoreRequest(settings.BackupId, settings.At, settings.ConfirmDestructive);
             var r = await adapterResult.Value!.BackupRestoreAsync(request, cts.Token).ConfigureAwait(false);
             if (r.IsFail)
             {

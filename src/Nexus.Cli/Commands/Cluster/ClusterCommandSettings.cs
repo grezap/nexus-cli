@@ -134,6 +134,10 @@ public sealed class ClusterBackupRestoreSettings : ClusterTargetSettingsBase
     [CommandOption("--at <TIMESTAMP>")]
     [Description("Point-in-time-recovery target (cluster-specific format); restores to backup completion time if omitted.")]
     public string? At { get; set; }
+
+    [CommandOption("--confirm-destructive")]
+    [Description("Extra opt-in required by adapters whose restore OVERWRITES live state in place (e.g. swarm consul/nomad snapshot restore).")]
+    public bool ConfirmDestructive { get; set; }
 }
 
 // --- health <cluster> -----------------------------------------------------

@@ -29,6 +29,52 @@ public static class VmrunPaths
 
     public static bool IsAvailable() => Resolve() is not null;
 
+    public const string VdiskManagerEnvVar = "NEXUS_VDISKMANAGER_PATH";
+
+    /// <summary>
+    /// Locate <c>vmware-vdiskmanager.exe</c> (ships in the same VMware Workstation
+    /// install dir as vmrun.exe; used by <c>scale-up --disk</c> to grow a .vmdk).
+    /// Honours <c>NEXUS_VDISKMANAGER_PATH</c>, else derives it from the resolved
+    /// vmrun.exe directory, else probes the Workstation defaults.
+    /// </summary>
+    public static string? ResolveVdiskManager()
+    {
+        var env = Environment.GetEnvironmentVariable(VdiskManagerEnvVar);
+        if (!string.IsNullOrWhiteSpace(env) && File.Exists(env))
+            return env;
+
+        if (!OperatingSystem.IsWindows())
+            return null;
+
+        var vmrun = Resolve();
+        if (vmrun is not null)
+        {
+            var dir = Path.GetDirectoryName(vmrun);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                var sibling = Path.Combine(dir, "vmware-vdiskmanager.exe");
+                if (File.Exists(sibling))
+                    return sibling;
+            }
+        }
+
+        foreach (var candidate in WindowsDefaults)
+        {
+            var dir = Path.GetDirectoryName(candidate);
+            if (string.IsNullOrEmpty(dir))
+                continue;
+            var vdm = Path.Combine(dir, "vmware-vdiskmanager.exe");
+            if (File.Exists(vdm))
+                return vdm;
+        }
+        return null;
+    }
+
+    public static string VdiskManagerUnavailableMessage()
+        => OperatingSystem.IsWindows()
+            ? $"vmware-vdiskmanager.exe not found (needed for --disk grows). Set {VdiskManagerEnvVar} or install VMware Workstation Pro."
+            : "vmware-vdiskmanager.exe is Windows-only; --disk grows require the win-x64 build host.";
+
     public static string GetVmxPath(string dir, string name)
         => Path.Combine(dir, name + ".vmx");
 

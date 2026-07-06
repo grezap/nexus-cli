@@ -35,11 +35,43 @@ public sealed class VmrunProcessClient : IVmrunClient
         return ok ? Result.Ok(true) : Result.Fail<bool>(stderr);
     }
 
+    public async Task<Result<bool>> StopAsync(string vmxPath, bool hard, CancellationToken cancellationToken)
+    {
+        var (ok, _, stderr) = await RunAsync(BuildStopArgs(vmxPath, hard), cancellationToken).ConfigureAwait(false);
+        return ok ? Result.Ok(true) : Result.Fail<bool>(stderr);
+    }
+
+    public async Task<Result<bool>> StartAsync(string vmxPath, CancellationToken cancellationToken)
+    {
+        var (ok, _, stderr) = await RunAsync(BuildResumeArgs(vmxPath), cancellationToken).ConfigureAwait(false);
+        return ok ? Result.Ok(true) : Result.Fail<bool>(stderr);
+    }
+
+    public async Task<Result<bool>> GrowVirtualDiskAsync(string vmdkPath, int newSizeGb, CancellationToken cancellationToken)
+    {
+        var vdm = VmrunPaths.ResolveVdiskManager();
+        if (vdm is null)
+            return Result.Fail<bool>(VmrunPaths.VdiskManagerUnavailableMessage());
+        var (ok, stdout, stderr) = await RunExeAsync(vdm, BuildGrowDiskArgs(vmdkPath, newSizeGb), cancellationToken).ConfigureAwait(false);
+        if (ok)
+            return Result.Ok(true);
+        // vmware-vdiskmanager writes the actionable failure (snapshots present,
+        // shrink attempt, disk in use) to stdout, not stderr.
+        var msg = !string.IsNullOrWhiteSpace(stderr) ? stderr : stdout.Trim();
+        return Result.Fail<bool>(string.IsNullOrWhiteSpace(msg) ? "vmware-vdiskmanager failed" : msg);
+    }
+
     internal static string[] BuildListArgs() => new[] { "list" };
 
     internal static string[] BuildSuspendArgs(string vmxPath) => new[] { "suspend", vmxPath };
 
     internal static string[] BuildResumeArgs(string vmxPath) => new[] { "start", vmxPath, "nogui" };
+
+    internal static string[] BuildStopArgs(string vmxPath, bool hard) => new[] { "stop", vmxPath, hard ? "hard" : "soft" };
+
+    // vmware-vdiskmanager -x <n>GB <vmdk>  (grow the virtual disk to n GB).
+    internal static string[] BuildGrowDiskArgs(string vmdkPath, int newSizeGb)
+        => new[] { "-x", $"{newSizeGb.ToString(System.Globalization.CultureInfo.InvariantCulture)}GB", vmdkPath };
 
     internal static IReadOnlySet<string> ParseRunningList(string stdout)
     {
@@ -66,24 +98,34 @@ public sealed class VmrunProcessClient : IVmrunClient
         var path = VmrunPaths.Resolve();
         if (path is null)
             return (false, "", VmrunPaths.UnavailableMessage());
+        // vmrun requires the "-T ws" host-type prefix before the verb.
+        var argv = new string[tail.Length + 2];
+        argv[0] = "-T";
+        argv[1] = "ws";
+        Array.Copy(tail, 0, argv, 2, tail.Length);
+        return await RunExeAsync(path, argv, cancellationToken).ConfigureAwait(false);
+    }
 
+    private static async Task<(bool Ok, string Stdout, string Stderr)> RunExeAsync(
+        string exePath,
+        string[] args,
+        CancellationToken cancellationToken)
+    {
         var psi = new ProcessStartInfo
         {
-            FileName = path,
+            FileName = exePath,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
-        psi.ArgumentList.Add("-T");
-        psi.ArgumentList.Add("ws");
-        foreach (var a in tail)
+        foreach (var a in args)
             psi.ArgumentList.Add(a);
 
         try
         {
             using var proc = Process.Start(psi)
-                ?? throw new InvalidOperationException("Process.Start returned null for vmrun.exe");
+                ?? throw new InvalidOperationException($"Process.Start returned null for {Path.GetFileName(exePath)}");
             var stdoutTask = proc.StandardOutput.ReadToEndAsync(cancellationToken);
             var stderrTask = proc.StandardError.ReadToEndAsync(cancellationToken);
             await proc.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
@@ -93,7 +135,7 @@ public sealed class VmrunProcessClient : IVmrunClient
         }
         catch (Exception ex)
         {
-            return (false, "", $"vmrun invocation failed: {ex.Message}");
+            return (false, "", $"{Path.GetFileName(exePath)} invocation failed: {ex.Message}");
         }
     }
 }
