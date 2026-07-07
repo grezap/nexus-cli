@@ -720,11 +720,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
         {
             var role = ClassifyRole(n.Name);
             if (role == "grafana-pg")
-            {
-                rotated.Add(new CertRotatedNode(n.Name, "(skipped)", "(skipped)",
-                    Error: "grafana-pg cert rotation is deferred to the grafana-pg DR runbook (a PG ssl reload during streaming repl is handled separately)."));
-                continue;
-            }
+                continue; // handled as a pair after the loop (standby-first PG SIGHUP reload — GAP #5)
             // Per-node TLS dir(s) + service reload command(s). A prom node carries BOTH the
             // Prometheus and the Alertmanager leaf (its vault-agent renders two templates).
             var units = role == "prometheus"
@@ -762,6 +758,15 @@ public sealed class ObservabilityAdapter : IClusterAdapter
             var newSerial = await WireSerialAsync(n.Vmnet11, primaryDir, cancellationToken).ConfigureAwait(false);
             rotated.Add(new CertRotatedNode(n.Name, oldSerial, newSerial, Error: null));
         }
+
+        // grafana-pg (GAP #5): rotate the Grafana state-DB pair's leaf STANDBY-FIRST then
+        // PRIMARY, with a SIGHUP reload (no restart → the streaming-replication connection
+        // + live Grafana sessions are never dropped). Shared with iceberg-pg (lakehouse)
+        // via PgSslCertRotator.
+        rotated.AddRange(await PgSslCertRotator.RotatePairAsync(
+            _ssh, T, Role(all, "grafana-pg"), GrafanaPgSpec.TlsDir, GrafanaPgSpec.Unit,
+            SshTimeout, cancellationToken).ConfigureAwait(false));
+
         sw.Stop();
         return Result.Ok(new CertRotationResult(rotated, sw.Elapsed, startedAt));
     }

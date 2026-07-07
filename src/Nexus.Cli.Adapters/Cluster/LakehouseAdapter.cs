@@ -764,11 +764,13 @@ public sealed class LakehouseAdapter : IClusterAdapter
             rotated.Add(new CertRotatedNode(n.Name, "(n/a)", "(n/a)",
                 Error: "ZooKeeper is backplane-only plaintext (ADR-0035) — no TLS, no vault-agent, nothing to rotate."));
 
-        // iceberg-pg cert rotation is deferred to the PG DR runbook (a PG ssl reload under
-        // streaming replication is handled there, not by a blunt restart).
-        foreach (var n in Role(all, "iceberg-pg"))
-            rotated.Add(new CertRotatedNode(n.Name, "(skipped)", "(skipped)",
-                Error: "iceberg-pg cert rotation is deferred to the PG DR runbook (ssl reload under streaming replication)."));
+        // iceberg-pg (GAP #6): rotate the Iceberg catalog-DB pair's leaf STANDBY-FIRST then
+        // PRIMARY, with a SIGHUP reload (no restart → the streaming-replication connection +
+        // Nessie's live catalog connections are never dropped). Shared with grafana-pg (obs)
+        // via PgSslCertRotator.
+        rotated.AddRange(await PgSslCertRotator.RotatePairAsync(
+            _ssh, T, Role(all, "iceberg-pg"), IcebergPgSpec.TlsDir, IcebergPgSpec.Unit,
+            SshTimeout, cancellationToken).ConfigureAwait(false));
 
         sw.Stop();
         return Result.Ok(new CertRotationResult(rotated, sw.Elapsed, startedAt));

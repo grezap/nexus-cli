@@ -1,0 +1,31 @@
+{
+  "id": "DEMO-163-grafana-pg-cert-rotate",
+  "title": "Observability: grafana-pg PG-ssl cert-rotate (standby-first, no restart)",
+  "description": "cert-rotate on the observability tier now ALSO rotates the Grafana state-DB pair grafana-pg (GAP #5, v0.8.8)  --  previously a graceful skip. The shared PgSslCertRotator rotates the PG17 streaming pair STANDBY-FIRST then PRIMARY: it forces each node's nexus-vault-agent to re-issue the leaf (remove the rendered bundle.pem -> restart the agent -> re-render -> split to server.crt/server.key) then SIGHUP-reloads postgresql@17-main (NOT a restart), so PG re-reads the leaf for new connections while existing sessions + the streaming-replication connection keep running. Live-verified 2026-07-07.",
+  "prerequisites": {
+    "vmsAlive": ["grafana-pg-1", "grafana-pg-2", "vault-1", "vault-2", "vault-3", "vault-transit"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT", "NEXUS_VMS_YAML"],
+    "smokeGate": "grafana-pg pair on the current Vault root (vault-agents active); observability tier up for the full-tier verb"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.180 'sudo openssl x509 -in /etc/nexus-grafana-pg/tls/server.crt -noout -serial | sed \"s/serial=//\"'; ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.181 'sudo openssl x509 -in /etc/nexus-grafana-pg/tls/server.crt -noout -serial | sed \"s/serial=//\"'",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "the CURRENT leaf serial on grafana-pg-1 (.180) and grafana-pg-2 (.181)  --  record them to compare after rotation" }
+      ]
+    },
+    {
+      "command": "nexus cert-rotate observability --yes --json",
+      "waitAfterSeconds": 60,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["grafana-pg-1", "grafana-pg-2"],
+      "observe": [
+        { "where": "stdout", "what": "the per-node old/new serial table: grafana-pg-2 (standby) rotates BEFORE grafana-pg-1 (primary); both show a fresh newSerial (different from step 1). The primary is rotated LAST  --  a failed standby rotation would leave it untouched." },
+        { "where": "ssh nexusadmin@192.168.70.180 'sudo systemctl is-active postgresql@17-main'", "what": "PG stays active  --  the rotation is a SIGHUP reload, not a restart (no dropped connections)" }
+      ]
+    }
+  ],
+  "whatProves": "grafana-pg TLS-leaf rotation is a real, in-CLI operation (not a DR-runbook deferral): the vault-agent re-issues the leaf and PG picks it up via a SIGHUP reload, standby-first, without a restart. The Grafana state DB gets fresh certs with no service interruption."
+}

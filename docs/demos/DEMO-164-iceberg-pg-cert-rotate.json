@@ -1,0 +1,32 @@
+{
+  "id": "DEMO-164-iceberg-pg-cert-rotate",
+  "title": "Lakehouse: iceberg-pg PG-ssl cert-rotate (standby-first, replication intact)",
+  "description": "cert-rotate on the lakehouse tier now ALSO rotates the Iceberg catalog-DB pair iceberg-pg (GAP #6, v0.8.8)  --  previously a graceful skip. Shares PgSslCertRotator with grafana-pg: rotates the PG17 streaming pair STANDBY-FIRST then PRIMARY via a vault-agent re-issue + a SIGHUP `systemctl reload postgresql@17-main` (NOT a restart), so the streaming-replication connection AND Nessie's live catalog connections are never dropped. Live-verified 2026-07-07 on the clean 1-primary + 1-standby pair.",
+  "prerequisites": {
+    "vmsAlive": ["iceberg-pg-1", "iceberg-pg-2", "vault-1", "vault-2", "vault-3", "vault-transit"],
+    "envVars": ["NEXUS_SSH_KEY", "VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT", "NEXUS_VMS_YAML"],
+    "smokeGate": "iceberg-pg pair on the current Vault root (vault-agents active); 1 primary + 1 streaming standby (nexus health lakehouse -> iceberg-pg-replication green)"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.149 \"sudo -u postgres psql -tAc 'SELECT pg_is_in_recovery()'; sudo -u postgres psql -tAc \\\"SELECT client_addr,state FROM pg_stat_replication\\\"\"",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["streaming"],
+      "observe": [
+        { "where": "stdout", "what": "iceberg-pg-1 (.149) is the primary (in_recovery=f) and sees the standby streaming (192.168.10.150 | streaming). This is the pre-rotation baseline." }
+      ]
+    },
+    {
+      "command": "nexus cert-rotate lakehouse --yes --json",
+      "waitAfterSeconds": 60,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["iceberg-pg-1", "iceberg-pg-2"],
+      "observe": [
+        { "where": "stdout", "what": "the per-node old/new serial table: iceberg-pg-2 (standby) rotates BEFORE iceberg-pg-1 (primary); both show a fresh newSerial. (MinIO/Nessie rows also rotate; Spark/ZooKeeper are graceful N/A  --  no rotatable leaf.)" },
+        { "where": "ssh nexusadmin@192.168.70.149 'sudo -u postgres psql -tAc \"SELECT client_addr,state FROM pg_stat_replication\"'", "what": "AFTER the rotation the primary STILL shows 192.168.10.150 | streaming  --  the SIGHUP reload did not drop the replication connection" }
+      ]
+    }
+  ],
+  "whatProves": "iceberg-pg TLS-leaf rotation is a real, in-CLI operation (not a DR-runbook deferral): both nodes of the Iceberg catalog DB get fresh certs, standby-first, and PostgreSQL streaming replication survives because PG re-reads the leaf via a SIGHUP reload instead of a restart. Nessie's catalog front door keeps working throughout."
+}

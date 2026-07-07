@@ -6,6 +6,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.8] — 2026-07-07
+
+Completion backlog, batch 4 (the PG-ssl cert-rotate gaps — closing the deferred PostgreSQL cert
+rotation on the two streaming-replicated catalog/state DBs, INSIDE the tool).
+
+- **grafana-pg (GAP #5) + iceberg-pg (GAP #6) PG-ssl `cert-rotate` — was "deferred to the DR runbook".**
+  A new shared `PgSslCertRotator.RotatePairAsync` rotates a PG 17 streaming-replication pair's TLS leaf
+  **STANDBY-FIRST, then PRIMARY**, forcing each node's `nexus-vault-agent` to re-issue (back up + `rm`
+  the rendered `bundle.pem` — `pkiCert` reuses the leaf otherwise — → restart the agent → poll the
+  re-render → restore the `.bak`), then a **SIGHUP `systemctl reload`** (NOT a restart): PostgreSQL
+  re-reads `ssl_cert_file`/`ssl_key_file` for new connections while existing sessions — including the
+  streaming-replication connection — keep running, so replication is never dropped and the primary's
+  write window is not interrupted. Safety: the primary is left untouched if a standby's rotation fails.
+  Wired into `ObservabilityAdapter.RotateCertAsync` (`grafana-pg`, VIP `.185`) and
+  `LakehouseAdapter.RotateCertAsync` (`iceberg-pg`, VIP `.151`) — replacing the two graceful skips.
+  - **Live-verified 2026-07-07** on the real nodes: **iceberg-pg** (a clean 1-primary + 1-standby pair)
+    rotated standby `.150` then primary `.149` — both leaf serials changed, PG reloaded (no restart),
+    and `pg_stat_replication` still showed `192.168.10.150 | streaming` after **both** rotations
+    (replication survived). **grafana-pg** both nodes rotated (fresh serials, PG stays `active`) — it is
+    currently a both-primary split (a pre-existing infra state, obs divergence #3), and the rotation
+    works regardless of replication role.
+- Ordering unit-tested (`PgSslCertRotator.OrderStandbyFirst` — the safety-critical "primary last"
+  ordering, +5 tests). AOT win-x64 **28.25 MB / 30**; **315/315 tests**.
+
 ## [0.8.7] — 2026-07-06
 
 Completion backlog, batch 3 (scale-up + swarm restore + kafka resize-gate — closing the last of the
