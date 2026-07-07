@@ -1,0 +1,41 @@
+{
+  "id": "DEMO-166-vitess-mysqld-wire-cert-rotate",
+  "title": "Vitess: mysqld-wire cert-rotate (online ALTER INSTANCE RELOAD TLS, no reparent)",
+  "description": "cert-rotate vitess (GAP #12, v0.8.9) now rotates the tablet's mysqld-WIRE cert too (:3306 -- replication + vt_dba + vtgate->mysqld), not just the vttablet gRPC cert. Each node's vault-agent is forced to re-issue a fresh, DURABLE leaf (rm bundle.pem -> restart agent -> post-render split; pkiCert otherwise reuses its cached leaf and reverts a direct write -- a pre-existing durability bug this fix also closes), then the tablet's mysqld reloads the wire cert ONLINE via ALTER INSTANCE RELOAD TLS (Percona 8.4 -- no restart, NO reparent, the PRIMARY is never demoted). Live-verified 2026-07-07.",
+  "prerequisites": {
+    "vmsAlive": ["vitess-etcd-1", "vitess-etcd-2", "vitess-etcd-3", "vitess-control-1", "vitess-vtgate-1", "vitess-vtgate-2", "vitess-shard1-tablet-1", "vitess-shard1-tablet-2", "vitess-shard1-tablet-3", "vitess-shard2-tablet-1", "vitess-shard2-tablet-2", "vitess-shard2-tablet-3"],
+    "envVars": ["VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT", "NEXUS_SSH_KEY", "NEXUS_VMS_YAML"],
+    "smokeGate": "nexus health vitess green (both shards 1 PRIMARY + 2 REPLICA); nodes on the current Vault root"
+  },
+  "steps": [
+    {
+      "command": "nexus topology vitess --json",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["primary"],
+      "observe": [
+        { "where": "stdout", "what": "record which tablet is each shard's PRIMARY (e.g. shard1-tablet-2, shard2-tablet-1) -- to confirm NO reparent after the rotation" }
+      ]
+    },
+    {
+      "command": "nexus cert-rotate vitess --yes --json",
+      "waitAfterSeconds": 170,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["vitess-shard1-tablet", "vitess-shard2-tablet"],
+      "observe": [
+        { "where": "stdout", "what": "all 12 nodes rotate GREEN with fresh serials and no error -- a tablet row with no error means its mysqld `ALTER INSTANCE RELOAD TLS` succeeded (it only succeeds if the new cert/key/ca load)" },
+        { "where": "ssh nexusadmin@<shard-primary-ip> 'sudo openssl x509 -in /etc/nexus-vitess/tls/server-cert.pem -noout -serial; echo | sudo openssl s_client -starttls mysql -connect 127.0.0.1:3306 2>/dev/null | openssl x509 -noout -serial'", "what": "the on-disk serial CHANGED and PERSISTS, and mysqld SERVES that same new serial -- the wire cert was reloaded online + durably (agent holds the new leaf)" }
+      ]
+    },
+    {
+      "command": "nexus topology vitess --json",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["primary"],
+      "observe": [
+        { "where": "stdout", "what": "the shard PRIMARIES are UNCHANGED from step 1 -- no reparent happened; `nexus health vitess` stays green (both shards 1 PRIMARY + 2 REPLICA, operator-auth via vtgate->mysqld mTLS)" }
+      ]
+    }
+  ],
+  "whatProves": "The tablet's mysqld-wire cert rotates as a real, in-CLI operation: the leaf is re-issued durably (force-rerender, no silent revert) and mysqld reloads it ONLINE via ALTER INSTANCE RELOAD TLS -- with no mysqld restart, no PlannedReparentShard, and no change of primary. Replication + vt_dba + vtgate->mysqld all keep working on the new cert."
+}

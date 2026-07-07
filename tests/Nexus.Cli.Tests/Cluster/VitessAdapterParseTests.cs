@@ -150,4 +150,29 @@ public class VitessAdapterParseTests
         VitessAdapter.ExtractJsonObject("Using a password...\n{ \"x\": 1 }").Should().Be("{ \"x\": 1 }");
         VitessAdapter.ExtractJsonArray("no array here").Should().BeNull();
     }
+
+    // === ParseRerender (cert-rotate force-rerender probe; GAP #12) ===========
+    [Fact]
+    public void ParseRerender_extracts_old_and_new_serials()
+    {
+        var (o, n) = VitessAdapter.ParseRerender("OLD=2FEE8AA653BF NEW=192DF4558AA2");
+        o.Should().Be("2FEE8AA653BF");
+        n.Should().Be("192DF4558AA2");
+    }
+
+    [Fact]
+    public void ParseRerender_handles_a_first_install_with_empty_old()
+    {
+        var (o, n) = VitessAdapter.ParseRerender("noise\nOLD= NEW=ABCDEF01");
+        o.Should().BeEmpty();
+        n.Should().Be("ABCDEF01");
+    }
+
+    [Fact]
+    public void ParseRerender_returns_empty_when_no_marker()
+    {
+        var (o, n) = VitessAdapter.ParseRerender("agent restart failed");
+        o.Should().BeEmpty();
+        n.Should().BeEmpty();
+    }
 }

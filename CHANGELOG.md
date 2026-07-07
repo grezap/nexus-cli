@@ -6,6 +6,43 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.9] — 2026-07-07
+
+Completion backlog, batch 5 — the last two cert-rotate gaps (#9 FoundationAD LDAPS, #12 Vitess
+mysqld-wire). **With these, the nexus-cli completion backlog is COMPLETE — every cluster's every
+verb is implemented, nothing deferred to an out-of-band script.**
+
+- **FoundationAD LDAPS `cert-rotate` (GAP #9) — was a graceful "the security overlay does it" skip.**
+  `FoundationAdAdapter.RotateCertAsync` now rotates each DC's LDAPS leaf, **STANDBY-DC-FIRST then the
+  PDC** (a botched standby rotation aborts before touching the PDC's auth plane). Per DC: issue the
+  leaf + build the PFX on vault-1 with openssl (the proven Schannel path — a .NET-exported PFX lands
+  ephemeral in MachineKeys and NTDS resets), SFTP the PFX + intermediate + root to the DC, import
+  root→Root / intermediate→CA / leaf→My (all three load-bearing for the Schannel 36886 fix), verify
+  the chain, then **`Restart-Service NTDS` + re-cycle ADWS** — all in ONE SSH session (sshd is
+  independent of NTDS, so the established session survives the ~20-30 s restart; no new SSH auth
+  during the window, so the #10 self-fence cannot occur), and finally verify the **:636 handshake from
+  the build host** (a TCP+TLS socket, no SSH). New `Environment` reads for `VAULT_TOKEN` (issue) +
+  `VAULT_CACERT` (root CA); `ParseIssueJson` unit-tested.
+  - **Live-verified 2026-07-07** on both DCs: dc-nexus-2 (standby, first-time PKI LDAPS install) then
+    dc-nexus (PDC, rotate) — both serve the new leaf on :636 (`openssl s_client` confirms), NTDS +
+    Netlogon + ADWS Running, `Get-AD*` clean afterward, AD auth uninterrupted.
+  - **Infra:** the `vault-server` PKI role only allowed `dc-nexus.nexus.lab`; added the four
+    `dc-nexus-2` entries (live + baked into `nexus-infra-vmware` `role-overlay-vault-pki-roles.tf` v3).
+- **Vitess mysqld-wire `cert-rotate` (GAP #12) — was `nexus-vttablet`-only ("mysqld-wire reload
+  deferred").** `VitessAdapter.RotateCertAsync` now reloads the tablet's mysqld-WIRE cert (:3306 —
+  replication + vt_dba + vtgate→mysqld) online via **`ALTER INSTANCE RELOAD TLS`** (Percona 8.4 — no
+  restart, **no reparent**, the PRIMARY is never demoted). **Also fixed a pre-existing durability bug
+  the verify surfaced:** the old issue-via-agent-token + write approach was silently reverted on the
+  vault-agent's next render (`pkiCert` reuses its cached leaf), so the whole vitess cert-rotate (gRPC
+  included) was non-durable — switched to **forcing the agent to re-issue** (rm `bundle.pem` → restart
+  the agent → its post-render `nexus-vitess-tls-split.sh` writes a fresh leaf that persists), the
+  Swarm/obs/lakehouse pattern. `ParseRerender` unit-tested.
+  - **Live-verified 2026-07-07** on the running vitess tier: all 12 nodes rotated GREEN; the tablet
+    on-disk serials change **and persist**; the primary's mysqld **serves the new serial** (`openssl
+    s_client -starttls mysql` == on-disk); both shards stay 1 PRIMARY + 2 REPLICA (no reparent);
+    `health` green (operator-auth via vtgate→mysqld mTLS + sharding 54/47).
+- AOT win-x64 **28.25 MB / 30**; **321/321 tests** (+3 `ParseIssueJson`, +3 `ParseRerender`).
+
 ## [0.8.8] — 2026-07-07
 
 Completion backlog, batch 4 (the PG-ssl cert-rotate gaps — closing the deferred PostgreSQL cert

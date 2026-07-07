@@ -1,5 +1,8 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Net.Security;
+using System.Net.Sockets;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Nexus.Cli.Core;
 using Nexus.Cli.Core.Abstractions;
@@ -637,11 +640,264 @@ public sealed class FoundationAdAdapter : IClusterAdapter
             "AD authoritative restore (`ntdsutil` DSRM) is a console-only DR procedure (Server 2025 blocks it over SSH, "
             + "[[feedback_ntdsutil_dsrm_console_mode_ssh]]); never exposed as a runtime verb."));
 
-    public Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken) =>
-        Task.FromResult(Result.Fail<CertRotationResult>(
-            "the DC LDAPS certificate is rotated by the nexus-infra-vmware security overlay (role-overlay-ldaps + an NTDS "
-            + "restart, ADR-0015) — not wired here to avoid an unguarded NTDS restart on the live auth plane. Vault's own "
-            + "listener certs rotate via `nexus cert-rotate vault`."));
+    // === RotateCertAsync — guarded DC LDAPS rotation (GAP #9, v0.8.9) ========
+    // Rotate each DC's LDAPS leaf (pki_int/issue/vault-server, openssl PFX on
+    // vault-1 — the proven Schannel path; a .NET-exported PFX lands ephemeral in
+    // MachineKeys and NTDS resets every handshake). STANDBY-FIRST (the non-PDC),
+    // PDC LAST — a botched standby rotation aborts before touching the PDC's auth
+    // plane. The install + NTDS restart run in ONE SSH session (sshd is
+    // independent of NTDS, so the established session survives the ~20-30s
+    // restart), and the :636 handshake is verified from the build host over a
+    // fresh TCP+TLS socket (no SSH re-auth during the AD-settle window) — so the
+    // #10 self-fence (which needed a NEW SSH connection while NTDS was down)
+    // cannot occur.
+    private const string PkiMount = "pki_int";
+    private const string PkiRole = "vault-server";
+    private const string RootCn = "NexusPlatform Root CA";
+    private const string IntCn = "NexusPlatform Intermediate CA";
+    private const string LdapsTtl = "2160h";
+    private const string Vault1IpFallback = "192.168.70.121";
+
+    public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
+    {
+        var startedAt = DateTimeOffset.UtcNow;
+        var sw = Stopwatch.StartNew();
+
+        var token = Environment.GetEnvironmentVariable("VAULT_TOKEN");
+        if (string.IsNullOrWhiteSpace(token))
+            return Result.Fail<CertRotationResult>("cert-rotate foundation-ad issues the DC LDAPS leaf from Vault pki_int — export VAULT_TOKEN (the operator token) and retry.");
+        var rootPemR = ReadRootPem();
+        if (rootPemR.IsFail) return Result.Fail<CertRotationResult>(rootPemR.Error!);
+        var rootPem = rootPemR.Value!;
+        var vault1 = ResolveVault1Ip();
+
+        // Reachability precheck: only touch DCs whose NTDS + Netlogon are Running.
+        var reachable = new List<DcNode>();
+        foreach (var dc in Dcs)
+        {
+            var h = await WinPsAsync(dc.Ip,
+                "$s=Get-Service NTDS,Netlogon -EA SilentlyContinue; if(-not $s -or ($s | Where-Object { $_.Status -ne 'Running' })){Write-Output 'NOTREADY'}else{Write-Output 'READY'}",
+                cancellationToken).ConfigureAwait(false);
+            if (h.IsOk && h.Value!.Contains("READY", StringComparison.Ordinal)) reachable.Add(dc);
+        }
+        if (reachable.Count == 0)
+            return Result.Fail<CertRotationResult>("no DC is reachable with NTDS + Netlogon Running — power on dc-nexus (+ dc-nexus-2) first.");
+
+        // Resolve the PDC so the NON-PDC standby rotates first.
+        string? pdcFqdn = null;
+        var pdcR = await WinPsAsync(reachable[0].Ip, "try{ Write-Output (Get-ADDomain -ErrorAction Stop).PDCEmulator }catch{}", cancellationToken).ConfigureAwait(false);
+        if (pdcR.IsOk) pdcFqdn = pdcR.Value!.Trim();
+        bool IsPdc(DcNode d) => pdcFqdn is not null && pdcFqdn.StartsWith(d.Name + ".", StringComparison.OrdinalIgnoreCase);
+        var ordered = reachable.OrderBy(d => IsPdc(d) ? 1 : 0).ThenBy(d => d.Name, StringComparer.Ordinal).ToList();
+
+        var rotated = new List<CertRotatedNode>();
+        var standbyFailed = false;
+        foreach (var dc in ordered)
+        {
+            var isPdc = IsPdc(dc);
+            if (isPdc && standbyFailed)
+            {
+                rotated.Add(new CertRotatedNode(dc.Name, "(skipped)", "(skipped)",
+                    Error: "PDC LDAPS rotation skipped — the standby DC's rotation failed; resolve it first (an NTDS restart on the PDC is the lab's auth plane, and standby-first exists to prove the flow on the non-PDC before touching it)."));
+                continue;
+            }
+            var res = await RotateOneDcLdapsAsync(dc, isPdc, vault1, token, rootPem, cancellationToken).ConfigureAwait(false);
+            rotated.Add(res);
+            if (res.Error is not null && !isPdc) standbyFailed = true;
+        }
+
+        sw.Stop();
+        return Result.Ok(new CertRotationResult(rotated, sw.Elapsed, startedAt));
+    }
+
+    private async Task<CertRotatedNode> RotateOneDcLdapsAsync(DcNode dc, bool isPdc, string vault1, string token, string rootPem, CancellationToken ct)
+    {
+        var fqdn = $"{dc.Name}.{Domain}";
+        var label = isPdc ? $"{dc.Name} (PDC)" : $"{dc.Name} (standby)";
+        var oldSerial = await DcLdapsSerialAsync(dc.Ip, fqdn, ct).ConfigureAwait(false);
+
+        // 1. Issue leaf + build the PFX on vault-1 (openssl).
+        var pfxPwd = RandomToken(32);
+        var upper = dc.Name.ToUpperInvariant();
+        var issueScript = LdapsIssueBash
+            .Replace("__TOKEN__", token)
+            .Replace("__ROLE__", $"{PkiMount}/issue/{PkiRole}")
+            .Replace("__CN__", fqdn)
+            .Replace("__ALT__", $"{dc.Name},{upper},{upper}.{Domain}")
+            .Replace("__IPSAN__", dc.Ip)
+            .Replace("__TTL__", LdapsTtl)
+            .Replace("__PFXNAME__", $"{dc.Name}-ldaps")
+            .Replace("__PFXPWD__", pfxPwd);
+        var issB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(issueScript.Replace("\r\n", "\n")));
+        var issR = await _ssh.ExecuteAsync(T(vault1), $"echo {issB64} | base64 -d | bash", TimeSpan.FromSeconds(90), ct).ConfigureAwait(false);
+        if (issR.IsFail || issR.Value!.ExitCode != 0)
+            return new CertRotatedNode(dc.Name, oldSerial, "(unchanged)", Error: $"vault-1 issue+PFX failed for {label}: {(issR.IsFail ? issR.Error : Tail(issR.Value!.Stdout + issR.Value.Stderr, 220))}");
+        var (pfxB64, intPem) = ParseIssueJson(issR.Value!.Stdout);
+        if (pfxB64.Length == 0 || intPem.Length == 0)
+            return new CertRotatedNode(dc.Name, oldSerial, "(unchanged)", Error: $"vault-1 issue for {label} returned no PFX/intermediate: {Tail(issR.Value!.Stdout, 200)}");
+
+        // 2. Upload PFX + intermediate + root to the DC (SFTP; the /C:/… form Windows OpenSSH needs).
+        byte[] pfxBytes;
+        try { pfxBytes = Convert.FromBase64String(pfxB64); }
+        catch { return new CertRotatedNode(dc.Name, oldSerial, "(unchanged)", Error: $"{label}: PFX base64 from vault-1 was malformed."); }
+        foreach (var (bytes, path, what) in new (byte[], string, string)[]
+                 {
+                     (pfxBytes, "/C:/Windows/Temp/nx-ldaps.pfx", "PFX"),
+                     (Encoding.ASCII.GetBytes(intPem), "/C:/Windows/Temp/nx-ldaps-int.pem", "intermediate"),
+                     (Encoding.ASCII.GetBytes(rootPem), "/C:/Windows/Temp/nx-ldaps-root.pem", "root"),
+                 })
+        {
+            var up = await _ssh.UploadBytesAsync(T(dc.Ip), bytes, path, SshTimeout, ct).ConfigureAwait(false);
+            if (up.IsFail) return new CertRotatedNode(dc.Name, oldSerial, "(unchanged)", Error: $"{label}: {what} upload failed: {up.Error}");
+        }
+
+        // 3. Import (root→Root, int→CA, leaf→My) + verify chain + RESTART NTDS — one session.
+        var importScript = LdapsImportPs
+            .Replace("__FQDN__", fqdn)
+            .Replace("__ROOTCN__", RootCn)
+            .Replace("__INTCN__", IntCn)
+            .Replace("__PFXPWD__", pfxPwd);
+        var scriptUp = await _ssh.UploadBytesAsync(T(dc.Ip), Encoding.UTF8.GetBytes(importScript.Replace("\r\n", "\n")), "/C:/Windows/Temp/nx-ldaps-import.ps1", SshTimeout, ct).ConfigureAwait(false);
+        if (scriptUp.IsFail) return new CertRotatedNode(dc.Name, oldSerial, "(unchanged)", Error: $"{label}: import-script upload failed: {scriptUp.Error}");
+        var imp = await _ssh.ExecuteAsync(T(dc.Ip), "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Windows/Temp/nx-ldaps-import.ps1", TimeSpan.FromMinutes(3), ct).ConfigureAwait(false);
+        if (imp.IsFail || imp.Value!.ExitCode != 0 || !imp.Value.Stdout.Contains("LDAPSROT", StringComparison.Ordinal))
+            return new CertRotatedNode(dc.Name, oldSerial, "(unchanged)", Error: $"{label} import/NTDS-restart failed: {(imp.IsFail ? imp.Error : Tail(imp.Value!.Stdout + imp.Value.Stderr, 260))}");
+
+        // 4. Verify LDAPS serves the NEW cert on :636 (build-host SslStream — no SSH).
+        var verify = await VerifyLdapsAsync(dc.Ip, fqdn, ct).ConfigureAwait(false);
+        if (verify.IsFail)
+            return new CertRotatedNode(dc.Name, oldSerial, "(unverified)", Error: $"{label}: cert installed + NTDS restarted, but the LDAPS :636 handshake did not complete: {verify.Error}");
+        return new CertRotatedNode(dc.Name, oldSerial, verify.Value!, Error: null);
+    }
+
+    /// <summary>The serial of the DC's current LDAPS leaf in LocalMachine\My (exact CN match).</summary>
+    private async Task<string> DcLdapsSerialAsync(string ip, string fqdn, CancellationToken ct)
+    {
+        var r = await WinPsAsync(ip,
+            $"$x=Get-ChildItem Cert:\\LocalMachine\\My -EA SilentlyContinue | Where-Object {{ $_.Subject -eq 'CN={fqdn}' -and $_.HasPrivateKey }} | Sort-Object NotBefore -Descending | Select-Object -First 1; Write-Output $x.SerialNumber",
+            ct).ConfigureAwait(false);
+        return r.IsOk && r.Value!.Trim().Length > 0 ? r.Value!.Trim() : "(none)";
+    }
+
+    /// <summary>Confirm dc:636 completes a TLS handshake; returns the served cert's serial.</summary>
+    private static async Task<Result<string>> VerifyLdapsAsync(string ip, string fqdn, CancellationToken ct)
+    {
+        for (var i = 0; i < 8; i++)
+        {
+            try
+            {
+                using var tcp = new TcpClient();
+                await tcp.ConnectAsync(ip, 636, ct).ConfigureAwait(false);
+                // Handshake-ONLY verify: we accept any server cert on purpose — the goal is to
+                // confirm :636 now serves a working leaf + read its serial. Trust of the chain is
+                // proven separately, on the DC, by X509Chain.Build in the import script BEFORE the
+                // NTDS restart (a PartialChain there aborts the rotation). So this is not a TLS-trust
+                // bypass on a data path — it's a post-rotation liveness probe.
+#pragma warning disable CA5359
+                using var ssl = new SslStream(tcp.GetStream(), false, (_, _, _, _) => true);
+#pragma warning restore CA5359
+                await ssl.AuthenticateAsClientAsync(fqdn).ConfigureAwait(false);
+                var remote = ssl.RemoteCertificate;
+                if (remote is null) return Result.Fail<string>("handshake completed but no server certificate was presented.");
+                using var cert = remote as X509Certificate2 ?? X509CertificateLoader.LoadCertificate(remote.Export(X509ContentType.Cert));
+                return Result.Ok(cert.GetSerialNumberString());
+            }
+            catch (Exception ex)
+            {
+                if (i == 7) return Result.Fail<string>($"{ex.GetType().Name}: {ex.Message}");
+                await Task.Delay(TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
+            }
+        }
+        return Result.Fail<string>("no handshake after 8 tries");
+    }
+
+    private static Result<string> ReadRootPem()
+    {
+        var path = Environment.GetEnvironmentVariable("VAULT_CACERT");
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return Result.Fail<string>("VAULT_CACERT is not set or missing — it supplies the current root CA to install into each DC's Root store (the Schannel 36886 fix). Point it at ~/.nexus/vault-ca-bundle.crt.");
+        try
+        {
+            var text = File.ReadAllText(path);
+            var m = System.Text.RegularExpressions.Regex.Match(text, "-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", System.Text.RegularExpressions.RegexOptions.Singleline);
+            return m.Success ? Result.Ok(m.Value + "\n") : Result.Fail<string>($"no PEM certificate block in VAULT_CACERT ({path}).");
+        }
+        catch (Exception ex) { return Result.Fail<string>($"failed to read VAULT_CACERT: {ex.Message}"); }
+    }
+
+    private string ResolveVault1Ip()
+    {
+        var loaded = _catalog.Load();
+        if (loaded.IsOk)
+            foreach (var (_, cluster) in loaded.Value!)
+            {
+                var v = cluster.Nodes.FirstOrDefault(n => string.Equals(n.Name, "vault-1", StringComparison.OrdinalIgnoreCase));
+                if (v is not null) return v.Vmnet11;
+            }
+        return Vault1IpFallback;
+    }
+
+    private static string RandomToken(int n)
+    {
+        const string cs = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        var b = new char[n];
+        for (var i = 0; i < n; i++) b[i] = cs[System.Security.Cryptography.RandomNumberGenerator.GetInt32(cs.Length)];
+        return new string(b);
+    }
+
+    /// <summary>Extract pfx_b64 + intermediate_pem from the vault-1 issue script's JSON line.</summary>
+    internal static (string Pfx, string Int) ParseIssueJson(string stdout)
+    {
+        var line = stdout.Split('\n').Reverse().FirstOrDefault(l => l.TrimStart().StartsWith('{'))?.Trim();
+        if (string.IsNullOrEmpty(line)) return ("", "");
+        try
+        {
+            using var d = System.Text.Json.JsonDocument.Parse(line);
+            var root = d.RootElement;
+            var pfx = root.TryGetProperty("pfx_b64", out var p) ? p.GetString() ?? "" : "";
+            var it = root.TryGetProperty("intermediate_pem", out var i) ? i.GetString() ?? "" : "";
+            return (pfx, it);
+        }
+        catch { return ("", ""); }
+    }
+
+    private const string LdapsIssueBash = """
+set -euo pipefail
+TMPDIR=$(mktemp -d); trap 'rm -rf "$TMPDIR"' EXIT
+ISSUED=$(VAULT_TOKEN='__TOKEN__' VAULT_SKIP_VERIFY=true VAULT_ADDR=https://127.0.0.1:8200 vault write -format=json __ROLE__ common_name=__CN__ alt_names=__ALT__ ip_sans=__IPSAN__ ttl=__TTL__)
+echo "$ISSUED" | jq -r '.data.certificate' > "$TMPDIR/cert.pem"
+echo "$ISSUED" | jq -r '.data.private_key' > "$TMPDIR/key.pem"
+echo "$ISSUED" | jq -r '.data.issuing_ca'  > "$TMPDIR/int.pem"
+if [ ! -s "$TMPDIR/cert.pem" ] || [ ! -s "$TMPDIR/key.pem" ] || [ ! -s "$TMPDIR/int.pem" ]; then echo "ERR: empty cert/key/int from vault" >&2; exit 1; fi
+openssl pkcs12 -export -inkey "$TMPDIR/key.pem" -in "$TMPDIR/cert.pem" -name '__PFXNAME__' -passout 'pass:__PFXPWD__' -out "$TMPDIR/cert.pfx" 2>/dev/null
+PFX_B64=$(base64 -w 0 "$TMPDIR/cert.pfx")
+INT_PEM=$(cat "$TMPDIR/int.pem")
+jq -nc --arg pfx "$PFX_B64" --arg int "$INT_PEM" '{pfx_b64:$pfx, intermediate_pem:$int}'
+""";
+
+    private const string LdapsImportPs = """
+$ProgressPreference='SilentlyContinue'; $ErrorActionPreference='Stop'
+try {
+  Get-ChildItem Cert:\LocalMachine\Root -EA SilentlyContinue | Where-Object { $_.Subject -match 'CN=__ROOTCN__' } | ForEach-Object { Remove-Item $_.PSPath -Force }
+  Import-Certificate -FilePath 'C:/Windows/Temp/nx-ldaps-root.pem' -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+  Get-ChildItem Cert:\LocalMachine\CA -EA SilentlyContinue | Where-Object { $_.Subject -match 'CN=__INTCN__' } | ForEach-Object { Remove-Item $_.PSPath -Force }
+  Import-Certificate -FilePath 'C:/Windows/Temp/nx-ldaps-int.pem' -CertStoreLocation Cert:\LocalMachine\CA | Out-Null
+  Get-ChildItem Cert:\LocalMachine\My -EA SilentlyContinue | Where-Object { $_.Subject -eq 'CN=__FQDN__' } | ForEach-Object { Remove-Item $_.PSPath -Force }
+  $pwd = ConvertTo-SecureString '__PFXPWD__' -AsPlainText -Force
+  $imp = Import-PfxCertificate -FilePath 'C:/Windows/Temp/nx-ldaps.pfx' -CertStoreLocation Cert:\LocalMachine\My -Password $pwd -Exportable
+  $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+  $chain.ChainPolicy.RevocationMode = 'NoCheck'
+  if (-not $chain.Build($imp)) { $s=($chain.ChainStatus | ForEach-Object { $_.Status }) -join ','; Write-Output ('CHAIN_FAILED: '+$s); exit 1 }
+  Remove-Item 'C:/Windows/Temp/nx-ldaps.pfx','C:/Windows/Temp/nx-ldaps-int.pem','C:/Windows/Temp/nx-ldaps-root.pem','C:/Windows/Temp/nx-ldaps-import.ps1' -EA SilentlyContinue
+  Restart-Service NTDS -Force
+  Start-Sleep -Seconds 20
+  # Re-cycle ADWS after the NTDS restart: it comes back Running but in a degraded
+  # state that fails Get-AD* with "bad parameter" (the adapter's own status/health
+  # verbs use Get-AD*), and a clean restart re-establishes it. Best-effort.
+  try { Restart-Service ADWS -Force -EA SilentlyContinue; Start-Sleep -Seconds 5 } catch {}
+  Write-Output ('LDAPSROT thumb=' + $imp.Thumbprint + ' serial=' + $imp.SerialNumber + ' ntds=' + (Get-Service NTDS).Status + ' adws=' + (Get-Service ADWS).Status)
+} catch { Write-Output ('IMPORT_FAILED: ' + $_); exit 1 }
+""";
 
     // === ApplyChaosAsync — graceful, evidence-based N/A ======================
     // GENUINE N/A for an SSH-managed adapter, not a stub. A meaningful DC chaos

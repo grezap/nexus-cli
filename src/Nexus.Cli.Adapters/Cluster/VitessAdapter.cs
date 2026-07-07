@@ -70,7 +70,8 @@ namespace Nexus.Cli.Adapters.Cluster;
 /// PRIMARY kill is the chaos path) / scale-out add+remove (tablet membership via
 /// DeleteTablets + service start) / backup take+restore (logical mysqldump
 /// round-trip per shard) / cert-rotate (per-node Vault PKI, gRPC + vtgate
-/// listener reload; mysqld-wire reload deferred to avoid an unplanned reparent)
+/// listener reload + the mysqld-WIRE cert reloaded ONLINE via `ALTER INSTANCE
+/// RELOAD TLS` — no restart, no reparent, the primary is never demoted; GAP #12)
 /// / acl (the vtgate static-auth users in <c>vtgate_creds.json</c> -- the real
 /// MySQL credentials at the :15306 front door; vtgate does not proxy CREATE USER
 /// DDL) / chaos (process-kill a tablet + VTOrc/replication rejoin).
@@ -248,6 +249,13 @@ public sealed class VitessAdapter : IClusterAdapter
             && pa.TryGetProperty("uid", out var u) && u.ValueKind == JsonValueKind.Number)
             return u.GetInt32();
         return null;
+    }
+
+    /// <summary>Parse the force-rerender probe's `OLD=&lt;serial&gt; NEW=&lt;serial&gt;` line.</summary>
+    internal static (string Old, string New) ParseRerender(string stdout)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(stdout, @"OLD=([0-9A-Fa-f]*)\s+NEW=([0-9A-Fa-f]*)");
+        return m.Success ? (m.Groups[1].Value, m.Groups[2].Value) : ("", "");
     }
 
     private async Task<Result<List<TabletInfo>>> GetTabletsAsync(IReadOnlyList<NodeRecord> all, CancellationToken ct, string? shard = null)
@@ -866,77 +874,86 @@ public sealed class VitessAdapter : IClusterAdapter
         var sw = Stopwatch.StartNew();
         var rotated = new List<CertRotatedNode>();
 
+        // GAP #12: to reload the tablet's mysqld-WIRE cert (:3306 — replication +
+        // vt_dba + vtgate→mysqld) we run `ALTER INSTANCE RELOAD TLS` on each tablet's
+        // mysqld socket (as vt_dba) after the split re-renders the leaf. Percona 8.4
+        // reloads the server TLS context ONLINE (no restart, no reparent — the primary
+        // is never demoted). Map each tablet's VMnet10 → uid for its socket path, and
+        // fetch vt_dba once.
+        var uidByVmnet10 = new Dictionary<string, int>(StringComparer.Ordinal);
+        string? dbaPwdVal = null;
+        if (tablets.IsOk)
+        {
+            foreach (var t in tablets.Value!) uidByVmnet10[t.Vmnet10] = t.Uid;
+            var dp = await DbaPwdAsync(cancellationToken).ConfigureAwait(false);
+            if (dp.IsOk) dbaPwdVal = dp.Value;
+        }
+
         foreach (var node in order)
         {
             var (role, _) = Classify(node.Name);
             var dir = role == "etcd" ? EtcdTlsDir : TlsDir;
-            var group = role == "etcd" ? "etcd" : "vitess";
 
-            var oldSerialExec = await _ssh.ExecuteAsync(T(node.Vmnet11),
-                $"sudo openssl x509 -in {dir}/server-cert.pem -noout -serial 2>/dev/null | sed 's/serial=//'", SshTimeout, cancellationToken).ConfigureAwait(false);
-            var oldSerial = oldSerialExec.IsOk && oldSerialExec.Value!.Stdout.Trim().Length > 0 ? oldSerialExec.Value.Stdout.Trim() : "(unknown)";
-
-            var cn = $"{node.Name}.vitess.nexus.lab";
-            var alts = role == "vtgate"
-                ? $"{node.Name},{node.Name}.nexus.lab,{cn},vtgate.nexus.lab,localhost"
-                : $"{node.Name},{node.Name}.nexus.lab,{cn},localhost";
-            var ips = $"{node.Vmnet10},{node.Vmnet11},127.0.0.1";
-
-            // Re-issue via the node's own Vault Agent token -> assemble bundle.pem ->
-            // run the infra's split script (writes server-cert/server-key(PKCS#8)/ca)
-            // -> restart the serving units. Reuses /usr/local/sbin/nexus-vitess-tls-split.sh.
-            var issueCmd =
-                $"T=$(sudo cat {AgentToken} 2>/dev/null); "
-                + $"sudo env VAULT_ADDR={VaultAddr} VAULT_TOKEN=\"$T\" VAULT_CACERT=/etc/vault-agent/ca-bundle.crt "
-                + $"/usr/local/bin/vault write -format=json pki_int/issue/{PkiRole} common_name={cn} alt_names={alts} ip_sans={ips} ttl=2160h";
-            var issueExec = await _ssh.ExecuteAsync(T(node.Vmnet11), issueCmd, SshTimeout, cancellationToken).ConfigureAwait(false);
-            if (issueExec.IsFail || issueExec.Value!.ExitCode != 0)
+            // Force the node's OWN vault-agent to RE-ISSUE a fresh leaf. `pkiCert`
+            // otherwise persists + reuses its cached leaf, so a direct issue+write is
+            // silently reverted on the agent's next render (the Swarm v0.8.2 lesson —
+            // the leaf MUST come from the agent to be durable). Back up + rm bundle.pem,
+            // restart the agent (whose post-render hook = nexus-vitess-tls-split.sh
+            // rewrites server-cert/server-key(PKCS#8)/ca), wait for server-cert.pem's
+            // serial to CHANGE (proof of a durable re-issue), restore the .bak if not.
+            var rerender =
+                $"D={dir}; OLD=$(sudo openssl x509 -in $D/server-cert.pem -noout -serial 2>/dev/null|sed 's/serial=//'); "
+                + "if sudo test -f $D/bundle.pem; then sudo cp -a $D/bundle.pem $D/bundle.pem.bak; sudo rm -f $D/bundle.pem; fi; "
+                + "sudo systemctl restart nexus-vault-agent; "
+                + "for i in $(seq 1 30); do NEW=$(sudo openssl x509 -in $D/server-cert.pem -noout -serial 2>/dev/null|sed 's/serial=//'); if [ -n \"$NEW\" ] && [ \"$NEW\" != \"$OLD\" ]; then break; fi; sleep 2; done; "
+                + "if sudo test -f $D/bundle.pem.bak; then if sudo test -f $D/bundle.pem; then sudo rm -f $D/bundle.pem.bak; else sudo mv $D/bundle.pem.bak $D/bundle.pem; fi; fi; "
+                + "echo \"OLD=$OLD NEW=$(sudo openssl x509 -in $D/server-cert.pem -noout -serial 2>/dev/null|sed 's/serial=//')\"";
+            var rr = await _ssh.ExecuteAsync(T(node.Vmnet11), rerender, TimeSpan.FromSeconds(90), cancellationToken).ConfigureAwait(false);
+            var (oldSerial, newSerial) = ParseRerender(rr.IsOk ? rr.Value!.Stdout : "");
+            if (rr.IsFail || oldSerial.Length == 0 || newSerial.Length == 0 || string.Equals(oldSerial, newSerial, StringComparison.OrdinalIgnoreCase))
             {
-                rotated.Add(new CertRotatedNode(node.Name, oldSerial, "(unchanged)",
-                    Error: issueExec.IsFail ? issueExec.Error : $"vault issue failed: {Tail(issueExec.Value!.Stdout + issueExec.Value.Stderr, 220)}"));
+                rotated.Add(new CertRotatedNode(node.Name, oldSerial.Length > 0 ? oldSerial : "(unknown)", "(unchanged)",
+                    Error: rr.IsFail ? rr.Error : "vault-agent did not re-issue a fresh leaf (server-cert serial unchanged — the node may be on the OLD Vault root, or its pkiCert did not re-render)."));
                 continue;
             }
 
-            string cert, key, ca, newSerial;
-            try
-            {
-                using var doc = JsonDocument.Parse(issueExec.Value.Stdout);
-                var d = doc.RootElement.GetProperty("data");
-                cert = d.GetProperty("certificate").GetString() ?? "";
-                key = d.GetProperty("private_key").GetString() ?? "";
-                ca = d.GetProperty("issuing_ca").GetString() ?? "";
-                newSerial = d.GetProperty("serial_number").GetString() ?? "(unknown)";
-            }
-            catch (Exception ex)
-            {
-                rotated.Add(new CertRotatedNode(node.Name, oldSerial, "(unchanged)", Error: $"could not parse vault issue response: {ex.Message}"));
-                continue;
-            }
-
-            // Assemble cert + key + ca into bundle.pem (the split-script input shape:
-            // leaf cert, then key, then CA), then split + restart.
-            var bundle = cert.TrimEnd() + "\n" + key.TrimEnd() + "\n" + ca.TrimEnd() + "\n";
+            // Restart the serving unit(s) to load the durable new leaf from disk.
             var restartUnits = role switch
             {
                 "etcd" => $"{EtcdSvc}.service",
                 "control" => $"{VtctldSvc}.service {VtorcSvc}.service",
                 "vtgate" => $"{VtgateSvc}.service",
-                // tablet: restart vttablet only (gRPC + db-client certs); mysqld stays
-                // up so the PRIMARY is never demoted (mysqld-wire cert reload deferred).
+                // tablet: restart vttablet (gRPC + db-client certs); mysqld stays UP —
+                // its wire cert is reloaded online via ALTER INSTANCE RELOAD TLS below,
+                // so the PRIMARY is never demoted (no reparent).
                 _ => $"{VttabletSvc}.service"
             };
-            var writeCmd =
-                $"echo {B64(bundle)}|base64 -d|sudo tee {dir}/bundle.pem >/dev/null; "
-                + $"sudo {SplitScript} {dir} {group} >/dev/null 2>&1; "
-                + $"sudo systemctl restart {restartUnits}; echo WROTE";
-            var writeExec = await _ssh.ExecuteAsync(T(node.Vmnet11), writeCmd, SshTimeout, cancellationToken).ConfigureAwait(false);
-            if (writeExec.IsFail || writeExec.Value!.ExitCode != 0 || !writeExec.Value.Stdout.Contains("WROTE", StringComparison.Ordinal))
+            var restart = await _ssh.ExecuteAsync(T(node.Vmnet11), $"sudo systemctl restart {restartUnits}; echo RESTARTED", SshTimeout, cancellationToken).ConfigureAwait(false);
+            if (restart.IsFail || !restart.Value!.Stdout.Contains("RESTARTED", StringComparison.Ordinal))
             {
-                rotated.Add(new CertRotatedNode(node.Name, oldSerial, "(unchanged)",
-                    Error: writeExec.IsFail ? writeExec.Error : $"writing new cert failed: {Tail(writeExec.Value!.Stdout + writeExec.Value.Stderr, 220)}"));
+                rotated.Add(new CertRotatedNode(node.Name, oldSerial, newSerial,
+                    Error: $"new leaf rendered but service restart failed: {(restart.IsFail ? restart.Error : Tail(restart.Value!.Stdout + restart.Value.Stderr, 180))}"));
                 continue;
             }
-            rotated.Add(new CertRotatedNode(node.Name, oldSerial, newSerial, Error: null));
+
+            // GAP #12: reload the tablet's mysqld-wire cert online (no restart/reparent).
+            string? mysqldNote = null;
+            if (role == "tablet")
+            {
+                if (dbaPwdVal is null)
+                    mysqldNote = "vttablet cert rotated, but the mysqld-wire cert was NOT reloaded — vt_dba password unavailable (need VAULT_ADDR/VAULT_TOKEN/VAULT_CACERT for the INexusVaultClient).";
+                else if (!uidByVmnet10.TryGetValue(node.Vmnet10, out var uid))
+                    mysqldNote = "vttablet cert rotated, but the tablet's uid was not found in the topology, so the mysqld socket could not be resolved for ALTER INSTANCE RELOAD TLS.";
+                else
+                {
+                    var sock = $"{DataRoot}/vt_{uid:D10}/mysql.sock";
+                    var reload = await _ssh.ExecuteAsync(T(node.Vmnet11),
+                        $"sudo env MYSQL_PWD='{dbaPwdVal}' mysql --socket={sock} -u vt_dba -e \"ALTER INSTANCE RELOAD TLS;\" 2>&1 && echo RELOADED", SshTimeout, cancellationToken).ConfigureAwait(false);
+                    if (reload.IsFail || !reload.Value!.Stdout.Contains("RELOADED", StringComparison.Ordinal))
+                        mysqldNote = $"vttablet cert rotated, but mysqld-wire `ALTER INSTANCE RELOAD TLS` failed (wire cert not reloaded): {(reload.IsFail ? reload.Error : Tail(reload.Value!.Stdout + reload.Value.Stderr, 180))}";
+                }
+            }
+            rotated.Add(new CertRotatedNode(node.Name, oldSerial, newSerial, Error: mysqldNote));
             await Task.Delay(TimeSpan.FromSeconds(role == "etcd" ? 6 : 4), cancellationToken).ConfigureAwait(false);
         }
         sw.Stop();

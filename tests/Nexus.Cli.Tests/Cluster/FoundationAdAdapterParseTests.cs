@@ -155,4 +155,32 @@ public class FoundationAdAdapterParseTests
     [InlineData("../../etc", "etc")]
     public void Sanitize_keeps_only_id_safe_chars(string input, string expected)
         => FoundationAdAdapter.Sanitize(input).Should().Be(expected);
+
+    // === ParseIssueJson (vault-1 LDAPS issue+PFX output; GAP #9 cert-rotate) ==
+    [Fact]
+    public void ParseIssueJson_extracts_pfx_and_intermediate()
+    {
+        var json = "{\"pfx_b64\":\"TUlJRkFB\",\"intermediate_pem\":\"-----BEGIN CERTIFICATE-----\\nMIIB\\n-----END CERTIFICATE-----\"}";
+        var (pfx, inter) = FoundationAdAdapter.ParseIssueJson(json);
+        pfx.Should().Be("TUlJRkFB");
+        inter.Should().Contain("BEGIN CERTIFICATE");
+    }
+
+    [Fact]
+    public void ParseIssueJson_ignores_leading_noise_and_reads_the_json_line()
+    {
+        // vault CLI / bash can print warnings before the final jq JSON line.
+        var stdout = "Warning: something\nanother line\n{\"pfx_b64\":\"QUJD\",\"intermediate_pem\":\"PEM\"}\n";
+        var (pfx, inter) = FoundationAdAdapter.ParseIssueJson(stdout);
+        pfx.Should().Be("QUJD");
+        inter.Should().Be("PEM");
+    }
+
+    [Fact]
+    public void ParseIssueJson_returns_empty_on_no_json()
+    {
+        var (pfx, inter) = FoundationAdAdapter.ParseIssueJson("ERROR: vault write failed\nnope");
+        pfx.Should().BeEmpty();
+        inter.Should().BeEmpty();
+    }
 }

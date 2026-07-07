@@ -1,0 +1,32 @@
+{
+  "id": "DEMO-165-foundation-ad-ldaps-cert-rotate",
+  "title": "FoundationAD: guarded DC LDAPS cert-rotate (standby DC first, NTDS restart, :636 verify)",
+  "description": "cert-rotate foundation-ad (GAP #9, v0.8.9) rotates each domain controller's LDAPS leaf, STANDBY DC FIRST then the PDC. Per DC: issue the leaf + build the PFX on vault-1 (openssl -- the Schannel-safe path), SFTP PFX + intermediate + root to the DC, import root->Root / intermediate->CA / leaf->My (all three load-bearing for the Schannel 36886 fix), verify the chain, Restart-Service NTDS + re-cycle ADWS in ONE SSH session (sshd is independent of NTDS so the session survives the ~20-30s restart -- no new SSH auth during the window, so the #10 self-fence can't occur), then verify the :636 handshake from the build host. If the standby DC's rotation fails, the PDC is left untouched. Live-verified 2026-07-07.",
+  "prerequisites": {
+    "vmsAlive": ["dc-nexus", "dc-nexus-2", "vault-1", "vault-2", "vault-3", "vault-transit"],
+    "envVars": ["VAULT_ADDR", "VAULT_TOKEN", "VAULT_CACERT", "NEXUS_SSH_KEY", "NEXUS_VMS_YAML"],
+    "smokeGate": "both DCs up with NTDS + Netlogon Running; vault-server PKI role allows dc-nexus + dc-nexus-2 (role-overlay-vault-pki-roles v3)"
+  },
+  "steps": [
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.240 \"powershell -NoProfile -Command \\\"(Get-ChildItem Cert:\\LocalMachine\\My | Where-Object { $_.Subject -eq 'CN=dc-nexus.nexus.lab' } | Select-Object -First 1).SerialNumber\\\"\"",
+      "waitAfterSeconds": 2,
+      "expectedExitCode": 0,
+      "observe": [
+        { "where": "stdout", "what": "the CURRENT LDAPS leaf serial on dc-nexus -- record it to compare after rotation" }
+      ]
+    },
+    {
+      "command": "nexus cert-rotate foundation-ad --yes --json",
+      "waitAfterSeconds": 120,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["dc-nexus-2", "dc-nexus"],
+      "observe": [
+        { "where": "stdout", "what": "the per-DC old/new serial table: dc-nexus-2 (standby) rotates BEFORE dc-nexus (PDC); each new serial is what :636 now serves. The PDC is rotated LAST -- a failed standby rotation would skip it." },
+        { "where": "ssh nexusadmin@192.168.70.1 'echo | openssl s_client -connect 192.168.70.240:636 -servername dc-nexus.nexus.lab 2>/dev/null | openssl x509 -noout -serial -issuer'", "what": "dc-nexus:636 serves the NEW serial, issuer=CN=NexusPlatform Intermediate CA -- the LDAPS handshake completes with the rotated PKI cert" },
+        { "where": "ssh nexusadmin@192.168.70.240 'powershell -c \"(Get-Service NTDS,Netlogon,ADWS).Status; Get-ADDomainController -Filter * | Select Name\"'", "what": "NTDS + Netlogon + ADWS Running and Get-AD* clean after the rotation -- AD auth was not interrupted (the NTDS restart stayed within the single session + ADWS was re-cycled)" }
+      ]
+    }
+  ],
+  "whatProves": "DC LDAPS cert rotation is a real, guarded, in-CLI operation (not an out-of-band overlay): standby-DC-first with abort-before-the-PDC, the NTDS restart is survived by keeping it in one SSH session, and LDAPS is proven to serve the new leaf on :636 -- without self-fencing the adapter's own SSH path or interrupting AD auth."
+}
