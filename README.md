@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-v0.8.9%20%E2%9C%85%20completion%20backlog%20COMPLETE%20(LDAPS%20%2B%20mysqld--wire%20cert--rotate)-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-v0.8.10%20%E2%9C%85%20infra--hardening%201--2%3A%20Postgres--VRRP%20failover%20fencing%20(iceberg--pg%20%2B%20registry--db)-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (140 VMs built through Phase 0.P) — a single **≤30 MB** Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,15 +12,26 @@ The operator surface for the **NexusPlatform lab** (140 VMs built through Phase 
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.8.9): the completion backlog is COMPLETE** — every cluster's every verb is
-> implemented inside the tool, nothing deferred to an out-of-band script. Batch 5 closed the last two
-> cert-rotate gaps: **FoundationAD DC LDAPS** (`cert-rotate foundation-ad` — issue on vault-1 → import
-> root/CA/leaf → `Restart-Service NTDS` + ADWS re-cycle in one SSH session → `:636` verify; **standby DC
-> first, PDC last**, abort-before-the-PDC; the single-session restart avoids the #10 self-fence) and
-> **Vitess mysqld-wire** (`cert-rotate vitess` — the tablet's mysqld reloads its :3306 wire cert online via
-> **`ALTER INSTANCE RELOAD TLS`**, no restart, **no reparent**; also fixed a pre-existing non-durability by
-> forcing the vault-agent to re-issue). Live-verified 2026-07-07 on both live DCs + the running vitess tier.
-> **321/321 tests; AOT 28.25 MB**. See CHANGELOG [0.8.9].
+> **Current state (v0.8.10): pre-Phase-1 infra-hardening, items 1–2 of 4** — both Postgres-VRRP tiers now
+> have **safe, self-healing one-shot failovers** via one shared fence + `pg_basebackup` re-seed pattern.
+> **lakehouse `--direction iceberg-pg`** (the Iceberg/Nessie catalog DB, was a graceful N/A) and **registry
+> `--direction registry-db`** (the Harbor datastore, was DR-deferred) now stop keepalived on the VIP holder
+> → promote the standby → **deterministically fence + re-seed the demoted old primary as a streaming
+> standby** (guarded so it can never wipe a live primary) → no split-brain. The paired infra fixes (the
+> `pg_hba` block on **both** nodes + the guarded reseed helper) live in `nexus-infra-lakehouse` (0.L.2.1) +
+> `nexus-infra-registry` (0.L.4.1). **Live-verified 2026-07-08** (both tiers were found split-brained and
+> repaired; 4 + 2 drills both directions GREEN; Nessie `GET /api/v2/trees` → 200 and the `harbor` role
+> admitted on the promoted node). **321/321 tests; AOT 28.33 MB**. See CHANGELOG [0.8.10].
+>
+> <details><summary>v0.8.9 completion backlog batch 5 — FoundationAD LDAPS + Vitess mysqld-wire cert-rotate (backlog COMPLETE)</summary>
+>
+> **v0.8.9 = completion backlog COMPLETE** — every cluster's every verb implemented inside the tool. Batch 5
+> closed the last two cert-rotate gaps: **FoundationAD DC LDAPS** (`cert-rotate foundation-ad` — issue on
+> vault-1 → import root/CA/leaf → `Restart-Service NTDS` + ADWS re-cycle in one SSH session → `:636` verify;
+> **standby DC first, PDC last**) and **Vitess mysqld-wire** (`cert-rotate vitess` — tablet mysqld reloads
+> its :3306 wire cert online via **`ALTER INSTANCE RELOAD TLS`**, no restart, no reparent). Live-verified
+> 2026-07-07. 321/321 tests; AOT 28.25 MB.
+> </details>
 >
 > <details><summary>v0.8.8 completion backlog batch 4 — grafana-pg + iceberg-pg PG-ssl cert-rotate</summary>
 >
@@ -444,6 +455,7 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Twenty-seven ADRs cover f
 | **v0.8.7** | **Completion backlog, batches 2–3** — **`scale-up`** skeleton → full vertical resizer (`VmrunVmResizer`: atomic `.vmx` cpu/ram edit + cold restart; `vmware-vdiskmanager -x` disk grow + a SAFE guest FS extend that never repartitions a live boot disk, honest deb13 root-not-last warning) with a cluster-safety gate (refuses the write-primary/controller-leader unless `--force-primary`); **swarm `backup restore`** guarded behind `--confirm-destructive`; **kafka resize-gate** (controller-leader); FoundationAD **`backup take`** (`ntdsutil ifm`) + **`failover-test`** (graceful FSMO transfer); demos/playbooks/handbook §3.5 for all; **28.25 MB**, 310/310 tests |
 | **v0.8.8** | **Completion backlog, batch 4** — the two deferred **PostgreSQL cert-rotate** gaps closed: `cert-rotate` now rotates **grafana-pg** (obs state DB) + **iceberg-pg** (lakehouse catalog DB) via a shared `PgSslCertRotator` — a PG17 streaming pair rotated **standby-first then primary** with a SIGHUP `reload` (not a restart), so replication is never dropped. Live-verified (iceberg-pg standby→primary, `pg_stat_replication` intact after both). **28.25 MB**, 315/315 tests. *(Remaining: #9 FoundationAD LDAPS, #12 Vitess mysqld-wire.)* |
 | **v0.8.9** | **Completion backlog COMPLETE** — the last two cert-rotate gaps: **FoundationAD DC LDAPS** (`cert-rotate foundation-ad`: openssl PFX on vault-1 → import root/CA/leaf → `Restart-Service NTDS` + ADWS re-cycle in one SSH session → `:636` verify; **standby DC first, PDC last**, abort-before-the-PDC, single-session restart avoids the #10 self-fence) + **Vitess mysqld-wire** (`cert-rotate vitess`: the tablet's mysqld reloads its :3306 wire cert online via **`ALTER INSTANCE RELOAD TLS`** — no restart, **no reparent**; also fixed a pre-existing non-durability by forcing the vault-agent to re-issue). Live-verified on both live DCs + the running vitess tier. **Every cluster's every verb is now implemented in-CLI — nothing deferred.** **28.25 MB**, 321/321 tests |
+| **v0.8.10** | **Pre-Phase-1 infra-hardening, items 1–2 of 4** — Postgres-VRRP failover fencing for both PG-behind-keepalived tiers: **lakehouse `--direction iceberg-pg`** (was graceful N/A) + **registry `--direction registry-db`** (was DR-deferred) now stop keepalived on the VIP holder → promote the standby → **deterministically fence + `pg_basebackup` re-seed the demoted old primary** (guarded so it can never wipe a live primary) → no split-brain. Paired infra fixes (the `pg_hba` block on **both** nodes + the reseed helper) in `nexus-infra-lakehouse` 0.L.2.1 + `nexus-infra-registry` 0.L.4.1. Both tiers found split-brained + repaired; 4 + 2 drills both directions GREEN (Nessie 200 + `harbor` role admitted on the promoted node). **28.33 MB**, 321/321 tests |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing

@@ -40,7 +40,10 @@ namespace Nexus.Cli.Adapters.Cluster;
 ///   streaming repl + Redis repl + S3 (MinIO) reachable + VIP bound.</item>
 ///   <item>topology = 4 nodes + VIP pseudo-node + datastore backends (MinIO/PG/Redis).</item>
 ///   <item>failover = datastore VRRP cutover (stop keepalived on the .119 holder → PG
-///   promote + Redis re-master via the keepalived notify scripts → RTO measured).</item>
+///   promote + Redis re-master via notify_master → the adapter then fences +
+///   pg_basebackup re-seeds the OLD primary as a streaming standby → RTO measured;
+///   0.L.4.1 fencing hardening = pg_hba on both nodes + the guarded reseed helper, so
+///   no split-brain and Harbor stays served on the promoted node).</item>
 ///   <item>scale-out = graceful actionable N/A (2-node RR-DNS app HA + 2-node datastore
 ///   pair is the ADR-0036 standard; growth is a terraform op).</item>
 ///   <item>backup = pg_dump the Harbor metadata DB (registry) round-trip — the
@@ -79,6 +82,7 @@ public sealed class RegistryAdapter : IClusterAdapter
 
     private static readonly TimeSpan SshTimeout = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan CurlTimeout = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan ReseedTimeout = TimeSpan.FromSeconds(180);   // pg_basebackup re-seed of the demoted old primary
 
     private static readonly string[] KnownChaosScenarios =
         ["network-partition", "packet-loss", "slow-disk", "cpu-starve", "memory-pressure", "process-kill"];
@@ -536,30 +540,53 @@ public sealed class RegistryAdapter : IClusterAdapter
         }
         var observed = sw.Elapsed;
 
-        // Recover: restart keepalived on the original master (nopreempt → it returns as BACKUP).
-        var recovery = "skipped";
-        string? recoveryHint = null;
+        // Fence + re-seed the OLD primary as a fresh streaming standby of the NEW primary
+        // (0.L.4.1 fencing hardening — deterministic, mirroring iceberg-pg). The helper refuses
+        // if the node still holds the VIP or the source is not a primary, so it can NEVER wipe a
+        // live primary; it streams over the new primary's backplane IP. Without this the old
+        // primary stays a second PG primary (split-brain) — the gap this closes.
+        var reseed = "skipped"; string? reseedHint = null;
+        if (promoted)
+        {
+            var rc = await _ssh.ExecuteAsync(T(masterNode.Vmnet11),
+                $"sudo /usr/local/sbin/nexus-registry-reseed.sh {backupNode.Vmnet10} 2>&1", ReseedTimeout, cancellationToken).ConfigureAwait(false);
+            var ok = rc.IsOk && rc.Value!.Stdout.Contains("RESEED_OK", StringComparison.Ordinal);
+            reseed = ok ? "re-seeded" : "failed";
+            if (!ok) reseedHint = $"the old primary {master} did NOT re-seed as a standby (split-brain risk) — run manually: "
+                + $"ssh {masterNode.Vmnet11} 'sudo /usr/local/sbin/nexus-registry-reseed.sh {backupNode.Vmnet10}'. "
+                + $"[{Tail((rc.IsOk ? rc.Value!.Stdout : rc.Error) ?? "", 220)}]";
+        }
+
+        // Recover: restart keepalived on the original master (nopreempt → it returns as BACKUP; its
+        // notify_backup demote.sh re-points Redis to the new master + is a no-op reseed since the
+        // adapter already re-seeded PG).
+        var kaBack = "skipped";
         if (!request.NoRecover)
         {
             var restart = await _ssh.ExecuteAsync(T(masterNode.Vmnet11), "sudo systemctl start keepalived && echo STARTED", SshTimeout, cancellationToken).ConfigureAwait(false);
-            recovery = restart.IsOk && restart.Value!.Stdout.Contains("STARTED", StringComparison.Ordinal) ? "recovered" : "failed";
-            if (recovery == "failed") recoveryHint = $"restart keepalived on {master} manually (`sudo systemctl start keepalived`).";
-            else recoveryHint = $"{master} rejoined as standby (nopreempt); it must re-sync as a PG replica of {backupNode.Name} "
-                + "(the keepalived notify_backup / DR runbook re-seeds it via pg_basebackup if streaming doesn't auto-resume).";
+            kaBack = restart.IsOk && restart.Value!.Stdout.Contains("STARTED", StringComparison.Ordinal) ? "recovered" : "failed";
+            if (kaBack == "failed") reseedHint = $"restart keepalived on {master} manually (`sudo systemctl start keepalived`). {reseedHint}";
         }
-        else recoveryHint = $"keepalived left stopped on {master} (--no-recover); restart it when ready.";
+        else reseedHint ??= $"keepalived left stopped on {master} (--no-recover); restart it when ready.";
         var recovered = sw.Elapsed;
         sw.Stop();
 
         var moved = newHolder == backupNode.Name;
+        var recovery = !promoted ? "failed"
+            : reseed != "re-seeded" ? "failed"
+            : request.NoRecover ? "skipped"
+            : kaBack == "recovered" ? "recovered" : "failed";
+        var okHint = $"{master} re-seeded as a streaming standby of {backupNode.Name} + its Redis re-pointed to the new master; "
+            + $"the .119 VIP now fronts {backupNode.Name} (nopreempt keeps it there). Harbor reconnects through the VIP — "
+            + "its pg_hba admits the harbor role on the promoted node.";
         return Result.Ok(new FailoverResult(
             Scenario: "vrrp-cutover:registry-db",
             OriginalPrimary: master,
             NewPrimary: moved ? backupNode.Name : newHolder,
             Rto: observed - injected,
             Recovery: recovery,
-            RecoveryHint: moved && promoted ? recoveryHint
-                : $"VIP/promotion did not complete on {backupNode.Name} within 30s (moved={moved}, pg-primary={promoted}) — check keepalived + the notify_master pg_ctl promote on the backup. {recoveryHint}",
+            RecoveryHint: moved && promoted ? (reseedHint ?? okHint)
+                : $"VIP/promotion did not complete on {backupNode.Name} within 30s (moved={moved}, pg-primary={promoted}) — check keepalived + the notify_master pg_ctl promote on the backup. {reseedHint}",
             Timeline: new FailoverTimeline(preFlight, injected, observed, recovered, recovered),
             StartedAtUtc: startedAt));
     }

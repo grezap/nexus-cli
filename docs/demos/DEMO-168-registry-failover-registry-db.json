@@ -1,0 +1,49 @@
+{
+  "id": "DEMO-168-registry-failover-registry-db",
+  "title": "Registry: registry-db datastore VRRP failover (.119 cutover + fence/re-seed)",
+  "description": "Runs `nexus failover-test cluster registry --direction registry-db --yes`. Stops keepalived on the VIP .119-holding datastore primary; notify_master promotes PG (pg_ctl promote) + re-masters Redis; the adapter then fences + pg_basebackup re-seeds the OLD primary as a fresh streaming standby (nexus-registry-reseed.sh, guarded so it can never wipe a live primary), and restarts keepalived (whose notify_backup demote.sh re-points the old Redis to the new master). 0.L.4.1 fencing hardening: the NEXUS-REGISTRY-HBA block is now on BOTH nodes so the promoted node admits the Harbor DB user -> no split-brain, Harbor stays served. Was code-verified-but-DR-deferred before this hardening.",
+  "prerequisites": {
+    "vmsAlive": [
+      "registry-pg-1",
+      "registry-pg-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_SSH_USER",
+      "NEXUS_VMS_YAML"
+    ],
+    "notes": "registry-pg-1/2 are the datastore pair (VIP registry-db.nexus.lab .119, PG :5432 + co-located Redis :6379). The Harbor app nodes (registry-1/2) are RR-DNS and NOT required for the drill — power them on only to observe Harbor end-to-end. MinIO is not required for the catalog-DB path."
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster registry --direction registry-db --yes",
+      "waitAfterSeconds": 10,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "vrrp-cutover:registry-db",
+        "original primary",
+        "new primary",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "VIP .119 moves registry-pg-1 -> registry-pg-2, RTO ~1.3-3s, recovery=recovered; hint 'registry-pg-1 re-seeded as a streaming standby of registry-pg-2 + its Redis re-pointed to the new master'; 5-instant timeline table."
+        },
+        {
+          "where": "ssh nexusadmin@192.168.70.118 \"sudo -u postgres psql -tAc 'SELECT pg_is_in_recovery()'\"",
+          "what": "The promoted node .118 returns 'f' (primary) and holds the VIP; ssh .117 returns 't' (streaming standby) with pg_stat_wal_receiver=streaming -> 1 primary + 1 standby, NO split-brain (was the gap: the old demote.sh left a second PG primary)."
+        },
+        {
+          "where": "ssh nexusadmin@<node> \"redis-cli -a $(sudo cat /etc/nexus-registry-pg/redis-password) --no-auth-warning info replication | grep role\"",
+          "what": "New primary Redis role:master; old primary role:slave -> Redis re-attached via notify_backup demote.sh."
+        },
+        {
+          "where": "psql \"host=192.168.70.118 dbname=registry user=harbor sslmode=require\"  (harbor pw at KV nexus/registry/harbor-db-password)",
+          "what": "The harbor role is ADMITTED over TLS on the promoted node (pg_hba NEXUS-REGISTRY-HBA now on both nodes) -> Harbor's DB connection via the VIP survives the cutover. Pre-fix this was refused."
+        }
+      ]
+    }
+  ],
+  "whatProves": "RegistryAdapter.FailoverAsync --direction registry-db is a real self-healing one-shot datastore failover (was DR-deferred). It performs a keepalived VRRP cutover of the .119 datastore VIP (PG + Redis), promotes PG + re-masters Redis, then deterministically fences + pg_basebackup re-seeds the demoted old primary as a streaming standby (no split-brain) and re-points its Redis to the new master. The promoted node serves Harbor because the NEXUS-REGISTRY-HBA block now exists on BOTH nodes. Symmetric in both directions (re-run to fail back). Reuses the iceberg-pg (0.L.2.1) fence/re-seed pattern."
+}

@@ -315,7 +315,7 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 
 ⁶⁰ lakehouse `topology` = 16 role-annotated nodes + the iceberg-db **VIP `.151` pseudo-node** (live holder) + the ZooKeeper leader/follower roles + the Spark ALIVE/STANDBY masters + the multi-master `spark://…:7077,…:7077` URL. Shards = null (the lakehouse tier is not data-sharded). Leaders/holders drift — the Spark ALIVE leader (`/json/` status) and the VIP holder are read live, never assumed.
 
-⁶¹ lakehouse `failover-test cluster lakehouse --direction spark-master`: stops `nexus-spark-master` on the ALIVE leader → **ZooKeeper promotes the STANDBY** to ALIVE (the workers re-register), measured to the standby reaching ALIVE (RTO ≈ 31 s), then restarts the old leader as the new STANDBY — the live-proven HA drill. **`--direction iceberg-pg` is a graceful actionable N/A** (v0.8.4-caught live): a keepalived VRRP cutover of the `.151` catalog-DB pair is NOT a safe one-shot — the `notify_master` hook promotes the standby while `nopreempt` leaves the old primary un-demoted (split-brain), and the promoted standby's `pg_hba.conf` does not admit the Nessie REST hosts → the catalog front door lands on a PG Nessie can't use → Nessie crash-loops. A real catalog-DB failover is a DR runbook (promote new + demote/fence old + `pg_basebackup` re-seed), not an adapter verb. MinIO (EC, no leader), Nessie (RR-DNS HA), ZooKeeper (its own Zab quorum) and the Spark workers have no operator-driven failover either.
+⁶¹ lakehouse has **two** one-shot failovers. **`--direction spark-master`**: stops `nexus-spark-master` on the ALIVE leader → **ZooKeeper promotes the STANDBY** to ALIVE (the workers re-register), measured to the standby reaching ALIVE (RTO ≈ 31 s), then restarts the old leader as the new STANDBY — the live-proven HA drill. **`--direction iceberg-pg` (catalog-DB VRRP cutover `.151`; 0.L.2.1 fencing hardening — was N/A until 2026-07-08):** stop keepalived on the VIP-holding primary → its peer's `notify_master` promotes the standby (`pg_ctl promote`) → the adapter **deterministically fences + `pg_basebackup` re-seeds the OLD primary as a fresh streaming standby** (`/usr/local/sbin/nexus-iceberg-reseed.sh`, guarded so it can never wipe a live primary) → restart keepalived (nopreempt keeps the VIP on the new primary). RTO ≈ 2–3 s, ~8.5 s end-to-end; symmetric (re-run to fail back). **The two prior blockers were fixed in `nexus-infra-lakehouse` (0.L.2.1):** the `NEXUS-ICEBERG-HBA` block now exists on **both** nodes (a promoted standby admits the Nessie role — the catalog stays served, no crash-loop) and there is a fence/re-seed so there is no split-brain; keepalived `notify_fault` is the unattended-crash self-heal backstop. **Live-verified 2026-07-08** (4 drills both directions GREEN; Nessie `GET /api/v2/trees` → 200 after the cutover; see `docs/verification/0.L.2.1-iceberg-pg-failover-fencing.md`). MinIO (EC, no leader), Nessie (RR-DNS HA), ZooKeeper (its own Zab quorum) and the Spark workers have no operator-driven failover.
 
 ⁶² lakehouse `scale-out` = graceful actionable **N/A** for every role: the MinIO erasure set is FIXED at 4 (EC:2; the set size is baked at format time — growing it is a new server pool), and the Spark worker count + the iceberg-pg/Nessie pairs + the ZooKeeper ensemble are fixed-size IaC. Add capacity by adding the VM + overlay in `nexus-infra-lakehouse` and re-applying.
 
@@ -331,7 +331,7 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
 
 ⁶⁸ registry `topology` = the 4 `registry-*` nodes (harbor-app ×2 RR-DNS `registry.nexus.lab`; registry-pg primary+replica) + the `.119` VIP pseudo-node (`registry-db.nexus.lab`, live holder) + the MinIO `s3://harbor` blob-store. Shards = null (not data-sharded). The vms.yaml cluster is `platform-tools`; the adapter filters to the four `registry-*` members (the unbuilt prefect/unleash/marquez/backstage reservations classify `other` and are excluded).
 
-⁶⁹ registry `failover-test cluster registry --direction registry-db` is **code-verified but DR-deferred** (honest, precedented — the lakehouse iceberg-pg + obs grafana-db pattern): the keepalived `demote.sh` re-attaches **Redis** but **not PostgreSQL**, so a VRRP cutover of `.119` promotes the peer's PG while leaving the demoted node a second PG primary (split-brain by design) → a real registry-db failover is a DR runbook (promote + fence + `pg_basebackup` re-seed). The VRRP+promote+Redis code path was verified against the live keepalived scripts; live execution was deferred to avoid degrading the freshly-rebuilt datastore. The **app tier needs no failover** (RR-DNS `registry.nexus.lab`; clients retry) — the verb refuses an app-direction with that pointer.
+⁶⁹ registry `failover-test cluster registry --direction registry-db` is a **real self-healing one-shot** (0.L.4.1 fencing hardening, 2026-07-08 — was "code-verified but DR-deferred"): stop keepalived on the `.119` holder → the peer's `notify_master` promotes PG (`pg_ctl promote`) + re-masters Redis → the **adapter then fences + `pg_basebackup` re-seeds the OLD primary as a streaming standby** (`/usr/local/sbin/nexus-registry-reseed.sh`, guarded so it can never wipe a live primary) → restart keepalived (nopreempt; its `notify_backup` `demote.sh` re-points the old node's Redis to the new master + is a no-op reseed). RTO ≈ 1.3–3 s; symmetric (re-run to fail back). **The prior split-brain gap was closed in `nexus-infra-registry` (0.L.4.1):** the `NEXUS-REGISTRY-HBA` block now on **both** nodes (a promoted standby admits the Harbor DB user) + the guarded reseed helper + `demote.sh` PG re-attach self-heal. **Live-verified 2026-07-08** (found split-brained; overlay re-apply fixed it; 2 drills both directions GREEN; the `harbor` role is admitted over TLS on the promoted node; see `docs/verification/0.L.4.1-registry-db-failover-reseed.md`). The **app tier needs no failover** (RR-DNS `registry.nexus.lab`; clients retry) — the verb refuses an app-direction with that pointer.
 
 ⁷⁰ registry `scale-out` = graceful actionable **N/A** (ADR-0036): the 2-node app pair (RR-DNS) + 2-node datastore pair (VRRP) is the fixed-HA standard; capacity scales by MinIO EC storage + vertical `scale-up`, not by adding registry nodes. Add capacity by adding the VM + overlay in `nexus-infra-registry` and re-applying.
 
@@ -805,3 +805,64 @@ prerequisites). Each was live-verified on the dates noted; the JSON demos are th
   Observed: **stdout**; on a manager, `consul kv export | grep -c key` matches the count.
 - **Proves:** a real, guarded, online restore — refused without the extra opt-in, GREEN with it (runs
   `consul`/`nomad snapshot restore` against the leader). **Live-verified 2026-07-06 on the swarm tier.**
+
+### §3.6 Infra-hardening verb playbooks (pre-Phase-1)
+
+#### §3.6.1 lakehouse `failover-test cluster lakehouse --direction iceberg-pg` — catalog-DB VRRP cutover + fence/re-seed · demo `DEMO-167-lakehouse-failover-iceberg-pg`
+- **Prereqs:** iceberg-pg-1 (.149) + iceberg-pg-2 (.150) up as a healthy 1-primary + 1-streaming-standby
+  pair (VIP iceberg-db.nexus.lab .151); `NEXUS_SSH_KEY`/`NEXUS_SSH_USER`/`NEXUS_VMS_YAML`. Add
+  iceberg-rest-1/2 (Nessie) only to OBSERVE the catalog staying served. MinIO **not** required. Depends
+  on the `nexus-infra-lakehouse` 0.L.2.1 overlay (pg_hba on both nodes + `nexus-iceberg-reseed.sh` +
+  keepalived `notify_fault`) — re-apply `role-overlay-iceberg-pg-replication.tf` first if a node lacks
+  `/usr/local/sbin/nexus-iceberg-reseed.sh` or the `NEXUS-ICEBERG-HBA` block.
+- **Step 1 — pre-state.** Input: `ssh nexusadmin@.149 "sudo -u postgres psql -tAc 'SELECT pg_is_in_recovery()'"`
+  (= `f`, holds the VIP) and `.150` (= `t`, `pg_stat_wal_receiver` streaming). Observed: **SSH/psql** — exactly
+  1 primary + 1 streaming standby. If BOTH read `f` you have a split-brain — re-apply the overlay to re-seed
+  the second node before drilling.
+- **Step 2 — the failover.** Input: `nexus failover-test cluster lakehouse --direction iceberg-pg --yes`.
+  Expected: GREEN `vrrp-cutover:iceberg-pg`, `original primary`/`new primary` swap, `recovery = recovered`,
+  hint *"… re-seeded as a streaming standby of …"*, a 5-instant timeline (RTO ≈ 2–3 s, ~8.5 s total).
+  Observed: **stdout**.
+- **Step 3 — no split-brain.** Input: re-query `pg_is_in_recovery()` + `pg_stat_wal_receiver` on both nodes.
+  Expected: the roles have swapped — the OLD primary is now `t` (streaming standby), the NEW primary is `f`
+  and holds the VIP; the new primary's `pg_stat_replication` shows the old primary's backplane IP streaming.
+  Observed: **SSH/psql**. Re-run Step 2 to fail back (symmetric).
+- **Step 4 — Nessie stays served (the pg_hba fix).** Input (with Nessie up): `curl -sk https://iceberg.nexus.lab:19120/api/v2/trees`.
+  Expected: **HTTP 200** with the branch list AFTER the cutover; `pg_stat_activity` on the new primary then
+  shows a `nessie/192.168.70.147|148` connection. Observed: **curl + SSH/psql**. Direct proof: a
+  `psql "host=<new-primary> dbname=nessie user=nessie sslmode=require"` connection is admitted on the
+  promoted node (pre-0.L.2.1 it was refused — no pg_hba entry for `nessie` on the standby).
+- **Safety:** running `sudo /usr/local/sbin/nexus-iceberg-reseed.sh <src>` **on the node holding the VIP**
+  refuses (`REFUSE: this node holds VIP …`, exit 3) — the helper can never wipe a live primary.
+- **Proves:** a real one-shot catalog-DB failover (was graceful N/A) — VRRP cutover + deterministic fence +
+  `pg_basebackup` re-seed with no split-brain, and a promoted standby that serves the Nessie catalog.
+  **Live-verified 2026-07-08** (4 drills both directions GREEN). See `docs/verification/0.L.2.1-iceberg-pg-failover-fencing.md`.
+
+#### §3.6.2 registry `failover-test cluster registry --direction registry-db` — datastore VRRP cutover + fence/re-seed · demo `DEMO-168-registry-failover-registry-db`
+- **Prereqs:** registry-pg-1 (.117) + registry-pg-2 (.118) up as a healthy 1-primary + 1-streaming-standby
+  pair (VIP registry-db.nexus.lab .119, carrying PG :5432 + Redis :6379); `NEXUS_SSH_KEY`/`NEXUS_SSH_USER`/
+  `NEXUS_VMS_YAML`. The Harbor app nodes (registry-1/2) are RR-DNS and only needed to observe Harbor
+  end-to-end (not required for the drill). Depends on the `nexus-infra-registry` 0.L.4.1 overlay
+  (pg_hba on both + `nexus-registry-reseed.sh` + `demote.sh` PG re-attach) — re-apply
+  `role-overlay-registry-pg-replication.tf` first if a node lacks the reseed helper or the HBA block.
+- **Step 1 — pre-state.** Input: `ssh nexusadmin@.117 "sudo -u postgres psql -tAc 'SELECT pg_is_in_recovery()'"`
+  (= `f`, holds VIP) and `.118` (= `t`, streaming). Observed: **SSH/psql** — 1 primary + 1 standby. If BOTH
+  read `f` you have a split-brain (as found 2026-07-08) — re-apply the overlay to re-seed the second node.
+- **Step 2 — the failover.** Input: `nexus failover-test cluster registry --direction registry-db --yes`.
+  Expected: GREEN `vrrp-cutover:registry-db`, `original primary`/`new primary` swap, `recovery = recovered`,
+  hint *"… re-seeded as a streaming standby of … + its Redis re-pointed to the new master"*, timeline RTO
+  ~1.3–3 s. Observed: **stdout**.
+- **Step 3 — no split-brain + Redis re-attach.** Input: re-query `pg_is_in_recovery()` + `pg_stat_wal_receiver`
+  + `redis-cli … info replication | grep role` on both nodes. Expected: roles swapped — old primary now `t`
+  (streaming standby) + `role:slave`, new primary `f` + VIP + `role:master`; `pg_stat_replication` on the new
+  primary shows the old primary streaming. Observed: **SSH/psql + redis-cli**. Re-run Step 2 to fail back.
+- **Step 4 — Harbor DB admitted on the promoted node (the pg_hba fix).** Input: a
+  `psql "host=<new-primary> dbname=registry user=harbor sslmode=require"` connection is admitted on the
+  promoted node (pre-0.L.4.1 it was refused — no pg_hba entry for `harbor` on the standby). Observed:
+  **psql** (the harbor password is at KV `nexus/registry/harbor-db-password`). Harbor's core reconnects
+  through the VIP the same way (RR-DNS app nodes retry).
+- **Safety:** `sudo /usr/local/sbin/nexus-registry-reseed.sh <src>` **on the VIP holder** refuses
+  (`REFUSE: this node holds VIP …`, exit 3) — the helper can never wipe a live primary.
+- **Proves:** a real self-healing one-shot datastore failover (was DR-deferred) — VRRP cutover + PG promote
+  + Redis re-master + deterministic fence/`pg_basebackup` re-seed of the old primary (no split-brain).
+  **Live-verified 2026-07-08** (2 drills both directions GREEN). See `docs/verification/0.L.4.1-registry-db-failover-reseed.md`.

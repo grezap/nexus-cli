@@ -54,7 +54,7 @@ namespace Nexus.Cli.Adapters.Cluster;
 ///   <item>status = MinIO EC online + Nessie up + Spark master/workers + ZK quorum (16 nodes + roles + VIP holder).</item>
 ///   <item>health = MinIO /health/{live,cluster} + mc drives; Nessie /q/health per-check + /iceberg/v1/config; Spark master ALIVE + aliveworkers + worker /json/; ZK quorum; iceberg-pg replication; S3+catalog reachable.</item>
 ///   <item>topology = 16 nodes + roles + VIP .151 holder + ZK ensemble (leader/followers) + Spark master/standby. Not sharded.</item>
-///   <item>failover = --direction spark-master (stop the ALIVE master → ZK promotes the STANDBY, ~30s — the live-proven HA drill); iceberg-pg catalog-DB = graceful N/A (a VRRP cutover promotes the standby into a split-brain + the pg_hba/Nessie mismatch — a DR runbook, not a one-shot).</item>
+///   <item>failover = --direction spark-master (stop the ALIVE master → ZK promotes the STANDBY, ~30s — the live-proven HA drill) OR --direction iceberg-pg (catalog-DB VRRP cutover .151: stop keepalived on the primary → standby promoted → fence + pg_basebackup re-seed the old primary as a standby; 0.L.2.1 fencing hardening made pg_hba-on-both + a guarded reseed helper, so no split-brain + Nessie stays served).</item>
 ///   <item>scale-out = graceful actionable N/A (MinIO EC fixed at 4; Spark worker count = terraform/Packer in nexus-infra-lakehouse).</item>
 ///   <item>cert-rotate = vault-agent force-rerender per node + reload (MinIO BIG-BANG restart all 4 — a rolling 1-node re-cert breaks distributed inter-node mTLS; Spark/Nessie/ZK restart; iceberg-pg deferred to the PG DR runbook).</item>
 ///   <item>acl = MinIO policies + users via <c>mc admin policy/user</c> (root + app user protected).</item>
@@ -87,6 +87,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
     private static readonly TimeSpan SshTimeout = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan CurlTimeout = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan McTimeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan ReseedTimeout = TimeSpan.FromSeconds(180);   // pg_basebackup re-seed of the demoted old primary
 
     private static readonly string[] KnownChaosScenarios =
         ["network-partition", "packet-loss", "slow-disk", "cpu-starve", "memory-pressure", "process-kill"];
@@ -192,6 +193,14 @@ public sealed class LakehouseAdapter : IClusterAdapter
     {
         var r = await _ssh.ExecuteAsync(T(ip), $"systemctl is-active {unit} 2>/dev/null", SshTimeout, ct).ConfigureAwait(false);
         return r.IsOk && r.Value!.Stdout.Trim() == "active";
+    }
+
+    /// <summary>iceberg-pg role via <c>pg_is_in_recovery()</c> → "primary" | "replica" | "".</summary>
+    private async Task<string> PgRoleAsync(string ip, CancellationToken ct)
+    {
+        var r = await _ssh.ExecuteAsync(T(ip), "sudo -u postgres psql -tAc 'SELECT pg_is_in_recovery()' 2>/dev/null", SshTimeout, ct).ConfigureAwait(false);
+        var v = r.IsOk ? r.Value!.Stdout.Trim() : "";
+        return v == "f" ? "primary" : v == "t" ? "replica" : "";
     }
 
     /// <summary>Which iceberg-pg node currently holds the VRRP VIP (ip addr show).</summary>
@@ -546,14 +555,14 @@ public sealed class LakehouseAdapter : IClusterAdapter
 
         if (direction is "spark-master" or "spark" or "master")
             return await SparkMasterFailoverAsync(all, request, cancellationToken).ConfigureAwait(false);
-        if (direction is "iceberg-pg" or "iceberg-db" or "pg" or ".151")
-            return Result.Fail<FailoverResult>(IcebergPgFailoverNaMessage);
+        if (direction is "iceberg-pg" or "iceberg-db" or "pg" or "db" or "catalog" or ".151")
+            return await IcebergPgFailoverAsync(all, request, cancellationToken).ConfigureAwait(false);
 
         return Result.Fail<FailoverResult>(
-            $"unknown failover direction '{direction}'. The lakehouse failover is `--direction spark-master` (ZooKeeper "
-            + "auto-promotes the STANDBY master, ~30s — the live-proven HA drill). MinIO (EC, no leader), Nessie (RR-DNS HA), "
-            + "ZooKeeper (its own Zab quorum), the Spark workers, and the iceberg-pg catalog DB have no safe one-shot operator "
-            + "failover (see `--direction iceberg-pg` for why the catalog-DB cutover is a DR runbook).");
+            $"unknown failover direction '{direction}'. The lakehouse has TWO one-shot failovers: `--direction spark-master` "
+            + "(ZooKeeper auto-promotes the STANDBY master, ~30s) and `--direction iceberg-pg` (the catalog-DB VRRP cutover .151 "
+            + "— promote the standby + fence/re-seed the old primary). MinIO (EC, no leader), Nessie (RR-DNS HA), ZooKeeper (its "
+            + "own Zab quorum), and the Spark workers have no safe one-shot operator failover.");
     }
 
     private async Task<Result<FailoverResult>> SparkMasterFailoverAsync(List<NodeRecord> all, FailoverRequest request, CancellationToken ct)
@@ -609,22 +618,105 @@ public sealed class LakehouseAdapter : IClusterAdapter
             StartedAtUtc: startedAt));
     }
 
-    // iceberg-pg catalog-DB failover is a graceful actionable N/A (diagnosed live in v0.8.4):
-    // a keepalived VRRP cutover of the .151 VIP is NOT a safe one-shot verb. The keepalived
-    // notify_master hook PROMOTES the standby when it takes the VIP, but nopreempt leaves the
-    // OLD primary running (un-demoted) → a split-brain (both nodes primary), and the standby's
-    // pg_hba.conf does not admit the Nessie REST hosts → the catalog front door lands on a node
-    // Nessie can't use → Nessie crash-loops. A correct catalog-DB failover is a coordinated DR
-    // runbook (promote the standby + demote/fence the old primary + re-point + pg_basebackup
-    // re-seed), not an adapter one-shot — the same call the obs adapter made for grafana-db.
-    private const string IcebergPgFailoverNaMessage =
-        "iceberg-pg (catalog-DB) failover is graceful N/A — a keepalived VRRP cutover of the .151 VIP is not a safe "
-        + "one-shot operation here. The notify_master hook promotes the standby when it takes the VIP, but nopreempt "
-        + "leaves the old primary un-demoted → split-brain (both nodes primary), and the promoted standby's pg_hba.conf "
-        + "does not admit the Nessie REST hosts, so the catalog front door lands on a PG that Nessie cannot use (it then "
-        + "crash-loops). A real catalog-DB failover is a coordinated DR runbook (promote new + demote/fence old + "
-        + "pg_basebackup re-seed), not an adapter verb. Use `--direction spark-master` for the live-proven HA failover "
-        + "(ZooKeeper auto-promotes the Spark STANDBY master, ~30s).";
+    // iceberg-pg catalog-DB failover: a real one-shot VRRP cutover of the .151 VIP (0.L.2.1
+    // fencing hardening). The v0.8.4 blockers were fixed in nexus-infra-lakehouse: the
+    // NEXUS-ICEBERG-HBA block is now on BOTH nodes (a promoted standby admits Nessie) and a
+    // guarded /usr/local/sbin/nexus-iceberg-reseed.sh fences + re-seeds the demoted old primary
+    // so there is no split-brain. This adapter DRIVES the drill deterministically (it holds the
+    // nexusadmin key + reaches both nodes — no inter-node SSH); the keepalived notify_fault hook
+    // is the unattended-crash backstop. Same shape as RegistryAdapter's registry-db cutover.
+    private async Task<Result<FailoverResult>> IcebergPgFailoverAsync(List<NodeRecord> all, FailoverRequest request, CancellationToken ct)
+    {
+        var pgs = Role(all, "iceberg-pg");
+        if (pgs.Count < 2) return Result.Fail<FailoverResult>("need the 2-node iceberg-pg catalog pair to fail over.");
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var sw = Stopwatch.StartNew();
+        var preFlight = sw.Elapsed;
+
+        // The VIP holder is the current primary; the other node must be a streaming standby.
+        var master = await VipHolderAsync(pgs, IcebergPgVip, ct).ConfigureAwait(false);
+        if (master is null)
+            return Result.Fail<FailoverResult>($"VIP {IcebergPgVip} is not bound to either iceberg-pg node; refusing to fail over an unbound VIP.");
+        var masterNode = pgs.First(n => n.Name == master);
+        var targetNode = pgs.First(n => n.Name != master);
+
+        // Pre-flight: the target must be a standby (in_recovery=t) so its notify_master can promote it.
+        var targetRole = await PgRoleAsync(targetNode.Vmnet11, ct).ConfigureAwait(false);
+        if (targetRole != "replica")
+            return Result.Fail<FailoverResult>(
+                $"{targetNode.Name} is not a streaming standby (role={(targetRole.Length == 0 ? "unreachable" : targetRole)}); refusing to fail over "
+                + "into a non-standby. Run `nexus status lakehouse` — the catalog pair must be 1 primary + 1 standby first "
+                + "(a prior split-brain re-seeds via the overlay / nexus-iceberg-reseed.sh).");
+
+        // Inject: stop keepalived on the VIP-holding primary → the standby claims the VIP;
+        // its notify_master runs pg_ctl promote.
+        var stop = await _ssh.ExecuteAsync(T(masterNode.Vmnet11), "sudo systemctl stop keepalived && echo STOPPED", SshTimeout, ct).ConfigureAwait(false);
+        if (stop.IsFail || !stop.Value!.Stdout.Contains("STOPPED", StringComparison.Ordinal))
+            return Result.Fail<FailoverResult>($"could not stop keepalived on {master}: {(stop.IsFail ? stop.Error : Tail(stop.Value!.Stderr, 160))}");
+        var injected = sw.Elapsed;
+
+        // Poll: the VIP lands on the target AND the target PG is promoted (in_recovery=f).
+        string? newHolder = null; bool promoted = false;
+        var moveDeadline = sw.Elapsed + TimeSpan.FromSeconds(45);
+        while (sw.Elapsed < moveDeadline)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false);
+            newHolder = await VipHolderAsync(pgs, IcebergPgVip, ct).ConfigureAwait(false);
+            if (newHolder == targetNode.Name && await PgRoleAsync(targetNode.Vmnet11, ct).ConfigureAwait(false) == "primary")
+            { promoted = true; break; }
+        }
+        var observed = sw.Elapsed;
+
+        // Fence + re-seed the OLD primary as a fresh standby of the NEW primary (deterministic).
+        // The helper refuses if the node still holds the VIP or the source is not a primary, so it
+        // can NEVER wipe a live primary; it streams over the new primary's backplane IP.
+        var reseed = "skipped"; string? reseedHint = null;
+        if (promoted)
+        {
+            var rc = await _ssh.ExecuteAsync(T(masterNode.Vmnet11),
+                $"sudo /usr/local/sbin/nexus-iceberg-reseed.sh {targetNode.Vmnet10} 2>&1", ReseedTimeout, ct).ConfigureAwait(false);
+            var ok = rc.IsOk && rc.Value!.Stdout.Contains("RESEED_OK", StringComparison.Ordinal);
+            reseed = ok ? "re-seeded" : "failed";
+            if (!ok) reseedHint = $"the old primary {master} did NOT re-seed as a standby (split-brain risk) — run manually: "
+                + $"ssh {masterNode.Vmnet11} 'sudo /usr/local/sbin/nexus-iceberg-reseed.sh {targetNode.Vmnet10}'. "
+                + $"[{Tail((rc.IsOk ? rc.Value!.Stdout : rc.Error) ?? "", 220)}]";
+        }
+
+        // Recover: restart keepalived on the old primary (nopreempt → it returns as BACKUP; it is
+        // now the streaming standby, so the VIP stays on the new primary).
+        var kaBack = "skipped";
+        if (!request.NoRecover)
+        {
+            var restart = await _ssh.ExecuteAsync(T(masterNode.Vmnet11), "sudo systemctl start keepalived && echo STARTED", SshTimeout, ct).ConfigureAwait(false);
+            kaBack = restart.IsOk && restart.Value!.Stdout.Contains("STARTED", StringComparison.Ordinal) ? "recovered" : "failed";
+            if (kaBack == "failed") reseedHint = $"restart keepalived on {master} manually (`sudo systemctl start keepalived`). {reseedHint}";
+        }
+        else reseedHint ??= $"keepalived left stopped on {master} (--no-recover); restart it when ready.";
+        var recovered = sw.Elapsed;
+        sw.Stop();
+
+        // Overall recovery = the tier is back to 1 primary + 1 standby (VIP moved, target promoted,
+        // old primary re-seeded, keepalived back). Any missing piece is surfaced as "failed" + hint.
+        var moved = newHolder == targetNode.Name;
+        var recovery = !promoted ? "failed"
+            : reseed != "re-seeded" ? "failed"
+            : request.NoRecover ? "skipped"
+            : kaBack == "recovered" ? "recovered" : "failed";
+        var okHint = $"{master} re-seeded as a streaming standby of {targetNode.Name}; the .151 VIP now fronts {targetNode.Name} "
+            + "(nopreempt keeps it there). Nessie reconnects through the VIP — its pg_hba admits the nessie role on the promoted node.";
+
+        return Result.Ok(new FailoverResult(
+            Scenario: "vrrp-cutover:iceberg-pg",
+            OriginalPrimary: master,
+            NewPrimary: moved ? targetNode.Name : newHolder,
+            Rto: observed - injected,
+            Recovery: recovery,
+            RecoveryHint: moved && promoted ? (reseedHint ?? okHint)
+                : $"VIP/promotion did not complete on {targetNode.Name} within 45s (moved={moved}, pg-primary={promoted}) — check keepalived + the notify_master pg_ctl promote on the standby. {reseedHint}",
+            Timeline: new FailoverTimeline(preFlight, injected, observed, recovered, recovered),
+            StartedAtUtc: startedAt));
+    }
 
     // === ScaleOut (graceful actionable N/A) ================================
     public Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken) =>

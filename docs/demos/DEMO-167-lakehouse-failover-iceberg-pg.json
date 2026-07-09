@@ -1,0 +1,51 @@
+{
+  "id": "DEMO-167-lakehouse-failover-iceberg-pg",
+  "title": "Lakehouse: iceberg-pg catalog-DB VRRP failover (.151 cutover + fence/re-seed)",
+  "description": "Runs `nexus failover-test cluster lakehouse --direction iceberg-pg --yes`. Stops keepalived on the VIP .151-holding PG primary; its notify_master promotes the standby (pg_ctl promote); the adapter then fences + pg_basebackup re-seeds the OLD primary as a fresh streaming standby (nexus-iceberg-reseed.sh, guarded so it can never wipe a live primary), and restarts keepalived (nopreempt keeps the VIP on the new primary). 0.L.2.1 fencing hardening: the NEXUS-ICEBERG-HBA block is now on BOTH nodes so the promoted node admits the Nessie role -> the catalog stays served (no split-brain, no Nessie crash-loop). Was a graceful N/A before this hardening.",
+  "prerequisites": {
+    "vmsAlive": [
+      "iceberg-pg-1",
+      "iceberg-pg-2",
+      "iceberg-rest-1",
+      "iceberg-rest-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "NEXUS_SSH_USER",
+      "NEXUS_VMS_YAML"
+    ],
+    "notes": "iceberg-pg-1/2 are the catalog PG pair (VIP iceberg-db.nexus.lab .151). iceberg-rest-1/2 (Nessie) are only needed to OBSERVE that the catalog stays served across the cutover; the failover itself needs only the 2 PG nodes. MinIO is NOT required (the catalog metadata is PG; only warehouse data IO uses S3)."
+  },
+  "steps": [
+    {
+      "command": "nexus failover-test cluster lakehouse --direction iceberg-pg --yes",
+      "waitAfterSeconds": 10,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "vrrp-cutover:iceberg-pg",
+        "original primary",
+        "new primary",
+        "recovered"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "VIP .151 moves iceberg-pg-1 -> iceberg-pg-2, RTO ~2-3s, recovery=recovered; hint 'iceberg-pg-1 re-seeded as a streaming standby of iceberg-pg-2'; 5-instant timeline table (~8.5s total)."
+        },
+        {
+          "where": "ssh nexusadmin@192.168.70.150 \"sudo -u postgres psql -tAc 'SELECT pg_is_in_recovery()'\"",
+          "what": "The promoted node .150 returns 'f' (primary) and holds the VIP; ssh .149 returns 't' (streaming standby) with pg_stat_wal_receiver=streaming -> 1 primary + 1 standby, NO split-brain."
+        },
+        {
+          "where": "ssh nexusadmin@192.168.70.149 \"sudo -u postgres psql -tAc \\\"SELECT client_addr,state FROM pg_stat_replication\\\"\"",
+          "what": "Before failover the primary .149 shows 192.168.10.150 streaming; after, the roles/backplane IPs swap (the old primary rejoins as the streaming standby)."
+        },
+        {
+          "where": "curl -sk https://iceberg.nexus.lab:19120/api/v2/trees  (or on a rest node: curl -sk https://127.0.0.1:19120/api/v2/trees)",
+          "what": "Returns HTTP 200 with the branch list AFTER the failover -> Nessie reconnected through the VIP onto the promoted node; pg_stat_activity on the new primary then shows a nessie/192.168.70.147|148 connection (pg_hba admits the nessie role on the promoted node)."
+        }
+      ]
+    }
+  ],
+  "whatProves": "LakehouseAdapter.FailoverAsync --direction iceberg-pg is a real one-shot catalog-DB failover (was graceful N/A pre-0.L.2.1). It performs a keepalived VRRP cutover, deterministically fences + pg_basebackup re-seeds the demoted old primary as a streaming standby (no split-brain), and the promoted node serves the Nessie catalog because the NEXUS-ICEBERG-HBA block now exists on BOTH nodes. Symmetric in both directions (re-run to fail back). keepalived notify_fault provides the unattended-crash self-heal backstop."
+}

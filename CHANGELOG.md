@@ -6,6 +6,59 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.10] — 2026-07-09
+
+Infra-hardening (pre-Phase-1), items 1–2 of 4 — **catalog-DB / datastore failover fencing** for the two
+Postgres-VRRP tiers. Both turn a split-brain-prone cutover into a safe, self-healing one-shot with an
+automatic `pg_basebackup` re-seed of the demoted old primary; the paired infra changes live in
+`nexus-infra-lakehouse` (0.L.2.1) and `nexus-infra-registry` (0.L.4.1).
+
+### Item 2 — registry-db datastore failover re-seed (`RegistryAdapter.FailoverAsync`)
+
+- **`--direction registry-db` now fences + `pg_basebackup` re-seeds the OLD primary** after promotion
+  (was: VRRP cutover + PG promote + Redis re-master, but the demoted node was left a **second PG
+  primary** — split-brain by design, "the DR runbook re-seeds it"). The adapter now runs the on-node
+  `nexus-registry-reseed.sh` deterministically on the old primary → streaming standby, then restarts
+  keepalived (whose `notify_backup` demote.sh re-points Redis + is a no-op reseed). New `ReseedTimeout`.
+  - **Infra (0.L.4.1, `nexus-infra-registry`):** the `NEXUS-REGISTRY-HBA` block is now on **both** nodes
+    (a promoted standby admits the Harbor DB user), the guarded `nexus-registry-reseed.sh` is installed
+    on both, and `demote.sh` (notify_backup) re-seeds the demoted PG as a self-heal backstop.
+  - **Live-verified 2026-07-08:** the tier was found **split-brained** (both primary, VIP on pg-2 which
+    lacked the HBA block); both nodes held identical Harbor data (1 project / 2 artifacts, LSNs within a
+    few bytes) so the canonical re-seed was loss-free. The overlay re-apply fixed it → 1 primary + 1
+    streaming standby; then **2 failover drills both directions all GREEN** (RTO ~1.3–3 s), each auto
+    re-seeding the old primary (**no split-brain**) + re-pointing its Redis to `slave`. Direct proof: the
+    `harbor` role connects over TLS on the promoted node. See
+    `docs/verification/0.L.4.1-registry-db-failover-reseed.md`.
+- Docs: handbook §1 (footnote ⁶⁹, now a real one-shot) + §3.6.2 playbook; System B `DEMO-168`.
+
+### Item 1 — lakehouse iceberg-pg catalog-DB failover fencing
+
+Turns `failover-test cluster lakehouse --direction iceberg-pg` from a graceful **N/A refusal** into a
+real one-shot failover; the paired infra change lives in `nexus-infra-lakehouse` (0.L.2.1).
+
+- **`LakehouseAdapter.FailoverAsync` — `--direction iceberg-pg` is now a real one-shot** (was
+  `IcebergPgFailoverNaMessage`). Mirrors `RegistryAdapter`'s registry-db VRRP cutover: stop keepalived
+  on the VIP `.151`-holding primary → poll the VIP onto the standby + its `notify_master` promote →
+  **deterministically fence + `pg_basebackup` re-seed the OLD primary as a fresh streaming standby**
+  via the on-node `nexus-iceberg-reseed.sh` (the adapter holds the nexusadmin key and reaches both
+  nodes, so no inter-node SSH) → restart keepalived (nopreempt keeps the VIP on the new primary) →
+  report RTO + recovery. Pre-flight refuses an unbound VIP or a non-standby target. New `PgRoleAsync`
+  helper + `ReseedTimeout`. Symmetric in both directions (re-run to fail back).
+  - **Why it was N/A before:** a VRRP cutover promoted the standby into a split-brain (old primary
+    un-demoted) AND the promoted standby's `pg_hba.conf` did not admit the Nessie hosts. The 0.L.2.1
+    infra hardening fixed both (the `NEXUS-ICEBERG-HBA` block now on BOTH nodes + the guarded reseed
+    helper + keepalived `notify_fault` self-heal backstop), so the adapter can drive it safely.
+  - **Live-verified 2026-07-08** on the running pair (see `docs/verification/0.L.2.1-iceberg-pg-failover-fencing.md`):
+    the tier was found split-brained (both nodes primary, pg-2 missing the HBA block); the overlay
+    re-apply fixed it, then **4 failover drills both directions all GREEN** (~8.5 s each, RTO ~2.3 s),
+    every run auto re-seeding the old primary with **no split-brain**. Nessie stays served — a `nessie`
+    TLS connection is admitted on the promoted node, and `GET /api/v2/trees` returns **HTTP 200** after
+    the cutover (the pool reconnects through the VIP). The reseed guard (`REFUSE … holds VIP`, exit 3)
+    was proven safe on the live primary.
+- Docs: `docs/handbook.md` §1 (lakehouse failover directions) + §3 playbook; System B `DEMO-167`;
+  verification note `0.L.2.1-iceberg-pg-failover-fencing.md`.
+
 ## [0.8.9] — 2026-07-07
 
 Completion backlog, batch 5 — the last two cert-rotate gaps (#9 FoundationAD LDAPS, #12 Vitess
