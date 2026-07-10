@@ -175,4 +175,48 @@ public class VitessAdapterParseTests
         o.Should().BeEmpty();
         n.Should().BeEmpty();
     }
+
+    // === ParseBackupNames (GetBackups listing; 0.O.1 engine-native) ==========
+    [Fact]
+    public void ParseBackupNames_returns_names_oldest_to_newest_skipping_noise()
+    {
+        var listing = "2026-07-09.225407.nexus-0000000100\n2026-07-09.225744.nexus-0000000100\n2026-07-09.230237.nexus-0000000102\n";
+        var names = VitessAdapter.ParseBackupNames(listing);
+        names.Should().HaveCount(3);
+        names[^1].Should().Be("2026-07-09.230237.nexus-0000000102"); // newest = last
+    }
+
+    [Fact]
+    public void ParseBackupNames_skips_json_error_lines_and_blanks()
+    {
+        var listing = "{\"level\":\"ERROR\",\"msg\":\"no registered implementation of BackupStorage\"}\n\n2026-07-09.230241.nexus-0000000201\n";
+        VitessAdapter.ParseBackupNames(listing).Should().BeEquivalentTo(["2026-07-09.230241.nexus-0000000201"]);
+    }
+
+    [Fact]
+    public void ParseBackupNames_empty_repo_yields_no_names()
+    {
+        VitessAdapter.ParseBackupNames("\n  \n").Should().BeEmpty();
+    }
+
+    // === ParseRestoreBackupName (RestoreFromBackup --dry-run log) =============
+    [Fact]
+    public void ParseRestoreBackupName_from_RestorePath_full_marker()
+    {
+        var log = "Restore: RestorePath: [full:2026-07-09.230237.nexus-0000000102]\nDry run. No changes made";
+        VitessAdapter.ParseRestoreBackupName(log).Should().Be("2026-07-09.230237.nexus-0000000102");
+    }
+
+    [Fact]
+    public void ParseRestoreBackupName_from_found_latest_backup_line()
+    {
+        var log = "Restore: found latest backup commerce/-80 2026-07-09.230237.nexus-0000000102 to restore";
+        VitessAdapter.ParseRestoreBackupName(log).Should().Be("2026-07-09.230237.nexus-0000000102");
+    }
+
+    [Fact]
+    public void ParseRestoreBackupName_returns_empty_when_absent()
+    {
+        VitessAdapter.ParseRestoreBackupName("Restore: looking for a suitable backup to restore").Should().BeEmpty();
+    }
 }

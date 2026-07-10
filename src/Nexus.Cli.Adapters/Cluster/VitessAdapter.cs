@@ -44,14 +44,16 @@ namespace Nexus.Cli.Adapters.Cluster;
 ///   <c>nexus</c>; the listener requires a CLIENT cert (the node's own leaf
 ///   doubles as the client cert, 0.O fix O13). Run from a tablet node (it has
 ///   the <c>mysql</c> client + the TLS leaf), connecting to a vtgate's vmnet11.</item>
-///   <item><b>Backup</b> -- the live 0.O infra has NO Vitess BackupStorage
-///   backend configured (<c>GetBackups</c> -> "no registered implementation of
-///   BackupStorage"; no xtrabackup installed), so the backup verb takes a
-///   sharding-aware <b>logical mysqldump</b> per shard from the shard PRIMARY's
-///   mysqld socket (as <c>vt_dba</c>) and proves a real round-trip by reloading
-///   into a throwaway verify schema and counting rows. Engine-native
-///   <c>vtctldclient Backup</c> (builtin/xtrabackup engine on a NFS file repo)
-///   is the 0.O.1 infra enhancement.</item>
+///   <item><b>Backup</b> (0.O.1, engine-native) -- the vitess tier now carries a
+///   real Vitess <b>file</b> BackupStorage backend on shared NFSv4
+///   (<c>/vt-backups</c>) driven by the <b>xtrabackup</b> engine (Percona hot
+///   physical backup), wired by nexus-infra-vitess
+///   <c>role-overlay-vitess-backup-storage.tf</c>. <c>backup take</c> runs
+///   <c>vtctldclient BackupShard</c> per shard (auto-selects a REPLICA; the
+///   primary is untouched, serving uninterrupted); <c>backup restore</c> is a
+///   <c>RestoreFromBackup --dry-run</c> validation by default and a REAL
+///   <c>RestoreFromBackup</c> onto a replica with <c>--confirm-destructive</c>.
+///   This replaced the pre-0.O.1 logical mysqldump round-trip.</item>
 /// </list>
 /// </para>
 /// <para>
@@ -68,8 +70,9 @@ namespace Nexus.Cli.Adapters.Cluster;
 /// sharded showcase: <c>-80</c> / <c>80-</c> hash-vindex ranges) / failover
 /// (graceful PlannedReparentShard to a healthy replica; VTOrc auto-reparent on a
 /// PRIMARY kill is the chaos path) / scale-out add+remove (tablet membership via
-/// DeleteTablets + service start) / backup take+restore (logical mysqldump
-/// round-trip per shard) / cert-rotate (per-node Vault PKI, gRPC + vtgate
+/// DeleteTablets + service start) / backup take+restore (engine-native
+/// BackupShard + RestoreFromBackup on the file/xtrabackup repo, 0.O.1) /
+/// cert-rotate (per-node Vault PKI, gRPC + vtgate
 /// listener reload + the mysqld-WIRE cert reloaded ONLINE via `ALTER INSTANCE
 /// RELOAD TLS` — no restart, no reparent, the primary is never demoted; GAP #12)
 /// / acl (the vtgate static-auth users in <c>vtgate_creds.json</c> -- the real
@@ -96,7 +99,10 @@ public sealed class VitessAdapter : IClusterAdapter
     private const string EtcdTlsDir = "/etc/nexus-etcd/tls";
     private const string SplitScript = "/usr/local/sbin/nexus-vitess-tls-split.sh";
     private const string DataRoot = "/var/lib/nexus-vitess";
-    private const string BackupRoot = "/var/backups/nexus-vitess";
+    // 0.O.1: engine-native Vitess `file` BackupStorage root (shared NFSv4 repo,
+    // xtrabackup engine), wired by nexus-infra-vitess
+    // role-overlay-vitess-backup-storage.tf. Replaces the old logical mysqldump dir.
+    private const string BackupRepoRoot = "/vt-backups";
     private const string AgentToken = "/run/nexus-vault-agent/token";
     private const string VaultAddr = "https://192.168.70.121:8200";
 
@@ -123,6 +129,9 @@ public sealed class VitessAdapter : IClusterAdapter
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan FailoverDeadline = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan BackupTimeout = TimeSpan.FromSeconds(180);
+    // Engine-native BackupShard / RestoreFromBackup stream the whole InnoDB image
+    // through xtrabackup + run mysql_upgrade on restore -> allow several minutes.
+    private static readonly TimeSpan RestoreTimeout = TimeSpan.FromMinutes(6);
     private static readonly TimeSpan JoinDeadline = TimeSpan.FromMinutes(2);
     private static readonly string[] KnownChaosScenarios =
         ["network-partition", "packet-loss", "slow-disk", "cpu-starve", "memory-pressure", "process-kill"];
@@ -731,14 +740,19 @@ public sealed class VitessAdapter : IClusterAdapter
             StartedAtUtc: startedAt));
     }
 
-    // === BackupTakeAsync (logical mysqldump per shard, from the shard primary) =
+    // === BackupTakeAsync (engine-native: vtctldclient BackupShard per shard) ==
+    // 0.O.1: the vitess tier now carries a real Vitess BackupStorage backend -- a
+    // `file` repo on shared NFSv4 (/vt-backups) driven by the `xtrabackup` engine
+    // (Percona hot physical backup), wired by nexus-infra-vitess
+    // role-overlay-vitess-backup-storage.tf. `BackupShard` auto-selects a healthy
+    // REPLICA in each shard and streams a compressed xtrabackup image (backup
+    // .xbstream.gz + MANIFEST) into the repo -- the PRIMARY is never touched and
+    // serving is uninterrupted. This replaces the pre-0.O.1 logical mysqldump.
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
         if (nodesR.IsFail) return Result.Fail<BackupResult>(nodesR.Error!);
         var all = nodesR.Value!;
-        var dbaPwd = await DbaPwdAsync(cancellationToken).ConfigureAwait(false);
-        if (dbaPwd.IsFail) return Result.Fail<BackupResult>(dbaPwd.Error!);
         var shardsR = await GetShardsAsync(all, cancellationToken).ConfigureAwait(false);
         if (shardsR.IsFail) return Result.Fail<BackupResult>(shardsR.Error!);
 
@@ -752,43 +766,35 @@ public sealed class VitessAdapter : IClusterAdapter
         var perShard = new List<string>();
         foreach (var sh in shardsR.Value!)
         {
-            var primary = await PrimaryNodeAsync(all, sh, cancellationToken).ConfigureAwait(false);
-            if (primary.IsFail) { sw.Stop(); return Result.Fail<BackupResult>(primary.Error!); }
-            var (node, uid) = primary.Value;
-            var sock = $"{DataRoot}/vt_{uid:D10}/mysql.sock";
-            var dir = $"{BackupRoot}/{backupId}";
-            var file = $"{dir}/{ShardFile(sh)}.sql.gz";
-            // mysqldump the shard's portion of `commerce` (the customer table) as vt_dba
-            // over the local socket. --single-transaction = consistent, no locks. Dump
-            // to a temp file first so a failed dump (or empty gz) can't masquerade as a
-            // valid backup -- require the DDL marker + non-zero size before sealing.
-            var script =
-                $"sudo mkdir -p {dir}; TMP=$(mktemp); "
-                + $"sudo env MYSQL_PWD='{dbaPwd.Value}' mysqldump --socket={sock} -u vt_dba "
-                + $"--single-transaction --no-tablespaces --skip-add-locks --set-gtid-purged=OFF {MysqlDb} {ShardTable} 2>/tmp/vdump.err > \"$TMP\"; RC=$?; "
-                + $"if [ $RC -ne 0 ] || ! grep -q 'CREATE TABLE' \"$TMP\"; then echo DUMP_FAIL; cat /tmp/vdump.err; rm -f \"$TMP\" /tmp/vdump.err; exit 1; fi; "
-                + $"gzip -c \"$TMP\" | sudo tee {file} >/dev/null; rm -f \"$TMP\" /tmp/vdump.err; "
-                + $"sudo stat -c %s {file}";
-            var exec = await _ssh.ExecuteAsync(T(node.Vmnet11), script, BackupTimeout, cancellationToken).ConfigureAwait(false);
-            if (exec.IsFail) { sw.Stop(); return Result.Fail<BackupResult>($"mysqldump for shard {sh} on {node.Name} failed: {exec.Error}"); }
-            if (exec.Value!.Stdout.Contains("DUMP_FAIL", StringComparison.Ordinal))
-            { sw.Stop(); return Result.Fail<BackupResult>($"mysqldump for shard {sh} on {node.Name} failed: {Tail(exec.Value.Stdout + exec.Value.Stderr, 280)}"); }
-            var sizeLine = exec.Value.Stdout.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "";
-            if (!long.TryParse(sizeLine.Trim(), out var size) || size <= 0)
-            { sw.Stop(); return Result.Fail<BackupResult>($"mysqldump for shard {sh} produced no archive: {Tail(exec.Value.Stdout + exec.Value.Stderr, 240)}"); }
+            // BackupShard picks a replica/rdonly + streams the whole InnoDB image
+            // through xtrabackup to the file repo -> a long op; generous timeout.
+            var bk = await VtctldAsync(all, $"BackupShard {Keyspace}/{sh}", cancellationToken, RestoreTimeout).ConfigureAwait(false);
+            if (bk.IsFail) { sw.Stop(); return Result.Fail<BackupResult>($"BackupShard {Keyspace}/{sh} failed: {bk.Error}"); }
+            // Confirm a fresh backup landed in the repo + capture its name/size.
+            var latest = await LatestBackupNameAsync(all, sh, cancellationToken).ConfigureAwait(false);
+            if (latest.IsFail) { sw.Stop(); return Result.Fail<BackupResult>(latest.Error!); }
+            var size = await BackupDirSizeAsync(all, sh, latest.Value!, cancellationToken).ConfigureAwait(false);
             totalSize += size;
-            perShard.Add($"{sh}@{node.Name} ({size}B)");
+            perShard.Add($"{sh}={latest.Value}({size}B)");
         }
         sw.Stop();
         return Result.Ok(new BackupResult(
             BackupId: backupId,
-            Destination: $"{BackupRoot}/{backupId}/<shard>.sql.gz node-local on each shard primary: {string.Join(", ", perShard)} (logical mysqldump; engine-native Backup = 0.O.1)",
+            Destination: $"{BackupRepoRoot} (Vitess file BackupStorage on NFSv4, xtrabackup engine) -- {string.Join(", ", perShard)}",
             SizeBytes: totalSize,
             Duration: sw.Elapsed,
             StartedAtUtc: startedAt));
     }
 
-    // === BackupRestoreAsync (reload each shard dump into a verify schema) =====
+    // === BackupRestoreAsync (engine-native: vtctldclient RestoreFromBackup) ===
+    // Default (SAFE): a NON-destructive `RestoreFromBackup --dry-run` per shard
+    // that resolves + validates the backup that WOULD be restored (no changes
+    // made). With --confirm-destructive: a REAL RestoreFromBackup onto a healthy
+    // REPLICA per shard (never the primary -> the shard stays writable), then
+    // waits for the tablet to rejoin as a serving replica and counts the restored
+    // rows. --at <YYYY-mm-DD.HHMMSS> (RestoreRequest.AtTimestamp) selects a
+    // specific backup; omit for the latest. (The command layer also gates the
+    // destructive form behind an interactive/--yes confirmation.)
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.BackupId))
@@ -796,58 +802,130 @@ public sealed class VitessAdapter : IClusterAdapter
         var nodesR = Nodes();
         if (nodesR.IsFail) return Result.Fail<RestoreResult>(nodesR.Error!);
         var all = nodesR.Value!;
-        var dbaPwd = await DbaPwdAsync(cancellationToken).ConfigureAwait(false);
-        if (dbaPwd.IsFail) return Result.Fail<RestoreResult>(dbaPwd.Error!);
         var shardsR = await GetShardsAsync(all, cancellationToken).ConfigureAwait(false);
         if (shardsR.IsFail) return Result.Fail<RestoreResult>(shardsR.Error!);
 
+        var tsFlag = string.IsNullOrWhiteSpace(request.AtTimestamp) ? "" : $" --backup-timestamp {request.AtTimestamp}";
         var startedAt = DateTimeOffset.UtcNow;
         var sw = Stopwatch.StartNew();
-        const string verifyDb = "commerce_restore_verify";
+
+        // The destructive path counts restored rows on the target -> needs vt_dba.
+        string? dbaPwd = null;
+        if (request.ConfirmDestructive)
+        {
+            var dp = await DbaPwdAsync(cancellationToken).ConfigureAwait(false);
+            if (dp.IsFail) { sw.Stop(); return Result.Fail<RestoreResult>(dp.Error!); }
+            dbaPwd = dp.Value;
+        }
+
         long totalRows = 0;
+        var perShard = new List<string>();
         foreach (var sh in shardsR.Value!)
         {
-            var primary = await PrimaryNodeAsync(all, sh, cancellationToken).ConfigureAwait(false);
-            if (primary.IsFail) { sw.Stop(); return Result.Fail<RestoreResult>(primary.Error!); }
-            var (node, uid) = primary.Value;
-            var sock = $"{DataRoot}/vt_{uid:D10}/mysql.sock";
-            var file = $"{BackupRoot}/{request.BackupId}/{ShardFile(sh)}.sql.gz";
-            var my = $"sudo env MYSQL_PWD='{dbaPwd.Value}' mysql --socket={sock} -u vt_dba";
-            // Reload the dump into a throwaway verify DB (sql_log_bin=0 so it never
-            // replicates to the shard's replicas), count rows, then drop it.
-            var script =
-                $"sudo test -s {file} || {{ echo MISSING-ARCHIVE; exit 9; }}; "
-                + $"{my} -e \"SET sql_log_bin=0; DROP DATABASE IF EXISTS {verifyDb}; CREATE DATABASE {verifyDb};\" && "
-                + $"( echo 'SET sql_log_bin=0;'; sudo gunzip -c {file} ) | {my} {verifyDb} && "
-                + $"{my} -N -e \"SELECT COUNT(*) FROM {verifyDb}.{ShardTable}\"; "
-                + $"{my} -e \"SET sql_log_bin=0; DROP DATABASE IF EXISTS {verifyDb};\" >/dev/null 2>&1";
-            var exec = await _ssh.ExecuteAsync(T(node.Vmnet11), script, BackupTimeout, cancellationToken).ConfigureAwait(false);
-            if (exec.IsFail) { sw.Stop(); return Result.Fail<RestoreResult>($"restore-verify for shard {sh} on {node.Name} failed: {exec.Error}"); }
-            var outp = StripPwWarning(exec.Value!.Stdout);
-            if (outp.Contains("MISSING-ARCHIVE", StringComparison.Ordinal))
-            { sw.Stop(); return Result.Fail<RestoreResult>($"backup '{request.BackupId}' shard {sh} archive not found on its current primary {node.Name} ({file}). It may have been taken before a failover; re-take, or restore on the node that holds it."); }
-            var rowsLine = outp.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries).LastOrDefault(l => long.TryParse(l.Trim(), out _));
-            if (rowsLine is null) { sw.Stop(); return Result.Fail<RestoreResult>($"restore-verify for shard {sh} did not confirm a row count: {Tail(outp, 240)}"); }
-            totalRows += long.Parse(rowsLine.Trim(), CultureInfo.InvariantCulture);
+            // Restore wipes + rebuilds the target tablet's datadir, so target a
+            // REPLICA (never the primary) -> the shard keeps a primary + a replica
+            // serving throughout.
+            var tabletsR = await GetTabletsAsync(all, cancellationToken, sh).ConfigureAwait(false);
+            if (tabletsR.IsFail) { sw.Stop(); return Result.Fail<RestoreResult>(tabletsR.Error!); }
+            var primaryUidR = await ShardPrimaryUidAsync(all, sh, cancellationToken).ConfigureAwait(false);
+            if (primaryUidR.IsFail) { sw.Stop(); return Result.Fail<RestoreResult>(primaryUidR.Error!); }
+            var replica = tabletsR.Value!.FirstOrDefault(t => t.Uid != primaryUidR.Value && t.Role == "replica");
+            if (replica is null)
+            { sw.Stop(); return Result.Fail<RestoreResult>($"no REPLICA in {Keyspace}/{sh} to restore onto (the primary is never restored in place); bring a replica up first."); }
+            var alias = $"{Cell}-{replica.Uid}";
+            var node = ByVmnet10(all, replica.Vmnet10);
+            var where = node?.Name ?? alias;
+
+            if (!request.ConfirmDestructive)
+            {
+                // Non-destructive validation: resolve + verify the restorable backup.
+                var dry = await VtctldAsync(all, $"RestoreFromBackup --dry-run{tsFlag} {alias}", cancellationToken, RestoreTimeout).ConfigureAwait(false);
+                if (dry.IsFail) { sw.Stop(); return Result.Fail<RestoreResult>($"restore dry-run for {Keyspace}/{sh} failed: {dry.Error}"); }
+                var name = ParseRestoreBackupName(dry.Value!);
+                if (name.Length == 0)
+                { sw.Stop(); return Result.Fail<RestoreResult>($"restore dry-run for {Keyspace}/{sh} found no restorable backup on {where}: {Tail(dry.Value!, 240)}"); }
+                perShard.Add($"{sh}:{name}@{where}");
+            }
+            else
+            {
+                // Real restore onto the replica, then confirm rejoin + row count.
+                var res = await VtctldAsync(all, $"RestoreFromBackup{tsFlag} {alias}", cancellationToken, RestoreTimeout).ConfigureAwait(false);
+                if (res.IsFail) { sw.Stop(); return Result.Fail<RestoreResult>($"RestoreFromBackup {alias} ({Keyspace}/{sh}) failed: {res.Error}"); }
+                var name = ParseRestoreBackupName(res.Value!);
+                var rejoined = await WaitReplicaServingAsync(all, sh, replica.Uid, cancellationToken).ConfigureAwait(false);
+                var rows = node is null ? -1 : await CountCustomerRowsAsync(node, replica.Uid, dbaPwd!, cancellationToken).ConfigureAwait(false);
+                if (rows >= 0) totalRows += rows;
+                perShard.Add($"{sh}<-{(name.Length > 0 ? name : "latest")}@{where}({(rows < 0 ? "?" : rows.ToString(CultureInfo.InvariantCulture))} rows,{(rejoined ? "rejoined" : "NOT-rejoined")})");
+            }
         }
         sw.Stop();
-        return Result.Ok(new RestoreResult(request.BackupId, totalRows, sw.Elapsed, startedAt));
+        var mode = request.ConfirmDestructive ? "restored" : "dry-run validated (no changes; --confirm-destructive to apply)";
+        return Result.Ok(new RestoreResult(
+            BackupId: $"{request.BackupId} [{mode}: {string.Join(", ", perShard)}]",
+            ItemsRestored: totalRows,
+            Duration: sw.Elapsed,
+            StartedAtUtc: startedAt));
     }
 
-    private async Task<Result<(NodeRecord Node, int Uid)>> PrimaryNodeAsync(IReadOnlyList<NodeRecord> all, string shard, CancellationToken ct)
+    /// <summary>`GetBackups` lists one backup name per line (oldest-&gt;newest); return the newest.</summary>
+    private async Task<Result<string>> LatestBackupNameAsync(IReadOnlyList<NodeRecord> all, string shard, CancellationToken ct)
     {
-        var uidR = await ShardPrimaryUidAsync(all, shard, ct).ConfigureAwait(false);
-        if (uidR.IsFail) return Result.Fail<(NodeRecord, int)>(uidR.Error!);
-        var tablets = await GetTabletsAsync(all, ct, shard).ConfigureAwait(false);
-        if (tablets.IsFail) return Result.Fail<(NodeRecord, int)>(tablets.Error!);
-        var ti = tablets.Value!.FirstOrDefault(t => t.Uid == uidR.Value);
-        if (ti is null) return Result.Fail<(NodeRecord, int)>($"primary uid {uidR.Value} not in topo for shard {shard}");
-        var node = ByVmnet10(all, ti.Vmnet10);
-        if (node is null) return Result.Fail<(NodeRecord, int)>($"primary {ti.Vmnet10} of shard {shard} not in vms.yaml");
-        return Result.Ok((node, ti.Uid));
+        var r = await VtctldAsync(all, $"GetBackups {Keyspace}/{shard}", ct).ConfigureAwait(false);
+        if (r.IsFail) return Result.Fail<string>(r.Error!);
+        var names = ParseBackupNames(r.Value!);
+        if (names.Count == 0) return Result.Fail<string>($"no backups listed for {Keyspace}/{shard} after BackupShard (repo empty?)");
+        return Result.Ok(names[^1]);
     }
 
-    private static string ShardFile(string shard) => Regex.Replace(shard, "[^A-Za-z0-9]", "_");
+    /// <summary>Parse `GetBackups` output into backup names (`YYYY-mm-DD.HHMMSS.&lt;tablet&gt;`), skipping any JSON error lines.</summary>
+    internal static List<string> ParseBackupNames(string stdout) =>
+        stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .Where(l => Regex.IsMatch(l, @"^\d{4}-\d{2}-\d{2}\.\d{6}\."))
+            .ToList();
+
+    /// <summary>Parse a RestoreFromBackup (dry-run) log for the resolved backup name (`[full:&lt;name&gt;]` or "found ... &lt;name&gt; to restore").</summary>
+    internal static string ParseRestoreBackupName(string stdout)
+    {
+        var m = Regex.Match(stdout, @"full:(\d{4}-\d{2}-\d{2}\.\d{6}\.[A-Za-z0-9\-]+)");
+        if (m.Success) return m.Groups[1].Value;
+        m = Regex.Match(stdout, @"found (?:latest|the) backup \S+ (\d{4}-\d{2}-\d{2}\.\d{6}\.\S+?) to restore");
+        return m.Success ? m.Groups[1].Value : "";
+    }
+
+    /// <summary>Size (bytes) of a backup directory in the repo, read from the control node's bind-mount.</summary>
+    private async Task<long> BackupDirSizeAsync(IReadOnlyList<NodeRecord> all, string shard, string name, CancellationToken ct)
+    {
+        var control = ByRole(all, "control").FirstOrDefault();
+        if (control is null) return 0;
+        var path = $"{BackupRepoRoot}/{Keyspace}/{shard}/{name}";
+        var r = await _ssh.ExecuteAsync(T(control.Vmnet11), $"sudo du -sb '{path}' 2>/dev/null | cut -f1", SshTimeout, ct).ConfigureAwait(false);
+        if (r.IsOk && long.TryParse(r.Value!.Stdout.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim(), out var b)) return b;
+        return 0;
+    }
+
+    /// <summary>Wait for a restored tablet to re-register in the shard topo as a serving REPLICA/RDONLY.</summary>
+    private async Task<bool> WaitReplicaServingAsync(IReadOnlyList<NodeRecord> all, string shard, int uid, CancellationToken ct)
+    {
+        var deadline = DateTimeOffset.UtcNow + JoinDeadline;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var t = await GetTabletsAsync(all, ct, shard).ConfigureAwait(false);
+            if (t.IsOk && t.Value!.Any(x => x.Uid == uid && x.Role is "replica" or "rdonly")) return true;
+            await Task.Delay(TimeSpan.FromSeconds(4), ct).ConfigureAwait(false);
+        }
+        return false;
+    }
+
+    /// <summary>Count restored customer rows on a tablet's local mysqld socket (as vt_dba).</summary>
+    private async Task<long> CountCustomerRowsAsync(NodeRecord node, int uid, string dbaPwd, CancellationToken ct)
+    {
+        var sock = $"{DataRoot}/vt_{uid:D10}/mysql.sock";
+        var cmd = $"sudo env MYSQL_PWD='{dbaPwd}' mysql --socket={sock} -u vt_dba -N -e \"SELECT COUNT(*) FROM {MysqlDb}.{ShardTable}\" 2>/dev/null";
+        var r = await _ssh.ExecuteAsync(T(node.Vmnet11), cmd, SshTimeout, ct).ConfigureAwait(false);
+        if (r.IsOk && long.TryParse(StripPwWarning(r.Value!.Stdout).Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Trim(), out var n)) return n;
+        return -1;
+    }
 
     // === RotateCertAsync (per-node Vault PKI; gRPC + vtgate listener reload) ==
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)

@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-v0.8.10%20%E2%9C%85%20infra--hardening%201--2%3A%20Postgres--VRRP%20failover%20fencing%20(iceberg--pg%20%2B%20registry--db)-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-v0.8.11%20%E2%9C%85%20infra--hardening%203%3A%20Vitess%20engine--native%20BackupStorage%20(0.O.1)-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (140 VMs built through Phase 0.P) — a single **≤30 MB** Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,16 +12,30 @@ The operator surface for the **NexusPlatform lab** (140 VMs built through Phase 
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.8.10): pre-Phase-1 infra-hardening, items 1–2 of 4** — both Postgres-VRRP tiers now
-> have **safe, self-healing one-shot failovers** via one shared fence + `pg_basebackup` re-seed pattern.
+> **Current state (v0.8.11): pre-Phase-1 infra-hardening, item 3 of 4 — 0.O.1 Vitess engine-native backup.**
+> `backup take/restore vitess` are now **engine-native**: `backup take` runs `vtctldclient BackupShard`
+> per shard against a real Vitess **`file` BackupStorage** on shared NFSv4 (`/vt-backups`) driven by the
+> **`xtrabackup`** engine (auto-selects a REPLICA — the PRIMARY is never touched); `backup restore` is a
+> **safe `RestoreFromBackup --dry-run` validation by default** and a real replica-restore only with
+> `--confirm-destructive` (the shard stays writable). Replaces the pre-0.O.1 logical `mysqldump`. The
+> paired infra (a NFS `file` repo + xtrabackup on the 6 tablets, and the three Vitess gotchas — per-tablet
+> `--mycnf-file`, dropping `--db-socket` for managed mode, and `[xtrabackup]` creds in `ssl.cnf`) lives in
+> `nexus-infra-vitess` (`role-overlay-vitess-backup-storage.tf`, a targeted overlay — no cold-rebuild).
+> **Live-verified 2026-07-09** (both shards backed up to NFS + restored onto replicas that rejoined:
+> **101 rows = 54 `-80` + 47 `80-`**; `health vitess` GREEN; smoke-0.O §9.5). **327/327 tests; AOT 28.33 MB**.
+> See CHANGELOG [0.8.11].
+>
+> <details><summary>v0.8.10 infra-hardening items 1–2 — Postgres-VRRP failover fencing (iceberg-pg + registry-db)</summary>
+>
+> **v0.8.10 = pre-Phase-1 infra-hardening, items 1–2 of 4** — both Postgres-VRRP tiers got
+> **safe, self-healing one-shot failovers** via one shared fence + `pg_basebackup` re-seed pattern.
 > **lakehouse `--direction iceberg-pg`** (the Iceberg/Nessie catalog DB, was a graceful N/A) and **registry
 > `--direction registry-db`** (the Harbor datastore, was DR-deferred) now stop keepalived on the VIP holder
 > → promote the standby → **deterministically fence + re-seed the demoted old primary as a streaming
-> standby** (guarded so it can never wipe a live primary) → no split-brain. The paired infra fixes (the
-> `pg_hba` block on **both** nodes + the guarded reseed helper) live in `nexus-infra-lakehouse` (0.L.2.1) +
-> `nexus-infra-registry` (0.L.4.1). **Live-verified 2026-07-08** (both tiers were found split-brained and
-> repaired; 4 + 2 drills both directions GREEN; Nessie `GET /api/v2/trees` → 200 and the `harbor` role
-> admitted on the promoted node). **321/321 tests; AOT 28.33 MB**. See CHANGELOG [0.8.10].
+> standby** (guarded so it can never wipe a live primary) → no split-brain. Paired infra in
+> `nexus-infra-lakehouse` (0.L.2.1) + `nexus-infra-registry` (0.L.4.1). **Live-verified 2026-07-08**.
+> **321/321 tests; AOT 28.33 MB**. See CHANGELOG [0.8.10].
+> </details>
 >
 > <details><summary>v0.8.9 completion backlog batch 5 — FoundationAD LDAPS + Vitess mysqld-wire cert-rotate (backlog COMPLETE)</summary>
 >
@@ -456,6 +470,7 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Twenty-seven ADRs cover f
 | **v0.8.8** | **Completion backlog, batch 4** — the two deferred **PostgreSQL cert-rotate** gaps closed: `cert-rotate` now rotates **grafana-pg** (obs state DB) + **iceberg-pg** (lakehouse catalog DB) via a shared `PgSslCertRotator` — a PG17 streaming pair rotated **standby-first then primary** with a SIGHUP `reload` (not a restart), so replication is never dropped. Live-verified (iceberg-pg standby→primary, `pg_stat_replication` intact after both). **28.25 MB**, 315/315 tests. *(Remaining: #9 FoundationAD LDAPS, #12 Vitess mysqld-wire.)* |
 | **v0.8.9** | **Completion backlog COMPLETE** — the last two cert-rotate gaps: **FoundationAD DC LDAPS** (`cert-rotate foundation-ad`: openssl PFX on vault-1 → import root/CA/leaf → `Restart-Service NTDS` + ADWS re-cycle in one SSH session → `:636` verify; **standby DC first, PDC last**, abort-before-the-PDC, single-session restart avoids the #10 self-fence) + **Vitess mysqld-wire** (`cert-rotate vitess`: the tablet's mysqld reloads its :3306 wire cert online via **`ALTER INSTANCE RELOAD TLS`** — no restart, **no reparent**; also fixed a pre-existing non-durability by forcing the vault-agent to re-issue). Live-verified on both live DCs + the running vitess tier. **Every cluster's every verb is now implemented in-CLI — nothing deferred.** **28.25 MB**, 321/321 tests |
 | **v0.8.10** | **Pre-Phase-1 infra-hardening, items 1–2 of 4** — Postgres-VRRP failover fencing for both PG-behind-keepalived tiers: **lakehouse `--direction iceberg-pg`** (was graceful N/A) + **registry `--direction registry-db`** (was DR-deferred) now stop keepalived on the VIP holder → promote the standby → **deterministically fence + `pg_basebackup` re-seed the demoted old primary** (guarded so it can never wipe a live primary) → no split-brain. Paired infra fixes (the `pg_hba` block on **both** nodes + the reseed helper) in `nexus-infra-lakehouse` 0.L.2.1 + `nexus-infra-registry` 0.L.4.1. Both tiers found split-brained + repaired; 4 + 2 drills both directions GREEN (Nessie 200 + `harbor` role admitted on the promoted node). **28.33 MB**, 321/321 tests |
+| **v0.8.11** | **Pre-Phase-1 infra-hardening, item 3 of 4 (0.O.1)** — Vitess **engine-native backup**: `backup take vitess` → `vtctldclient BackupShard` per shard against a real Vitess **`file` BackupStorage** on shared NFSv4 (`/vt-backups`) + the **`xtrabackup`** engine (auto-selects a REPLICA; PRIMARY untouched); `backup restore vitess` → `RestoreFromBackup --dry-run` validation by default, real replica-restore with `--confirm-destructive` (shard stays writable). Replaces the pre-0.O.1 logical `mysqldump`. Paired infra (`nexus-infra-vitess role-overlay-vitess-backup-storage.tf`, targeted overlay — no cold-rebuild) + the three Vitess gotchas (`--mycnf-file`, drop `--db-socket`, `[xtrabackup]` in `ssl.cnf`). Live-verified: both shards backed up to NFS + restored onto replicas (**101 rows = 54 + 47**, rejoined); `health` GREEN; smoke-0.O §9.5. **28.33 MB**, 327/327 tests |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing

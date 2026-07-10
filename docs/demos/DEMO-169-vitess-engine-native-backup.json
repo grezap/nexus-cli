@@ -1,0 +1,113 @@
+{
+  "id": "DEMO-169-vitess-engine-native-backup",
+  "title": "Vitess: engine-native BackupShard/RestoreFromBackup round-trip (0.O.1, xtrabackup on NFS)",
+  "description": "0.O.1 (2026-07-09) replaces the old logical-mysqldump backup with a REAL Vitess BackupStorage backend: a `file` repo on shared NFSv4 at /vt-backups (NFS server co-located on vitess-control-1 .193, all 6 tablets mount it) + the xtrabackup engine (Percona hot physical backup). VitessAdapter.BackupTake/RestoreAsync were rewritten from mysqldump to engine-native `vtctldclient BackupShard` / `RestoreFromBackup`. `backup take` runs BackupShard per shard -- it auto-selects a REPLICA per shard, so the PRIMARY is never touched and serving is uninterrupted. `backup restore` is DEFAULT non-destructive: it validates (dry-run) the newest backup per shard without changing anything; only with --confirm-destructive (on top of --yes) does it run RestoreFromBackup onto a REPLICA (wiping+rebuilding that replica's datadir, then rejoining via GTID position + mysql_upgrade) -- the shard's PRIMARY stays writable throughout. Keyspace `commerce`, shards `-80` / `80-`, hash-vindex on customer_id. Live-verified 2026-07-09.",
+  "prerequisites": {
+    "vmsAlive": [
+      "vitess-etcd-1",
+      "vitess-etcd-2",
+      "vitess-etcd-3",
+      "vitess-control-1",
+      "vitess-vtgate-1",
+      "vitess-vtgate-2",
+      "vitess-shard1-tablet-1",
+      "vitess-shard1-tablet-2",
+      "vitess-shard1-tablet-3",
+      "vitess-shard2-tablet-1",
+      "vitess-shard2-tablet-2",
+      "vitess-shard2-tablet-3"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "nexus health vitess green (both shards 1 PRIMARY + 2 REPLICA); the /vt-backups NFSv4 export is served from vitess-control-1 .193 and mounted on all 6 tablets; vtctld reachable on the control node"
+  },
+  "steps": [
+    {
+      "command": "nexus backup take vitess --tag demo0O1 --json",
+      "waitAfterSeconds": 10,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "vitess-demo0O1-",
+        "xtrabackup",
+        "/vt-backups",
+        "-80=",
+        "80-="
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "backupId vitess-demo0O1-20260709-232309, sizeBytes 4988059 (~5 MB physical), durationSec ~6.957; destination '/vt-backups (Vitess file BackupStorage on NFSv4, xtrabackup engine) -- -80=2026-07-09.232309.nexus-0000000102(2521433B), 80-=2026-07-09.232313.nexus-0000000201(2466626B)'. Two per-shard xtrabackup dirs, each named <timestamp>.<tablet-alias>."
+        },
+        {
+          "where": "ssh nexusadmin@192.168.70.193 'ls -1 /vt-backups/commerce/-80 /vt-backups/commerce/80-'",
+          "what": "the two shard backup dirs 2026-07-09.232309.nexus-0000000102 (-80) and 2026-07-09.232313.nexus-0000000201 (80-) exist on the NFS server -- physical xtrabackup output, not a .sql.gz"
+        },
+        {
+          "where": "ssh nexusadmin@192.168.70.193 'vtctldclient --server localhost:15999 GetBackups commerce/-80; vtctldclient --server localhost:15999 GetBackups commerce/80-'",
+          "what": "vtctld lists the freshly-written backup per shard; the tablet aliases (nexus-0000000102, nexus-0000000201) confirm BackupShard picked a REPLICA -- the PRIMARY was never taken offline, serving stayed up"
+        }
+      ]
+    },
+    {
+      "command": "nexus backup restore vitess vitess-demo0O1-20260709-232309 --yes --json",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "dry-run validated",
+        "--confirm-destructive to apply",
+        "itemsRestored"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "DEFAULT = non-destructive dry-run: itemsRestored 0, durationSec ~1.404, backupId suffix '[dry-run validated (no changes; --confirm-destructive to apply): -80:2026-07-09.232309.nexus-0000000102@vitess-shard1-tablet-1, 80-:2026-07-09.232313.nexus-0000000201@vitess-shard2-tablet-2]'. It resolves the newest backup per shard and the REPLICA target it would restore onto, but changes NOTHING."
+        },
+        {
+          "where": "nexus health vitess",
+          "what": "still GREEN (11/11) -- the default restore is a pure validation, zero cluster mutation"
+        }
+      ]
+    },
+    {
+      "command": "nexus backup restore vitess vitess-demo0O1-20260709-232309 --confirm-destructive --yes --json",
+      "waitAfterSeconds": 30,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "restored:",
+        "rows,rejoined",
+        "itemsRestored"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "REAL restore: itemsRestored 101, durationSec ~25.433, backupId suffix '[restored: -80<-2026-07-09.232309.nexus-0000000102@vitess-shard1-tablet-1(54 rows,rejoined), 80-<-2026-07-09.232313.nexus-0000000201@vitess-shard2-tablet-2(47 rows,rejoined)]'. 101 = 54 (-80) + 47 (80-) = the hash-vindex customer_id split. Each shard restored onto a REPLICA (never the primary), which rebuilds its datadir from the xtrabackup and rejoins via GTID position + mysql_upgrade."
+        },
+        {
+          "where": "ssh nexusadmin@192.168.70.193 'vtctldclient --server localhost:15999 GetTablets --keyspace commerce'",
+          "what": "the restored tablets (vitess-shard1-tablet-1, vitess-shard2-tablet-2) come back as REPLICA and rejoin their shard; each shard still has exactly one PRIMARY -- the restore never demoted or wiped a primary, so the shard stayed writable"
+        }
+      ]
+    },
+    {
+      "command": "nexus health vitess",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "vitess",
+        "green"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "GREEN 11/11 probes after both the dry-run and the destructive restore -- both shards back to 1 PRIMARY + 2 REPLICA, the re-seeded replicas streaming"
+        }
+      ]
+    }
+  ],
+  "whatProves": "vitess backup is now engine-native, not a logical mysqldump: `backup take vitess` runs `vtctldclient BackupShard` (xtrabackup hot physical copy) per shard onto a `file` BackupStorage repo on shared NFSv4 (/vt-backups), auto-selecting a REPLICA so the PRIMARY keeps serving; ~5 MB physical output per take. `backup restore vitess` is safe-by-default -- a validation dry-run (itemsRestored 0) unless --confirm-destructive is given, in which case it runs `RestoreFromBackup` onto a REPLICA (54 + 47 = 101 rows, the hash-vindex split) that rebuilds its datadir and rejoins via GTID position + mysql_upgrade, leaving the shard writable the whole time. nexus health vitess is GREEN (11/11) throughout."
+}

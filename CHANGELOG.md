@@ -6,6 +6,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.11] — 2026-07-09
+
+Infra-hardening (pre-Phase-1), item 3 of 4 — **0.O.1 Vitess engine-native backup**. Paired with the new
+`nexus-infra-vitess role-overlay-vitess-backup-storage.tf` (a real Vitess `file` BackupStorage on NFSv4 +
+the `xtrabackup` engine).
+
+### Changed — `VitessAdapter` backup/restore are now engine-native (`BackupShard` / `RestoreFromBackup`)
+
+- **`BackupTakeAsync` → `vtctldclient BackupShard commerce/<shard>` per shard** (auto-selects a REPLICA,
+  streams a compressed xtrabackup image to the `/vt-backups` file repo; the PRIMARY is untouched and
+  serving is uninterrupted), then reads the new backup name/size from `GetBackups`. Replaces the
+  pre-0.O.1 logical `mysqldump`-per-shard.
+- **`BackupRestoreAsync` — two modes.** Default (safe) = `RestoreFromBackup --dry-run` per shard, a
+  NON-destructive validation that resolves the restorable backup (no changes). With
+  `--confirm-destructive` = a REAL `RestoreFromBackup` onto a healthy REPLICA per shard (never the
+  primary → the shard stays writable), then waits for the tablet to rejoin as a serving replica and
+  counts the restored rows. `--at <YYYY-mm-DD.HHMMSS>` selects a specific backup; omit for the latest.
+- New helpers `ParseBackupNames` / `ParseRestoreBackupName` (+ 6 parser tests). Removed the dead
+  mysqldump helpers (`PrimaryNodeAsync`, `ShardFile`, `BackupRoot`). New `BackupRepoRoot = /vt-backups`,
+  `RestoreTimeout` (6 min).
+- **LIVE-VERIFIED against the running cluster:** `backup take vitess` (2 shards, xtrabackup, ~5 MB on
+  NFS, ~7 s); `backup restore vitess <id>` dry-run (validated both shards, 0 changes); `backup restore
+  vitess <id> --confirm-destructive` (restored both shards onto replicas, both rejoined, **101 rows** =
+  54 `-80` + 47 `80-`, ~25 s); `health vitess` GREEN afterward. 327 tests pass.
+
 ## [0.8.10] — 2026-07-09
 
 Infra-hardening (pre-Phase-1), items 1–2 of 4 — **catalog-DB / datastore failover fencing** for the two
