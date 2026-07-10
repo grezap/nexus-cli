@@ -1,7 +1,8 @@
 {
   "id": "DEMO-80-vitess-backup-take",
-  "title": "Vitess: logical mysqldump backup per shard",
-  "description": "Runs `nexus backup take vitess`: a logical mysqldump of vt_commerce.customer from each shard PRIMARY socket (as vt_dba) -> a gzip archive node-local on each primary. (No Vitess BackupStorage is configured in 0.O; engine-native Backup is the 0.O.1 enhancement.)",
+  "title": "Vitess: logical mysqldump backup per shard [SUPERSEDED by DEMO-169]",
+  "description": "SUPERSEDED (2026-07-09, 0.O.1): `nexus backup take vitess` was rewritten to engine-native Vitess `file` BackupStorage (BackupShard + xtrabackup on NFS) — see DEMO-169-vitess-engine-native-backup. Retained only as a record of the pre-0.O.1 behavior. HISTORICAL: it ran a logical mysqldump of vt_commerce.customer from each shard PRIMARY socket (as vt_dba) -> a gzip archive node-local on each primary, because no Vitess BackupStorage was configured in 0.O.",
+  "supersededBy": "DEMO-169-vitess-engine-native-backup",
   "prerequisites": {
     "vmsAlive": [
       "vitess-etcd-1",
