@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-v0.8.11%20%E2%9C%85%20infra--hardening%203%3A%20Vitess%20engine--native%20BackupStorage%20(0.O.1)-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-v0.8.12%20%E2%9C%85%20infra--hardening%20COMPLETE%20(4%2F4)%3A%20mongo--sharded%20wire%20mTLS%20(0.N.1)-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (140 VMs built through Phase 0.P) — a single **≤30 MB** Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,18 +12,27 @@ The operator surface for the **NexusPlatform lab** (140 VMs built through Phase 
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.8.11): pre-Phase-1 infra-hardening, item 3 of 4 — 0.O.1 Vitess engine-native backup.**
-> `backup take/restore vitess` are now **engine-native**: `backup take` runs `vtctldclient BackupShard`
-> per shard against a real Vitess **`file` BackupStorage** on shared NFSv4 (`/vt-backups`) driven by the
-> **`xtrabackup`** engine (auto-selects a REPLICA — the PRIMARY is never touched); `backup restore` is a
-> **safe `RestoreFromBackup --dry-run` validation by default** and a real replica-restore only with
-> `--confirm-destructive` (the shard stays writable). Replaces the pre-0.O.1 logical `mysqldump`. The
-> paired infra (a NFS `file` repo + xtrabackup on the 6 tablets, and the three Vitess gotchas — per-tablet
-> `--mycnf-file`, dropping `--db-socket` for managed mode, and `[xtrabackup]` creds in `ssl.cnf`) lives in
-> `nexus-infra-vitess` (`role-overlay-vitess-backup-storage.tf`, a targeted overlay — no cold-rebuild).
-> **Live-verified 2026-07-09** (both shards backed up to NFS + restored onto replicas that rejoined:
-> **101 rows = 54 `-80` + 47 `80-`**; `health vitess` GREEN; smoke-0.O §9.5). **327/327 tests; AOT 28.33 MB**.
-> See CHANGELOG [0.8.11].
+> **Current state (v0.8.12): pre-Phase-1 infra-hardening COMPLETE (4/4) — 0.N.1 mongo-sharded wire mTLS.**
+> The 11-VM sharded MongoDB cluster went from keyFile-only to full **Vault-PKI wire mTLS** (`requireTLS` +
+> per-host leaf certs, parity with the 0.G.2 mongo RS), delivered as an **11-VM cold-rebuild that succeeded
+> in a single from-zero pass (92 resources, zero transients)**. `MongoShardedAdapter` now dials every
+> mongosh/mongodump/mongorestore over TLS, and **`cert-rotate mongo-sharded` is a real verb** (was N/A):
+> it re-issues all 11 per-host leaves and reloads each **online** via `db.adminCommand({rotateCertificates:1})`
+> — **no restart, no shard re-election**. Paired infra in `nexus-infra-oltp` (TLS overlays + `net.tls` in
+> config) + `nexus-infra-vmware` (`mongo-sharded-server` PKI role + 11 AppRoles). **Live-verified
+> 2026-07-10:** `health` 16/16 GREEN over mTLS · `cert-rotate` all 11 nodes (78 s, health still 16/16 after)
+> · `backup take/restore` over `--ssl` (200 docs). **330/330 tests; AOT 28.34 MB**. **This completes all four
+> pre-Phase-1 infra-hardening items.** See CHANGELOG [0.8.12].
+>
+> <details><summary>v0.8.11 infra-hardening item 3 — 0.O.1 Vitess engine-native BackupStorage</summary>
+>
+> **v0.8.11 = infra-hardening item 3 of 4** — `backup take/restore vitess` became **engine-native**:
+> `BackupShard` per shard against a real Vitess **`file` BackupStorage** on NFSv4 (`/vt-backups`) + the
+> **`xtrabackup`** engine (auto-selects a REPLICA); `backup restore` is a safe `RestoreFromBackup --dry-run`
+> by default, a real replica-restore with `--confirm-destructive`. Paired infra in `nexus-infra-vitess`
+> (`role-overlay-vitess-backup-storage.tf`, targeted overlay). Live-verified 2026-07-09 (101 rows = 54+47).
+> **327 tests; AOT 28.33 MB.** See CHANGELOG [0.8.11].
+> </details>
 >
 > <details><summary>v0.8.10 infra-hardening items 1–2 — Postgres-VRRP failover fencing (iceberg-pg + registry-db)</summary>
 >
@@ -471,6 +480,7 @@ ADR index: [`docs/adr/index.md`](./docs/adr/index.md). Twenty-seven ADRs cover f
 | **v0.8.9** | **Completion backlog COMPLETE** — the last two cert-rotate gaps: **FoundationAD DC LDAPS** (`cert-rotate foundation-ad`: openssl PFX on vault-1 → import root/CA/leaf → `Restart-Service NTDS` + ADWS re-cycle in one SSH session → `:636` verify; **standby DC first, PDC last**, abort-before-the-PDC, single-session restart avoids the #10 self-fence) + **Vitess mysqld-wire** (`cert-rotate vitess`: the tablet's mysqld reloads its :3306 wire cert online via **`ALTER INSTANCE RELOAD TLS`** — no restart, **no reparent**; also fixed a pre-existing non-durability by forcing the vault-agent to re-issue). Live-verified on both live DCs + the running vitess tier. **Every cluster's every verb is now implemented in-CLI — nothing deferred.** **28.25 MB**, 321/321 tests |
 | **v0.8.10** | **Pre-Phase-1 infra-hardening, items 1–2 of 4** — Postgres-VRRP failover fencing for both PG-behind-keepalived tiers: **lakehouse `--direction iceberg-pg`** (was graceful N/A) + **registry `--direction registry-db`** (was DR-deferred) now stop keepalived on the VIP holder → promote the standby → **deterministically fence + `pg_basebackup` re-seed the demoted old primary** (guarded so it can never wipe a live primary) → no split-brain. Paired infra fixes (the `pg_hba` block on **both** nodes + the reseed helper) in `nexus-infra-lakehouse` 0.L.2.1 + `nexus-infra-registry` 0.L.4.1. Both tiers found split-brained + repaired; 4 + 2 drills both directions GREEN (Nessie 200 + `harbor` role admitted on the promoted node). **28.33 MB**, 321/321 tests |
 | **v0.8.11** | **Pre-Phase-1 infra-hardening, item 3 of 4 (0.O.1)** — Vitess **engine-native backup**: `backup take vitess` → `vtctldclient BackupShard` per shard against a real Vitess **`file` BackupStorage** on shared NFSv4 (`/vt-backups`) + the **`xtrabackup`** engine (auto-selects a REPLICA; PRIMARY untouched); `backup restore vitess` → `RestoreFromBackup --dry-run` validation by default, real replica-restore with `--confirm-destructive` (shard stays writable). Replaces the pre-0.O.1 logical `mysqldump`. Paired infra (`nexus-infra-vitess role-overlay-vitess-backup-storage.tf`, targeted overlay — no cold-rebuild) + the three Vitess gotchas (`--mycnf-file`, drop `--db-socket`, `[xtrabackup]` in `ssl.cnf`). Live-verified: both shards backed up to NFS + restored onto replicas (**101 rows = 54 + 47**, rejoined); `health` GREEN; smoke-0.O §9.5. **28.33 MB**, 327/327 tests |
+| **v0.8.12** | **Pre-Phase-1 infra-hardening COMPLETE (4/4) (0.N.1)** — sharded MongoDB **wire mTLS**: the 11-VM cluster went keyFile-only → `requireTLS` with per-host Vault-PKI leaf certs (parity with the 0.G.2 mongo RS), via an **11-VM cold-rebuild** (single from-zero pass, 92 resources, zero transients). `MongoShardedAdapter` now dials every mongosh/mongodump/mongorestore over TLS, and **`cert-rotate mongo-sharded`** is a real verb (was N/A): re-issues all 11 leaves + reloads each **online** via `db.adminCommand({rotateCertificates:1})` — no restart, no shard re-election. Paired infra in `nexus-infra-oltp` (TLS overlays) + `nexus-infra-vmware` (`mongo-sharded-server` PKI role + 11 AppRoles). Live-verified: `health` 16/16 GREEN · `cert-rotate` 11 nodes (78 s, no re-election) · backup/restore over `--ssl` (200 docs). **28.34 MB**, 330/330 tests |
 | v1.0.0 | All five master-plan commands stable; panic-button verbs everywhere |
 
 ## Contributing

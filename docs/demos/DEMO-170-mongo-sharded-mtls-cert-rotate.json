@@ -1,0 +1,128 @@
+{
+  "id": "DEMO-170-mongo-sharded-mtls-cert-rotate",
+  "title": "Mongo-sharded: Vault-PKI wire mTLS + online cert-rotate across 11 nodes (no re-election) + TLS backup round-trip",
+  "description": "0.N.1 (2026-07-10) brings Vault-PKI WIRE mTLS to the 11-VM sharded MongoDB cluster (3 config-server RS @ .74/.75/.76:27019 + shard-1 RS @ .77/.78/.79 + shard-2 RS @ .80/.56/.57:27018 + 2 mongos @ .58/.59:27017), reaching parity with the 0.G.2 non-sharded mongo RS. 0.N was keyFile-only (member auth, NO wire TLS); 0.N.1 makes every mongod/mongos run `net.tls.mode: requireTLS` with a per-host Vault-Agent-rendered leaf from PKI role `mongo-sharded-server` (CN `<host>.mongo.nexus.lab`), while `clusterAuthMode` stays keyFile. Delivered as an 11-VM COLD-REBUILD (destroy -> from-zero apply, ONE pass, 92 resources, zero transients). MongoShardedAdapter gained a REAL `cert-rotate` verb (was a graceful N/A) and its mongosh/mongodump/mongorestore now all dial over TLS. `cert-rotate` re-issues each node's leaf (forcing that node's own vault-agent to re-render) then reloads it ONLINE via `db.adminCommand({rotateCertificates:1})` -- NO mongod restart, NO shard re-election. Live-verified 2026-07-10.",
+  "prerequisites": {
+    "vmsAlive": [
+      "mongo-cfg-1",
+      "mongo-cfg-2",
+      "mongo-cfg-3",
+      "mongo-shard-1-1",
+      "mongo-shard-1-2",
+      "mongo-shard-1-3",
+      "mongo-shard-2-1",
+      "mongo-shard-2-2",
+      "mongo-shard-2-3",
+      "mongo-mongos-1",
+      "mongo-mongos-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY",
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_CACERT",
+      "NEXUS_VMS_YAML"
+    ],
+    "smokeGate": "smoke-0.N.ps1 ALL PASSED (incl. new §9 Wire mTLS: per-host leaf CN, requireTLS rejects a non-TLS connection, mTLS ping succeeds); nodes on the current Vault root; every mongod/mongos on `net.tls.mode: requireTLS`"
+  },
+  "steps": [
+    {
+      "command": "nexus health mongo-sharded --json",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "mongo-sharded",
+        "green",
+        "16"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "GREEN, 16/16 probes -- and every probe now dials over mTLS (config RS, both shard RSes, and the two mongos all speak requireTLS). A healthy sharded topology before the rotation drill."
+        },
+        {
+          "where": "ssh nexusadmin@192.168.70.77 'echo | sudo openssl s_client -connect 127.0.0.1:27018 2>/dev/null | openssl x509 -noout -subject'",
+          "what": "the shard-1 mongod serves a leaf with CN `mongo-shard-1-1.mongo.nexus.lab` -- the per-host Vault-Agent-rendered cert from PKI role `mongo-sharded-server`, not a shared/self-signed cert"
+        }
+      ]
+    },
+    {
+      "command": "nexus cert-rotate mongo-sharded --yes --json",
+      "waitAfterSeconds": 90,
+      "expectedOutputContains": [
+        "mongo-cfg-1",
+        "mongo-shard-1-1",
+        "mongo-shard-2-1",
+        "mongo-mongos-1"
+      ],
+      "expectedExitCode": 0,
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "all 11 nodes rotate GREEN with distinct serials and no error -- oldSerial != newSerial per node (e.g. mongo-cfg-1 555E9FA8...->4719E276...); durationSec 78.47, zero errors. A node row with no error means its `db.adminCommand({rotateCertificates:1})` returned ok:1 -- which only succeeds if the freshly-issued leaf/key/CA all load."
+        },
+        {
+          "where": "ssh nexusadmin@192.168.70.74 'sudo journalctl -u mongod --since \"2 min ago\" | grep -i rotateCertificates'",
+          "what": "the mongod logs the online cert reload -- no restart line, no stepdown/election. rotateCertificates swaps the running server's cert in place, so no member is ever taken down."
+        },
+        {
+          "where": "ssh nexusadmin@192.168.70.77 'sudo openssl x509 -in /etc/nexus-mongo/tls/server.pem -noout -serial'",
+          "what": "the on-disk leaf serial CHANGED to the reported newSerial and PERSISTS (the per-host vault-agent holds the new leaf) -- a genuine Vault re-issue, not a cache replay"
+        }
+      ]
+    },
+    {
+      "command": "nexus health mongo-sharded --json",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "mongo-sharded",
+        "green",
+        "16"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "still GREEN 16/16 AFTER the rotation -- config RS still 1 PRIMARY + 2 SECONDARY, both shard RSes unchanged, both mongos serving. NO shard re-election happened: the online rotateCertificates never demoted a primary."
+        }
+      ]
+    },
+    {
+      "command": "nexus backup take mongo-sharded --json",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "mongo-sharded-backup-",
+        ".archive.gz",
+        "1946"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "backupId mongo-sharded-backup-20260710-125332, archive /var/backups/nexus-mongo-sharded/mongo-sharded-backup-20260710-125332.archive.gz, sizeBytes 1946, durationSec 0.4. The mongodump ran with `--ssl` THROUGH a mongos (:27017) -- the whole logical dump of nexus_n_smoke crossed the wire encrypted."
+        },
+        {
+          "where": "ssh nexusadmin@192.168.70.58 'ls -l /var/backups/nexus-mongo-sharded/mongo-sharded-backup-20260710-125332.archive.gz'",
+          "what": "the gzip archive exists on the mongos host at the reported size (1946 bytes) -- a real, restorable dump of the sharded `samples` collection"
+        }
+      ]
+    },
+    {
+      "command": "nexus backup restore mongo-sharded mongo-sharded-backup-20260710-125332 --yes --json",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "itemsRestored",
+        "200",
+        "nexus_n_restore_verify"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "mongorestore ran with `--ssl` through the mongos into a verify DB `nexus_n_restore_verify`: itemsRestored 200, durationSec 1.3. 200 = the full seeded `samples` set -- the TLS backup round-trips end-to-end, restore-over-mTLS included."
+        }
+      ]
+    }
+  ],
+  "whatProves": "The sharded MongoDB tier now has genuine Vault-PKI WIRE mTLS (parity with the non-sharded 0.G.2 RS): every mongod/mongos runs `requireTLS` with a per-host leaf (CN `<host>.mongo.nexus.lab`) rendered by its own Vault Agent from PKI role `mongo-sharded-server`, keyFile staying for member auth. `cert-rotate mongo-sharded` is a REAL in-CLI verb (no longer the earlier graceful N/A): it re-issues all 11 leaves durably and reloads each ONLINE via `db.adminCommand({rotateCertificates:1})` -- 78.47 s, zero errors, and NO mongod restart / NO shard re-election, so health stays GREEN 16/16 throughout. Backup take/restore are now `mongodump --ssl` / `mongorestore --ssl` through a mongos -- a 200-item TLS round-trip into nexus_n_restore_verify. Delivered as a clean 11-VM cold-rebuild (92 resources, one pass, zero transients)."
+}

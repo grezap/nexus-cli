@@ -26,9 +26,10 @@ namespace Nexus.Cli.Adapters.Cluster;
 /// <see cref="MongoAdapter"/>.
 /// </para>
 /// <para>
-/// Connection contract (LIVE-PROBED 2026-06-16 against the running cluster):
-/// keyFile internal auth only -- <b>NO TLS on the wire</b> in 0.N v1 (mTLS is the
-/// 0.N.1 hardening, deferred per ADR-0040); <c>authorization=enabled</c>. The
+/// Connection contract: keyFile member auth + <b>wire mTLS as of 0.N.1</b>
+/// (requireTLS with per-host Vault-PKI leaf certs, parity with the 0.G.2 mongo
+/// RS); every mongosh/mongodump/mongorestore dials over TLS presenting the node's
+/// own leaf as its client cert; <c>authorization=enabled</c>. The
 /// adapter authenticates two ways, BOTH using the shared keyFile content as the
 /// password (the cluster's single secret):
 /// <list type="bullet">
@@ -53,9 +54,10 @@ namespace Nexus.Cli.Adapters.Cluster;
 /// Verb surface (v0.7.1): status / health / topology (Shards populated -- the
 /// sharded showcase) / failover (shard-primary stepDown + per-shard re-election)
 /// / scale-out add+remove (shard RS member, apply-on-demand) / backup take+restore
-/// (mongodump through mongos round-trip) / acl (config-server admin users via
-/// mongos) / chaos (process-kill a shard mongod). <c>cert-rotate</c> returns a
-/// graceful "not applicable in 0.N v1 (no TLS; mTLS is the 0.N.1 hardening)".
+/// (mongodump through mongos round-trip, over TLS) / acl (config-server admin
+/// users via mongos) / chaos (process-kill a shard mongod) / <c>cert-rotate</c>
+/// (0.N.1: per-node Vault-PKI leaf re-issue via the node's own agent + online
+/// <c>rotateCertificates</c> reload -- no restart, no shard re-election).
 /// </para>
 /// </summary>
 public sealed class MongoShardedAdapter : IClusterAdapter
@@ -67,6 +69,19 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     private const int ShardPort = 27018;
     private const int MongosPort = 27017;
     private const string KeyFilePath = "/etc/nexus-mongo/keyfile";
+
+    // 0.N.1 wire mTLS (parity with the 0.G.2 mongo RS). Every mongod/mongos runs
+    // requireTLS with a per-host Vault-PKI leaf rendered by nexus-infra-oltp
+    // role-overlay-mongo-tls.tf: server.pem = leaf+PKCS#8 key, ca.crt =
+    // intermediate+root. Owned root:mongodb 0640. TlsArgs is presented on every
+    // mongosh dial (the node's own leaf doubles as the client cert).
+    private const string TlsDir = "/etc/nexus-mongo/tls";
+    private const string CaFile = TlsDir + "/ca.crt";
+    private const string PemFile = TlsDir + "/server.pem";
+    private const string TlsArgs = $"--tls --tlsCAFile {CaFile} --tlsCertificateKeyFile {PemFile}";
+    private const string PkiRole = "mongo-sharded-server";
+    private const string VaultAddr = "https://192.168.70.121:8200";
+    private const string AgentToken = "/run/nexus-vault-agent/token";
 
     // Vault KV (mount nexus/, KV-v2). The shared keyFile (= the operator/__system
     // password) is sticky-seeded by the 0.G.2 security overlay
@@ -166,12 +181,12 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     // __system / local -- the only principal the shard mongods accept; also valid
     // on the config mongods. Used for ALL direct-mongod RS operations.
     private static string SysAuth(string pwd) =>
-        $"--username __system --password '{pwd}' --authenticationDatabase local --authenticationMechanism SCRAM-SHA-256";
+        $"{TlsArgs} --username __system --password '{pwd}' --authenticationDatabase local --authenticationMechanism SCRAM-SHA-256";
 
     // nexus-sharded-admin / admin -- the root user that lives on the config-server
     // RS and is reachable THROUGH mongos. Used for all cluster-level operations.
     private static string OperatorAuth(string pwd) =>
-        $"--username {OperatorUser} --password '{pwd}' --authenticationDatabase admin";
+        $"{TlsArgs} --username {OperatorUser} --password '{pwd}' --authenticationDatabase admin";
 
     /// <summary>Run a mongosh eval against a mongod RS member (direct, via __system).</summary>
     private async Task<Result<string>> EvalMongodAsync(NodeRecord node, int port, string pwd, string js, CancellationToken ct)
@@ -641,7 +656,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
         var dumpUri = $"mongodb://127.0.0.1:{MongosPort}/nexus_n_smoke?authSource=admin";
         var script =
             $"sudo mkdir -p {dir}; "
-            + $"sudo mongodump --uri '{dumpUri}' --username {OperatorUser} --password '{pwd.Value}' --authenticationDatabase admin "
+            + $"sudo mongodump --uri '{dumpUri}' --ssl --sslCAFile {CaFile} --sslPEMKeyFile {PemFile} --username {OperatorUser} --password '{pwd.Value}' --authenticationDatabase admin "
             + $"--archive={archive} --gzip 2>&1 | tail -3; "
             + $"sudo stat -c %s {archive}";
         var target = new SshTarget(mongos.Vmnet11, 22, _sshUsername, _sshKeyPath);
@@ -691,7 +706,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
         var restoreUri = $"mongodb://127.0.0.1:{MongosPort}/?authSource=admin";
         var script =
             $"test -s {archive} || {{ echo MISSING-ARCHIVE; exit 9; }}; "
-            + $"sudo mongorestore --uri '{restoreUri}' --username {OperatorUser} --password '{pwd.Value}' --authenticationDatabase admin "
+            + $"sudo mongorestore --uri '{restoreUri}' --ssl --sslCAFile {CaFile} --sslPEMKeyFile {PemFile} --username {OperatorUser} --password '{pwd.Value}' --authenticationDatabase admin "
             + $"--gzip --archive={archive} --nsInclude 'nexus_n_smoke.*' --nsFrom 'nexus_n_smoke.*' --nsTo 'nexus_n_restore_verify.*' --drop 2>&1 | tail -3; "
             + $"sudo mongosh --quiet {OperatorAuth(pwd.Value!)} --host 127.0.0.1:{MongosPort} --eval "
             + "'var c=db.getSiblingDB(\"nexus_n_restore_verify\").getCollectionNames().reduce(function(a,n){return a+db.getSiblingDB(\"nexus_n_restore_verify\").getCollection(n).countDocuments({})},0);print(\"RESTORED=\"+c)'";
@@ -707,13 +722,77 @@ public sealed class MongoShardedAdapter : IClusterAdapter
             long.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture), sw.Elapsed, startedAt));
     }
 
-    // === RotateCertAsync (N/A in 0.N v1 -- no TLS) ==========================
-    public Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken) =>
-        Task.FromResult(Result.Fail<CertRotationResult>(
-            "cert-rotate is not applicable to mongo-sharded in 0.N v1: the sharded cluster authenticates with a shared "
-            + "keyFile and runs WITHOUT TLS on the wire (ADR-0040). mTLS via Vault PKI (per-host leaf certs, parity with the "
-            + "0.G.2 `mongo` RS) is the 0.N.1 hardening; once it lands, cert-rotate will re-issue per-node certs like the "
-            + "MongoAdapter. For the keyFile itself, rotate via the nexus-infra-oltp keyfile overlay + a rolling restart."));
+    // === RotateCertAsync (0.N.1: per-node Vault-PKI leaf re-issue + online reload) =
+    // Implemented by 0.N.1 (was N/A in 0.N v1 which had no wire TLS). For each of
+    // the 11 nodes: force the node's OWN vault-agent to re-issue a fresh leaf, then
+    // reload it ONLINE via MongoDB's rotateCertificates (no restart, no shard
+    // re-election). Sequential + evidence-based per node.
+    public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
+    {
+        var cluster = _catalog.GetCluster(ClusterName);
+        if (cluster.IsFail) return Result.Fail<CertRotationResult>(cluster.Error!);
+        var all = cluster.Value!.Nodes;
+        var pwd = await GetKeyfileAsync(cancellationToken).ConfigureAwait(false);
+        if (pwd.IsFail) return Result.Fail<CertRotationResult>(pwd.Error!);
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var sw = Stopwatch.StartNew();
+        var rotated = new List<CertRotatedNode>();
+
+        // Order: config RS, then shards, then mongos (routers reload last). The
+        // online reload never demotes a primary, so ordering is for tidiness only.
+        var ordered = all.OrderBy(n => Classify(n.Name).Role switch { "configsvr" => 0, "shardsvr" => 1, _ => 2 })
+                         .ThenBy(n => n.Name, StringComparer.Ordinal).ToList();
+
+        foreach (var node in ordered)
+        {
+            var (role, _, port) = Classify(node.Name);
+            var target = new SshTarget(node.Vmnet11, 22, _sshUsername, _sshKeyPath);
+
+            // Force the node's OWN vault-agent to RE-ISSUE a fresh leaf (durable:
+            // a direct issue+write is reverted by the agent's next render -- the
+            // Swarm/vitess lesson). rm bundle.pem + restart the agent -> template 70
+            // (pkiCert) re-issues bundle.pem + its command mongo-tls-split.sh
+            // regenerates server.pem (leaf+key) + ca.crt. Wait for the server.pem
+            // serial to CHANGE (proof of a durable re-issue); restore the .bak if not.
+            var rerender =
+                $"D={TlsDir}; OLD=$(sudo openssl x509 -in $D/server.pem -noout -serial 2>/dev/null|sed 's/serial=//'); "
+                + "if sudo test -f $D/bundle.pem; then sudo cp -a $D/bundle.pem $D/bundle.pem.bak; sudo rm -f $D/bundle.pem; fi; "
+                + "sudo systemctl restart nexus-vault-agent; "
+                + "for i in $(seq 1 30); do NEW=$(sudo openssl x509 -in $D/server.pem -noout -serial 2>/dev/null|sed 's/serial=//'); if [ -n \"$NEW\" ] && [ \"$NEW\" != \"$OLD\" ]; then break; fi; sleep 2; done; "
+                + "if sudo test -f $D/bundle.pem.bak; then if sudo test -f $D/bundle.pem; then sudo rm -f $D/bundle.pem.bak; else sudo mv $D/bundle.pem.bak $D/bundle.pem; fi; fi; "
+                + "echo \"OLD=$OLD NEW=$(sudo openssl x509 -in $D/server.pem -noout -serial 2>/dev/null|sed 's/serial=//')\"";
+            var rr = await _ssh.ExecuteAsync(target, rerender, TimeSpan.FromSeconds(90), cancellationToken).ConfigureAwait(false);
+            var (oldSerial, newSerial) = ParseRerender(rr.IsOk ? rr.Value!.Stdout : "");
+            if (rr.IsFail || oldSerial.Length == 0 || newSerial.Length == 0 || string.Equals(oldSerial, newSerial, StringComparison.OrdinalIgnoreCase))
+            {
+                rotated.Add(new CertRotatedNode(node.Name, oldSerial.Length > 0 ? oldSerial : "(unknown)", "(unchanged)",
+                    Error: rr.IsFail ? rr.Error : "vault-agent did not re-issue a fresh leaf (server.pem serial unchanged -- the node may be on the OLD Vault root, or its pkiCert did not re-render)."));
+                continue;
+            }
+
+            // Online reload -- MongoDB 8.0 rotateCertificates reloads the leaf from
+            // certificateKeyFile/CAFile with NO restart + NO re-election. Run as the
+            // right principal per role (mongod=__system/local, mongos=operator/admin).
+            var auth = role == "mongos" ? OperatorAuth(pwd.Value!) : SysAuth(pwd.Value!);
+            var reloadCmd = $"sudo mongosh --quiet {auth} --host 127.0.0.1:{port} --eval 'print(db.adminCommand({{rotateCertificates:1}}).ok)'";
+            var reload = await _ssh.ExecuteAsync(target, reloadCmd, SshTimeout, cancellationToken).ConfigureAwait(false);
+            string? note = null;
+            if (reload.IsFail || !reload.Value!.Stdout.Trim().EndsWith('1'))
+                note = $"new leaf rendered on disk, but rotateCertificates did not confirm ok:1 (the cert loads on the next engine restart regardless): {(reload.IsFail ? reload.Error : Tail(reload.Value!.Stdout + reload.Value.Stderr, 180))}";
+            rotated.Add(new CertRotatedNode(node.Name, oldSerial, newSerial, Error: note));
+            await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
+        }
+        sw.Stop();
+        return Result.Ok(new CertRotationResult(rotated, sw.Elapsed, startedAt));
+    }
+
+    /// <summary>Parse the force-rerender probe's `OLD=&lt;serial&gt; NEW=&lt;serial&gt;` line.</summary>
+    internal static (string Old, string New) ParseRerender(string stdout)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(stdout, @"OLD=([0-9A-Fa-f]*)\s+NEW=([0-9A-Fa-f]*)");
+        return m.Success ? (m.Groups[1].Value, m.Groups[2].Value) : ("", "");
+    }
 
     // === AclAsync (config-server admin users, via mongos) ===================
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)

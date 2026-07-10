@@ -8,8 +8,9 @@ namespace Nexus.Cli.Tests.Cluster;
 /// <summary>
 /// Parser-contract tests for <see cref="MongoShardedAdapter"/> (Phase 0.N,
 /// nexus-cli v0.7.1). Fixtures are verbatim from the LIVE sharded cluster
-/// (MongoDB 8.0, keyFile auth, no TLS) captured during the v0.7.1 contract
-/// probe 2026-06-16, so a parser regression surfaces here rather than mid-verb.
+/// (MongoDB 8.0, keyFile auth + 0.N.1 wire mTLS) captured during the v0.7.1
+/// contract probe 2026-06-16, so a parser regression surfaces here rather than
+/// mid-verb.
 /// </summary>
 public class MongoShardedAdapterParseTests
 {
@@ -102,5 +103,30 @@ public class MongoShardedAdapterParseTests
         var (members, leader) = MongoShardedAdapter.ParseRsStatusJson("not json at all", ConfigEndpoints(), "config");
         members.Should().BeEmpty();
         leader.Should().BeNull();
+    }
+
+    // === ParseRerender (0.N.1 cert-rotate force-rerender serial probe) ========
+    [Fact]
+    public void ParseRerender_extracts_old_and_new_serials()
+    {
+        var (o, n) = MongoShardedAdapter.ParseRerender("OLD=2FEE8AA653BF NEW=192DF4558AA2");
+        o.Should().Be("2FEE8AA653BF");
+        n.Should().Be("192DF4558AA2");
+    }
+
+    [Fact]
+    public void ParseRerender_handles_a_first_install_with_empty_old()
+    {
+        var (o, n) = MongoShardedAdapter.ParseRerender("noise\nOLD= NEW=ABCDEF01");
+        o.Should().BeEmpty();
+        n.Should().Be("ABCDEF01");
+    }
+
+    [Fact]
+    public void ParseRerender_returns_empty_when_no_marker()
+    {
+        var (o, n) = MongoShardedAdapter.ParseRerender("vault-agent restart failed");
+        o.Should().BeEmpty();
+        n.Should().BeEmpty();
     }
 }

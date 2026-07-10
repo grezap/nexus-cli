@@ -6,6 +6,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.12] — 2026-07-10
+
+Infra-hardening (pre-Phase-1), item 4 of 4 (the LAST) — **0.N.1 mongo-sharded wire mTLS**. Paired with the
+new `nexus-infra-oltp` TLS overlays + `nexus-infra-vmware` security PKI/AppRoles (an 11-VM cold-rebuild).
+**All four infra-hardening items are now complete.**
+
+### Changed — `MongoShardedAdapter` now runs over wire mTLS + implements `cert-rotate`
+
+- **Every mongosh/mongodump/mongorestore dials over TLS.** New TLS constants + a `TlsArgs` const folded into
+  both `SysAuth` and `OperatorAuth` — one edit puts the whole verb surface (status/health/topology/failover/
+  scale/acl/restore-verify) on mTLS, presenting the node's own leaf as its client cert. `--ssl --sslCAFile
+  … --sslPEMKeyFile …` added to the inline `mongodump`/`mongorestore`.
+- **`RotateCertAsync` implemented** (was an N/A stub — the 0.N cluster had no wire TLS). Per node
+  (config → shards → mongos): force the node's OWN vault-agent to re-issue a fresh leaf (rm bundle.pem →
+  restart agent → wait for the `server.pem` serial to change — the durable Swarm/vitess pattern), then
+  reload it **ONLINE** via MongoDB's `db.adminCommand({rotateCertificates:1})` — **no restart, no shard
+  re-election**. `+ParseRerender` (+3 tests).
+- **LIVE-VERIFIED over mTLS:** `health mongo-sharded` 16/16 GREEN; `cert-rotate mongo-sharded --yes` rotated
+  **all 11 nodes** (each oldSerial→newSerial distinct, ~78s, zero errors), health still 16/16 GREEN after
+  (no re-election); `backup take`/`restore` round-trip over `--ssl` (200 docs). 330 tests; AOT 28.34 MB.
+
 ## [0.8.11] — 2026-07-09
 
 Infra-hardening (pre-Phase-1), item 3 of 4 — **0.O.1 Vitess engine-native backup**. Paired with the new
