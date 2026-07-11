@@ -75,8 +75,15 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
     private readonly string _sshUsername;
     private readonly string _sshKeyPath;
 
+    // Cached from the last GetStatusAsync so CanResizeVm (a synchronous
+    // heuristic) can answer without a fresh SSH round-trip.
     private ClusterStatus? _lastStatus;
 
+    /// <summary>
+    /// Binds the adapter to one KRaft cluster (<paramref name="clusterId"/> ==
+    /// its vms.yaml key) plus the SSH transport + key used to run native Kafka
+    /// CLIs on its brokers.
+    /// </summary>
     public KafkaClusterAdapter(string clusterId, IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath)
     {
         _clusterId = clusterId;
@@ -86,7 +93,10 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
         _sshKeyPath = sshKeyPath;
     }
 
+    /// <inheritdoc />
     public string ClusterId => _clusterId;
+
+    /// <inheritdoc />
     public string DisplayName =>
         $"Apache Kafka ({(_clusterId.EndsWith("east", StringComparison.OrdinalIgnoreCase) ? "primary east" : "DR west")} KRaft cluster)";
 
@@ -158,6 +168,8 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
         $"sudo {KafkaBin}/{tool} --bootstrap-server SSL://{b.Vmnet10}:9092 --command-config {ClientCfg} {args}";
 
     // === GetStatusAsync =====================================================
+
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var brokersRes = await ResolveBrokersAsync(cancellationToken).ConfigureAwait(false);
@@ -176,6 +188,8 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
                 $"echo '===OFFLINE==='; {Admin(b, "kafka-topics.sh", "--describe --unavailable-partitions")} 2>/dev/null | grep -c Partition; " +
                 "echo '===END==='";
             var exec = await _ssh.ExecuteAsync(Ssh(b), script, SshTimeout, cancellationToken).ConfigureAwait(false);
+            // "LeaderId" in stdout is the marker that the quorum probe actually
+            // ran (vs a down/errored broker printing only banners); accept it.
             if (exec.IsOk && exec.Value!.Stdout.Contains("LeaderId", StringComparison.Ordinal))
             {
                 q = ParseQuorum(exec.Value.Stdout);
@@ -208,6 +222,9 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
                 ReplicationLagSeconds: null));
         }
 
+        // green only when EVERY voter is alive and no partition is degraded;
+        // yellow while a leader + a bare majority (n/2+1) survive with nothing
+        // offline; red otherwise (no leader or quorum lost).
         var aliveVoters = members.Count(m => m.Status == "alive");
         var overall = (q.LeaderId >= 0 && aliveVoters == brokers.Count && q.UnderReplicated == 0 && q.Offline == 0) ? "green"
             : (q.LeaderId >= 0 && aliveVoters >= (brokers.Count / 2 + 1) && q.Offline == 0) ? "yellow"
@@ -220,6 +237,8 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
     }
 
     // === HealthAsync ========================================================
+
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var brokersRes = await ResolveBrokersAsync(cancellationToken).ConfigureAwait(false);
@@ -270,6 +289,8 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
     }
 
     // === TopologyAsync ======================================================
+
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var statusRes = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -293,6 +314,8 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
     }
 
     // === FailoverAsync (controlled controller-leader move) ==================
+
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var startedAt = DateTimeOffset.UtcNow;
@@ -309,6 +332,8 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
         var leaderHost = before.Value!.Leader;
         var leader = brokers.FirstOrDefault(b => b.Hostname == leaderHost);
         if (leader is null) return Result.Fail<FailoverResult>("could not identify the current quorum leader");
+        // Observe re-election from a DIFFERENT node than the one we stop, else
+        // the poll target dies with the leader.
         var survivor = brokers.FirstOrDefault(b => b.NodeId != leader.NodeId);
         if (survivor is null) return Result.Fail<FailoverResult>("no surviving broker to observe re-election");
 
@@ -355,6 +380,8 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
     }
 
     // === ScaleOutRemoveAsync (drain a broker) ===============================
+
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.NodeName))
@@ -394,6 +421,8 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
     }
 
     // === ScaleOutAddAsync (broker rejoin) ===================================
+
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
         var brokersRes = await ResolveBrokersAsync(cancellationToken).ConfigureAwait(false);
@@ -439,6 +468,8 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
     }
 
     // === BackupTakeAsync (topic -> node-local file capture) =================
+
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var brokersRes = await ResolveBrokersAsync(cancellationToken).ConfigureAwait(false);
@@ -478,6 +509,8 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
     }
 
     // === BackupRestoreAsync (replay file -> verify topic, count round-trip) =
+
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.BackupId))
@@ -517,6 +550,8 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
     }
 
     // === RotateCertAsync (per-broker reissue + split + rolling restart) =====
+
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var brokersRes = await ResolveBrokersAsync(cancellationToken).ConfigureAwait(false);
@@ -596,6 +631,8 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
     }
 
     // === AclAsync ===========================================================
+
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var brokersRes = await ResolveBrokersAsync(cancellationToken).ConfigureAwait(false);
@@ -649,6 +686,8 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
     }
 
     // === ApplyChaosAsync (process-kill kafka.service + rejoin) ==============
+
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         var known = new[] { "network-partition", "packet-loss", "slow-disk", "cpu-starve", "memory-pressure", "process-kill" };
@@ -709,6 +748,8 @@ public sealed class KafkaClusterAdapter : IClusterAdapter
     }
 
     // === CanResizeVm ========================================================
+
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null) return false;

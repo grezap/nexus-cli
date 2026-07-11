@@ -1,7 +1,15 @@
 namespace Nexus.Cli.Adapters.Vmware;
 
+/// <summary>
+/// Path helpers for the VMware Workstation toolchain: locates <c>vmrun.exe</c> and
+/// its sibling <c>vmware-vdiskmanager.exe</c>, derives <c>.vmx</c>/<c>.vmss</c>/<c>.vmem</c>
+/// sidecar paths, and detects suspended-VM state on disk. Windows-only for the
+/// live tools (the lab build host is win-x64); non-Windows callers get a clear
+/// unavailable message rather than a spawn attempt.
+/// </summary>
 public static class VmrunPaths
 {
+    /// <summary>Environment variable that, when set to an existing file, overrides the default vmrun.exe search.</summary>
     public const string PathEnvVar = "NEXUS_VMRUN_PATH";
 
     private static readonly string[] WindowsDefaults =
@@ -10,6 +18,7 @@ public static class VmrunPaths
         @"C:\Program Files\VMware\VMware Workstation\vmrun.exe"
     };
 
+    /// <summary>Resolves the vmrun.exe path (env override, then Workstation defaults), or <c>null</c> off-Windows / when absent.</summary>
     public static string? Resolve()
     {
         var env = Environment.GetEnvironmentVariable(PathEnvVar);
@@ -27,8 +36,10 @@ public static class VmrunPaths
         return null;
     }
 
+    /// <summary>True when vmrun.exe can be resolved on this host.</summary>
     public static bool IsAvailable() => Resolve() is not null;
 
+    /// <summary>Environment variable that, when set to an existing file, overrides the vmware-vdiskmanager.exe search.</summary>
     public const string VdiskManagerEnvVar = "NEXUS_VDISKMANAGER_PATH";
 
     /// <summary>
@@ -70,11 +81,13 @@ public static class VmrunPaths
         return null;
     }
 
+    /// <summary>Operator-facing guidance shown when vmware-vdiskmanager.exe is required but unavailable.</summary>
     public static string VdiskManagerUnavailableMessage()
         => OperatingSystem.IsWindows()
             ? $"vmware-vdiskmanager.exe not found (needed for --disk grows). Set {VdiskManagerEnvVar} or install VMware Workstation Pro."
             : "vmware-vdiskmanager.exe is Windows-only; --disk grows require the win-x64 build host.";
 
+    /// <summary>Builds the canonical <c>&lt;dir&gt;/&lt;name&gt;.vmx</c> path for a VM.</summary>
     public static string GetVmxPath(string dir, string name)
         => Path.Combine(dir, name + ".vmx");
 
@@ -108,6 +121,7 @@ public static class VmrunPaths
             || Directory.EnumerateFiles(dir, $"{baseName}*.vmss").Any();
     }
 
+    /// <summary>Operator-facing guidance shown when vmrun.exe is required but unavailable.</summary>
     public static string UnavailableMessage()
         => OperatingSystem.IsWindows()
             ? $"vmrun.exe not found. Install VMware Workstation Pro or set {PathEnvVar}."

@@ -5,8 +5,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.FailoverTest;
 
+/// <summary>Implements <c>failover-test nomad-leader</c>: stops the current Nomad leader, measures raft re-election RTO, then auto-recovers. Destructive; guarded by <c>--yes</c>.</summary>
 public sealed class FailoverTestNomadLeaderCommand : AsyncCommand<FailoverTestNomadLeaderSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         FailoverTestNomadLeaderSettings settings,

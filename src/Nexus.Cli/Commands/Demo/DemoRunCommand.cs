@@ -5,8 +5,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Demo;
 
+/// <summary>Implements <c>demo run &lt;demo-id&gt;</c>: executes each step of a demo spec in order and reports per-step exit codes.</summary>
 public sealed class DemoRunCommand : AsyncCommand<DemoRunSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         DemoRunSettings settings,

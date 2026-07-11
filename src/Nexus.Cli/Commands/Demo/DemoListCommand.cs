@@ -4,8 +4,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Demo;
 
+/// <summary>Implements <c>demo list</c>: loads the demo catalog and renders the available DEMO-NN-* specs.</summary>
 public sealed class DemoListCommand : AsyncCommand<DemoListSettings>
 {
+    /// <inheritdoc />
     protected override Task<int> ExecuteAsync(
         CommandContext context,
         DemoListSettings settings,

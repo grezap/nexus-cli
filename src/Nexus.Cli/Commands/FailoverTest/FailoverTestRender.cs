@@ -5,8 +5,10 @@ using Spectre.Console;
 
 namespace Nexus.Cli.Commands.FailoverTest;
 
+/// <summary>Rendering helpers for the Swarm failover-test verbs (human timeline table, JSON via source-gen DTO).</summary>
 internal static class FailoverTestRender
 {
+    /// <summary>Renders a failover-test report (leaders, RTO, recovery, phase timeline) for humans.</summary>
     public static void EmitHuman(FailoverTestReport r)
     {
         var (label, color) = (r.NewLeader, r.Recovery) switch
@@ -39,6 +41,7 @@ internal static class FailoverTestRender
         AnsiConsole.Write(t);
     }
 
+    /// <summary>Emits a failover-test report as JSON.</summary>
     public static void EmitJson(FailoverTestReport r)
     {
         var dto = new FailoverTestJsonOutput

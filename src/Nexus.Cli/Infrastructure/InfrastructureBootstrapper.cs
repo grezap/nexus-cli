@@ -17,14 +17,17 @@ public sealed class InfrastructureBootstrapper : IDisposable
     private readonly IVmsCatalog _catalog;
     private readonly IVmrunClient _vmrun;
 
+    /// <summary>Constructs the bootstrapper, allocating the on-disk YAML catalog + local vmrun client.</summary>
     public InfrastructureBootstrapper()
     {
         _catalog = new VmsYamlCatalog();
         _vmrun = new VmrunProcessClient();
     }
 
+    /// <summary>Builds the <see cref="IInfrastructureService"/> backing the <c>infrastructure</c> verb.</summary>
     public IInfrastructureService BuildService()
         => new InfrastructureService(_catalog, _vmrun);
 
+    /// <inheritdoc />
     public void Dispose() { }
 }

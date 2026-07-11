@@ -82,6 +82,17 @@ public sealed class RedisAdapter : IClusterAdapter
     // CanResizeVm (which is sync) without re-running SSH.
     private ClusterStatus? _lastStatus;
 
+    /// <summary>
+    /// Create a Redis Cluster adapter. <paramref name="sshUsername"/> /
+    /// <paramref name="sshKeyPath"/> are the operator's lab SSH identity used for every
+    /// on-node <c>redis-cli</c> dispatch; <paramref name="catalog"/> resolves the
+    /// <c>redis</c> cluster's node IPs from vms.yaml and <paramref name="ssh"/> is the
+    /// shell-out transport.
+    /// </summary>
+    /// <param name="catalog">Resolves the <c>redis</c> cluster's declared nodes (IPs on VMnet10/11).</param>
+    /// <param name="ssh">SSH transport used to shell out to on-node <c>redis-cli</c>/<c>vault</c>.</param>
+    /// <param name="sshUsername">SSH login (nexusadmin) on each target VM.</param>
+    /// <param name="sshKeyPath">Path to the operator's private key for SSH auth.</param>
     public RedisAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath)
     {
         _catalog = catalog;
@@ -90,13 +101,16 @@ public sealed class RedisAdapter : IClusterAdapter
         _sshKeyPath = sshKeyPath;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+    /// <inheritdoc />
     public string DisplayName => "Redis Cluster";
 
     // -----------------------------------------------------------------------
     // GetStatusAsync -- IMPLEMENTED
     // SSH to any reachable node, run `CLUSTER NODES`, parse the lines.
     // -----------------------------------------------------------------------
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -137,6 +151,7 @@ public sealed class RedisAdapter : IClusterAdapter
     // We pick a replica (operator-supplied or first replica of the first
     // primary), measure RTO from "failover issued" to "role flipped to master".
     // -----------------------------------------------------------------------
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var startedAt = DateTimeOffset.UtcNow;
@@ -229,6 +244,7 @@ public sealed class RedisAdapter : IClusterAdapter
     // reachable redis node (a freshly-applied growth node, or one freed by a prior
     // scale-out remove) and joins it as the requested --role.
     // -----------------------------------------------------------------------
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
         var role = (request.Role ?? "replica").Trim().ToLowerInvariant();
@@ -267,6 +283,8 @@ public sealed class RedisAdapter : IClusterAdapter
         if (role == "replica")
         {
             var primaryIds = nodes.Where(n => n.Role == "primary").Select(n => n.Id).ToList();
+            // Attach the new replica to the primary with the FEWEST existing replicas, so
+            // added redundancy lands on the least-covered shard rather than piling onto one.
             var masterId = primaryIds
                 .OrderBy(id => nodes.Count(n => n.Role == "replica" && n.MasterId == id))
                 .First();
@@ -301,6 +319,7 @@ public sealed class RedisAdapter : IClusterAdapter
     // For a replica: CLUSTER FORGET via del-node, then CLUSTER RESET HARD the removed
     // node so it is a clean, empty node ready to be re-added or deprovisioned.
     // -----------------------------------------------------------------------
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.NodeName))
@@ -346,6 +365,7 @@ public sealed class RedisAdapter : IClusterAdapter
     // HealthAsync -- IMPLEMENTED
     // SSH to every node, run INFO replication, build per-node probes.
     // -----------------------------------------------------------------------
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -403,6 +423,7 @@ public sealed class RedisAdapter : IClusterAdapter
     // TopologyAsync -- IMPLEMENTED
     // Same SSH + CLUSTER NODES as GetStatus, but emphasises slot ranges.
     // -----------------------------------------------------------------------
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -439,6 +460,7 @@ public sealed class RedisAdapter : IClusterAdapter
     // NFS is NOT mounted on redis nodes (0.G.1 live finding), so each shard primary's
     // dump.rdb is snapshotted node-locally under /var/backups/nexus-redis/<id>.
     // -----------------------------------------------------------------------
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var statusRes = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -483,6 +505,7 @@ public sealed class RedisAdapter : IClusterAdapter
     // DESTRUCTIVE: overwrites each shard primary's data with its snapshot. Replicas
     // re-sync from their primary automatically afterwards.
     // -----------------------------------------------------------------------
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.BackupId))
@@ -524,6 +547,7 @@ public sealed class RedisAdapter : IClusterAdapter
     // -----------------------------------------------------------------------
     // RotateCertAsync -- IMPLEMENTED (Vault Agent re-render + SIGHUP)
     // -----------------------------------------------------------------------
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -614,6 +638,7 @@ public sealed class RedisAdapter : IClusterAdapter
     // time-boxed self-reverting fault, observes impact via HealthAsync mid-window,
     // lifts explicitly, then confirms the cluster returns to green. ADR-0010.
     // -----------------------------------------------------------------------
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         var known = new[] { "network-partition", "packet-loss", "slow-disk", "cpu-starve", "memory-pressure", "process-kill" };
@@ -712,6 +737,7 @@ public sealed class RedisAdapter : IClusterAdapter
     // -----------------------------------------------------------------------
     // AclAsync -- IMPLEMENTED (read-only ACL LIST for "list" + "describe")
     // -----------------------------------------------------------------------
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -805,6 +831,7 @@ public sealed class RedisAdapter : IClusterAdapter
     // Refuses primaries; allows replicas. Consults _lastStatus if available;
     // otherwise conservative refusal.
     // -----------------------------------------------------------------------
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null)
@@ -943,11 +970,13 @@ public sealed class RedisAdapter : IClusterAdapter
         return true;
     }
 
+    /// <summary>Return the last <paramref name="n"/> chars of <paramref name="s"/> (keeps error tails short in result messages).</summary>
     private static string Tail(string s, int n)
     {
         if (string.IsNullOrEmpty(s)) return string.Empty;
         return s.Length <= n ? s : s.Substring(s.Length - n);
     }
 
+    /// <summary>Base64-encode a UTF-8 string for safe transport through the <c>echo … | base64 -d | sudo tee</c> write path (avoids shell-quoting cert/key material).</summary>
     private static string B64(string s) => Convert.ToBase64String(Encoding.UTF8.GetBytes(s));
 }

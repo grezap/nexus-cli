@@ -7,7 +7,7 @@ using Renci.SshNet;
 namespace Nexus.Cli.Adapters.Ssh;
 
 /// <summary>
-/// SSH.NET (Renci.SshNet 2025.1.0) implementation of <see cref="ISshClient"/>.
+/// SSH.NET (Renci.SshNet 2025.1.0) implementation of <see cref="Nexus.Cli.Core.Abstractions.ISshClient"/>.
 /// Stateless: each <see cref="ExecuteAsync"/> opens a fresh connection, runs
 /// one command, and disconnects. Acceptable for failover-test's ~5-10 command
 /// budget; if a future verb needs many commands per session, add an
@@ -17,6 +17,7 @@ namespace Nexus.Cli.Adapters.Ssh;
 /// </summary>
 public sealed class SshNetClient : Nexus.Cli.Core.Abstractions.ISshClient
 {
+    /// <inheritdoc />
     public async Task<Result<SshExecResult>> ExecuteAsync(
         SshTarget target,
         string command,
@@ -66,6 +67,7 @@ public sealed class SshNetClient : Nexus.Cli.Core.Abstractions.ISshClient
         }
     }
 
+    /// <inheritdoc />
     public async Task<Result<bool>> UploadBytesAsync(
         SshTarget target,
         byte[] content,
@@ -100,6 +102,7 @@ public sealed class SshNetClient : Nexus.Cli.Core.Abstractions.ISshClient
         }
     }
 
+    /// <inheritdoc />
     public async Task<Result<byte[]>> DownloadBytesAsync(
         SshTarget target,
         string remotePath,

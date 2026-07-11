@@ -37,9 +37,17 @@ namespace Nexus.Cli.Infrastructure;
 /// </summary>
 public static class ClusterBootstrapper
 {
+    /// <summary>Environment variable that overrides the SSH login user for adapter/resizer connections.</summary>
     public const string SshUserEnvVar = "NEXUS_SSH_USER";
+
+    /// <summary>SSH user assumed when <see cref="SshUserEnvVar"/> is unset.</summary>
     public const string DefaultSshUser = "nexusadmin";
 
+    /// <summary>
+    /// Builds every <see cref="IClusterAdapter"/> (one per cluster type), wires their shared
+    /// dependencies (YAML catalog, SSH client/key/user, an optional Vault client, and the Kafka
+    /// DR service), and composes them into an <see cref="IClusterRegistry"/> for the v0.6 verbs.
+    /// </summary>
     public static IClusterRegistry BuildRegistry()
     {
         var catalog = new VmsYamlCatalog();
@@ -122,6 +130,12 @@ public static class ClusterBootstrapper
         }
     }
 
+    /// <summary>
+    /// Builds the cluster-aware vertical <see cref="IVmResizer"/> (<c>scale-up</c> verb). Takes the
+    /// already-built <paramref name="registry"/> so the resizer can consult each adapter's
+    /// <c>CanResizeVm</c> guard before suspending a node.
+    /// </summary>
+    /// <param name="registry">The cluster registry used to check whether a VM may be resized safely.</param>
     public static IVmResizer BuildVmResizer(IClusterRegistry registry)
     {
         var catalog = new VmsYamlCatalog();

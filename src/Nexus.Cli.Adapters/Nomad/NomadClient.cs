@@ -8,13 +8,26 @@ using Nexus.Cli.Core.Models;
 
 namespace Nexus.Cli.Adapters.Nomad;
 
+/// <summary>
+/// CA-pinned HTTP <see cref="INexusNomadClient"/> for the Swarm-tier Nomad
+/// cluster. Fans out to <c>/v1/agent/members</c> (server raft), <c>/v1/status/leader</c>,
+/// and <c>/v1/nodes</c> (client nodes) with the mgmt token in the <c>X-Nomad-Token</c>
+/// header, marking the server whose <c>addr:port</c> prefixes the leader address as
+/// leader. HTTP-from-the-build-host; no nomad binary is linked.
+/// </summary>
 public sealed class NomadClient : INexusNomadClient, IDisposable
 {
+    /// <summary>Connection settings for the Nomad HTTP API.</summary>
+    /// <param name="BaseAddress">Base URL of the Nomad agent (e.g. <c>https://host:4646</c>).</param>
+    /// <param name="MgmtToken">Nomad management/bootstrap ACL token sent in <c>X-Nomad-Token</c>.</param>
     public sealed record Settings(string BaseAddress, string MgmtToken);
 
     private readonly Settings _settings;
     private readonly HttpClient _http;
 
+    /// <summary>Creates a client bound to <paramref name="settings"/>, minting a CA-pinned <see cref="HttpClient"/> from <paramref name="httpFactory"/> and pre-seeding the ACL-token header.</summary>
+    /// <param name="settings">Base address + mgmt token for the target Nomad agent.</param>
+    /// <param name="httpFactory">Factory that produces the CA-bundle-pinned HTTP client.</param>
     public NomadClient(Settings settings, NexusHttpClientFactory httpFactory)
     {
         _settings = settings;
@@ -22,6 +35,7 @@ public sealed class NomadClient : INexusNomadClient, IDisposable
         _http.DefaultRequestHeaders.Add("X-Nomad-Token", _settings.MgmtToken);
     }
 
+    /// <inheritdoc />
     public async Task<Result<NomadHealth>> GetHealthAsync(CancellationToken cancellationToken)
     {
         try
@@ -91,5 +105,6 @@ public sealed class NomadClient : INexusNomadClient, IDisposable
         }
     }
 
+    /// <inheritdoc />
     public void Dispose() => _http.Dispose();
 }

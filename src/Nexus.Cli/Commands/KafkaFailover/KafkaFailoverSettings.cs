@@ -9,4 +9,9 @@ namespace Nexus.Cli.Commands.KafkaFailover;
 /// </summary>
 public sealed class KafkaFailoverEastToWestSettings : FailoverTestSettingsBase;
 
+/// <summary>
+/// Settings for the <c>kafka failover west-to-east</c> verb. Inherits the
+/// FailoverTest base (<c>--json</c>, <c>--no-color</c>, <c>--yes</c>) to stay
+/// uniform with the failover-test family.
+/// </summary>
 public sealed class KafkaFailoverWestToEastSettings : FailoverTestSettingsBase;

@@ -103,6 +103,12 @@ public sealed class LakehouseAdapter : IClusterAdapter
     private string? _icebergPgVipHolder;
     private string? _sparkAliveLeader;
 
+    /// <summary>
+    /// Construct the lakehouse adapter over an SSH client + the vms.yaml catalog.
+    /// <paramref name="vault"/> is nullable — MinIO-root reads (mc / acl) need the
+    /// operator token, so those verbs fail-soft when it is absent; every other verb
+    /// works SSH-only.
+    /// </summary>
     public LakehouseAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath, INexusVaultClient? vault)
     {
         _catalog = catalog;
@@ -112,7 +118,10 @@ public sealed class LakehouseAdapter : IClusterAdapter
         _vault = vault;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+
+    /// <inheritdoc />
     public string DisplayName => DisplayNameConst;
 
     // === per-role service contract (from the live probe 2026-06-24) =========
@@ -140,6 +149,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
         return "other";
     }
 
+    /// <summary>Resolve the <see cref="RoleSpec"/> for a role (unknown falls back to MinIO — never used at runtime).</summary>
     private static RoleSpec SpecFor(string role) => role switch
     {
         "minio" => MinioSpec,
@@ -151,8 +161,10 @@ public sealed class LakehouseAdapter : IClusterAdapter
         _ => MinioSpec
     };
 
+    /// <summary>Build an SSH target for a node IP with the adapter's operator key/user.</summary>
     private SshTarget T(string ip) => new(ip, 22, _sshUsername, _sshKeyPath);
 
+    /// <summary>Load the lakehouse cluster's nodes from vms.yaml, ordinal-sorted by name (stable role slicing).</summary>
     private Result<List<NodeRecord>> Nodes()
     {
         var cluster = _catalog.GetCluster(VmsCluster);
@@ -162,6 +174,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
         return Result.Ok(nodes);
     }
 
+    /// <summary>Slice the nodes belonging to one role (<see cref="ClassifyRole"/>), ordinal-sorted by name.</summary>
     private static List<NodeRecord> Role(List<NodeRecord> all, string role) =>
         all.Where(n => ClassifyRole(n.Name) == role).OrderBy(n => n.Name, StringComparer.Ordinal).ToList();
 
@@ -188,7 +201,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
         return (code, body.Trim());
     }
 
-    /// <summary>`systemctl is-active <unit>` on a node → true if "active".</summary>
+    /// <summary><c>systemctl is-active &lt;unit&gt;</c> on a node → true if "active".</summary>
     private async Task<bool> IsActiveAsync(string ip, string unit, CancellationToken ct)
     {
         var r = await _ssh.ExecuteAsync(T(ip), $"systemctl is-active {unit} 2>/dev/null", SshTimeout, ct).ConfigureAwait(false);
@@ -226,6 +239,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
         await CurlAsync(master.Vmnet11, master.Vmnet11, SparkMasterSpec.Port, false, null, "/json/", null, ct).ConfigureAwait(false);
 
     // === parsing helpers (internal static for unit tests) ==================
+    /// <summary>Safe string-property read off a <see cref="JsonElement"/> ("" when absent or non-string).</summary>
     private static string Str(JsonElement e, string name)
         => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
 
@@ -316,6 +330,11 @@ public sealed class LakehouseAdapter : IClusterAdapter
     }
 
     // === lazy KV (MinIO root creds for mc / acl) ===========================
+    /// <summary>
+    /// Lazily fetch the MinIO root credential from Vault KV (mount <c>nexus</c>, field
+    /// <c>value</c>) — needed only for the mc-driven acl paths; fails with an operator-token
+    /// hint when the adapter was built without a <see cref="INexusVaultClient"/>.
+    /// </summary>
     private async Task<Result<(string User, string Pw)>> MinioRootAsync(CancellationToken ct)
     {
         if (_vault is null)
@@ -329,6 +348,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
     }
 
     // === GetStatusAsync ====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -378,6 +398,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
     }
 
     // === HealthAsync =======================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -472,6 +493,11 @@ public sealed class LakehouseAdapter : IClusterAdapter
         return Result.Ok(new HealthReport(ClusterName, overallStatus, probes, DateTimeOffset.UtcNow));
     }
 
+    /// <summary>
+    /// Probe iceberg-pg streaming replication: find the primary (<c>in_recovery=f</c>) + confirm at
+    /// least one streaming standby via <c>pg_stat_replication</c>. Flags the two-primary split
+    /// (pg-2 never re-seeded — the live-contract casualty) explicitly RED.
+    /// </summary>
     private async Task PgReplicationHealthAsync(List<NodeRecord> pgs, List<HealthProbe> probes, CancellationToken ct)
     {
         string? primary = null; bool sawStandby = false;
@@ -495,6 +521,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
     }
 
     // === TopologyAsync =====================================================
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -546,6 +573,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
     }
 
     // === FailoverAsync (Spark master ZK re-elect; iceberg-pg = graceful N/A) ==
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -565,6 +593,11 @@ public sealed class LakehouseAdapter : IClusterAdapter
             + "own Zab quorum), and the Spark workers have no safe one-shot operator failover.");
     }
 
+    /// <summary>
+    /// Spark master HA drill: stop <c>nexus-spark-master</c> on the ALIVE leader so ZooKeeper
+    /// promotes the STANDBY, poll the survivor to ALIVE (RTO), then restart the stopped node as
+    /// the new STANDBY unless <c>--no-recover</c>.
+    /// </summary>
     private async Task<Result<FailoverResult>> SparkMasterFailoverAsync(List<NodeRecord> all, FailoverRequest request, CancellationToken ct)
     {
         var masters = Role(all, "spark-master");
@@ -625,6 +658,13 @@ public sealed class LakehouseAdapter : IClusterAdapter
     // so there is no split-brain. This adapter DRIVES the drill deterministically (it holds the
     // nexusadmin key + reaches both nodes — no inter-node SSH); the keepalived notify_fault hook
     // is the unattended-crash backstop. Same shape as RegistryAdapter's registry-db cutover.
+    /// <summary>
+    /// iceberg-pg catalog-DB VRRP cutover of the <c>.151</c> VIP: pre-check the target is a
+    /// streaming standby, stop keepalived on the VIP-holding primary so the standby claims the VIP
+    /// + its <c>notify_master</c> promotes it, then fence + <c>pg_basebackup</c> re-seed the old
+    /// primary as a fresh standby (guarded helper — never wipes a live primary) and restart its
+    /// keepalived as BACKUP (<c>nopreempt</c>).
+    /// </summary>
     private async Task<Result<FailoverResult>> IcebergPgFailoverAsync(List<NodeRecord> all, FailoverRequest request, CancellationToken ct)
     {
         var pgs = Role(all, "iceberg-pg");
@@ -719,9 +759,11 @@ public sealed class LakehouseAdapter : IClusterAdapter
     }
 
     // === ScaleOut (graceful actionable N/A) ================================
+    /// <inheritdoc />
     public Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<ScaleOutResult>(ScaleOutNaMessage));
 
+    /// <inheritdoc />
     public Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<ScaleOutResult>(ScaleOutNaMessage));
 
@@ -732,6 +774,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
         + "overlay in nexus-infra-lakehouse and re-applying (the node joins on boot); there is no safe runtime add/remove to expose here.";
 
     // === Backup (mc mirror s3://warehouse round-trip) ======================
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -763,6 +806,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
         return Result.Ok(new BackupResult($"{tag} ({objs} objects @ {via}:{dest})", $"{via}:{dest}", bytes, sw.Elapsed, startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -796,6 +840,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
     }
 
     // === RotateCertAsync (force vault-agent re-render; MinIO big-bang) ======
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -899,6 +944,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
     }
 
     // === AclAsync (MinIO policies + users via mc admin) ====================
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -968,6 +1014,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
     }
 
     // === ApplyChaosAsync (nexus-chaos.sh process-kill a tolerant node) =====
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         if (!KnownChaosScenarios.Contains(scenario.ScenarioType, StringComparer.OrdinalIgnoreCase))
@@ -1041,6 +1088,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
         return Result.Ok(new ChaosOutcome(scenario.ScenarioType, victim.Name, observed, sw.Elapsed, startedAt, recovered));
     }
 
+    /// <summary>Base64-stage the embedded <c>nexus-chaos.sh</c> resource to <c>/usr/local/bin</c> on the victim (CRLF-stripped, chmod +x).</summary>
     private async Task<Result<bool>> PushChaosHelperAsync(SshTarget target, CancellationToken cancellationToken)
     {
         var asm = typeof(RedisAdapter).Assembly;
@@ -1059,6 +1107,7 @@ public sealed class LakehouseAdapter : IClusterAdapter
     }
 
     // === CanResizeVm =======================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         // Refuse the iceberg-pg VIP holder + the ALIVE Spark master (resizing flaps the front door /
@@ -1069,9 +1118,12 @@ public sealed class LakehouseAdapter : IClusterAdapter
     }
 
     // === helpers ===========================================================
+    /// <summary>First int captured by <paramref name="pattern"/> group 1, else 0.</summary>
     private static int MatchInt(string s, string pattern)
         => Regex.Match(s, pattern) is { Success: true } m && int.TryParse(m.Groups[1].Value, out var v) ? v : 0;
+    /// <summary>First long captured by <paramref name="pattern"/> group 1, else 0.</summary>
     private static long MatchLong(string s, string pattern)
         => Regex.Match(s, pattern) is { Success: true } m && long.TryParse(m.Groups[1].Value, out var v) ? v : 0;
+    /// <summary>Last <paramref name="n"/> chars of <paramref name="s"/> (for truncating stderr in error messages).</summary>
     private static string Tail(string s, int n) => string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= n ? s : s.Substring(s.Length - n));
 }

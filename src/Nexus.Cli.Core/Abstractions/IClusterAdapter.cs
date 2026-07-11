@@ -31,38 +31,49 @@ public interface IClusterAdapter
     /// <summary>Human-readable name for status/topology rendering.</summary>
     string DisplayName { get; }
 
+    /// <summary>Probes the live cluster and returns its current role/health topology.</summary>
     Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken);
 
+    /// <summary>Triggers a controlled primary/leader failover per <paramref name="request"/>.</summary>
     Task<Result<FailoverResult>> FailoverAsync(
         FailoverRequest request,
         CancellationToken cancellationToken);
 
+    /// <summary>Horizontally scales the cluster out by adding a node (the <c>scale-out add</c> verb).</summary>
     Task<Result<ScaleOutResult>> ScaleOutAddAsync(
         ScaleOutAddRequest request,
         CancellationToken cancellationToken);
 
+    /// <summary>Horizontally scales the cluster in by removing a node (the <c>scale-out remove</c> verb).</summary>
     Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(
         ScaleOutRemoveRequest request,
         CancellationToken cancellationToken);
 
+    /// <summary>Runs the adapter's deep health checks and returns a per-node report.</summary>
     Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken);
 
+    /// <summary>Captures a point-in-time snapshot of the cluster's membership and roles.</summary>
     Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken);
 
+    /// <summary>Takes a backup of the cluster per <paramref name="request"/>.</summary>
     Task<Result<BackupResult>> BackupTakeAsync(
         BackupRequest request,
         CancellationToken cancellationToken);
 
+    /// <summary>Restores the cluster from a prior backup per <paramref name="request"/>.</summary>
     Task<Result<RestoreResult>> BackupRestoreAsync(
         RestoreRequest request,
         CancellationToken cancellationToken);
 
+    /// <summary>Rotates the cluster's TLS/mTLS leaf certificates, online where the engine supports it.</summary>
     Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken);
 
+    /// <summary>Injects a chaos <paramref name="scenario"/> (fault/kill/partition) to exercise resilience.</summary>
     Task<Result<ChaosOutcome>> ApplyChaosAsync(
         ChaosScenario scenario,
         CancellationToken cancellationToken);
 
+    /// <summary>Reads or mutates the cluster's access-control state per <paramref name="operation"/>.</summary>
     Task<Result<AclSnapshot>> AclAsync(
         AclOperation operation,
         CancellationToken cancellationToken);

@@ -5,8 +5,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Cluster;
 
+/// <summary>Implements <c>scale-up &lt;vm&gt;</c>: vertically resizes a VM's CPU/RAM/disk (power off, edit .vmx, restart). Stateful; guarded by <c>--yes</c>.</summary>
 public sealed class ClusterScaleUpCommand : AsyncCommand<ClusterScaleUpSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         ClusterScaleUpSettings settings,

@@ -4,8 +4,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Cluster;
 
+/// <summary>Implements <c>cluster-status &lt;cluster&gt;</c>: probes a single data-tier cluster via its adapter and renders its role/health topology.</summary>
 public sealed class ClusterStatusForClusterCommand : AsyncCommand<ClusterStatusForClusterSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         ClusterStatusForClusterSettings settings,

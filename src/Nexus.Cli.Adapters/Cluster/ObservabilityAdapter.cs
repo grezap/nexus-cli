@@ -90,6 +90,12 @@ public sealed class ObservabilityAdapter : IClusterAdapter
     private string? _grafanaVipHolder;
     private string? _grafanaDbVipHolder;
 
+    /// <summary>
+    /// Constructs the observability adapter over the vms.yaml catalog + SSH client (with the
+    /// operator username/key used for every on-node command) and an OPTIONAL Vault client — Vault
+    /// is only consulted lazily for the Grafana admin password, so status/health/topology work
+    /// without an operator token.
+    /// </summary>
     public ObservabilityAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath, INexusVaultClient? vault)
     {
         _catalog = catalog;
@@ -99,7 +105,9 @@ public sealed class ObservabilityAdapter : IClusterAdapter
         _vault = vault;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+    /// <inheritdoc />
     public string DisplayName => DisplayNameConst;
 
     // === per-role service contract (from the live probe) ===================
@@ -129,6 +137,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
         return "other";
     }
 
+    /// <summary>Resolve the static <see cref="RoleSpec"/> for a role; unknown roles fall back to Prometheus (harmless — such nodes are never probed).</summary>
     private static RoleSpec SpecFor(string role) => role switch
     {
         "prometheus" => PrometheusSpec,
@@ -140,8 +149,10 @@ public sealed class ObservabilityAdapter : IClusterAdapter
         _ => PrometheusSpec
     };
 
+    /// <summary>Build an SSH target (port 22 + operator key) for a node IP.</summary>
     private SshTarget T(string ip) => new(ip, 22, _sshUsername, _sshKeyPath);
 
+    /// <summary>Load + Ordinal-sort the observability cluster's nodes from vms.yaml (stable ordering keeps role selection deterministic).</summary>
     private Result<List<NodeRecord>> Nodes()
     {
         var cluster = _catalog.GetCluster(VmsCluster);
@@ -151,6 +162,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
         return Result.Ok(nodes);
     }
 
+    /// <summary>Filter <paramref name="all"/> to the nodes of a given role, Ordinal-sorted (index 0 = the canonical query node).</summary>
     private static List<NodeRecord> Role(List<NodeRecord> all, string role) =>
         all.Where(n => ClassifyRole(n.Name) == role).OrderBy(n => n.Name, StringComparer.Ordinal).ToList();
 
@@ -175,7 +187,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
         return (code, body.Trim());
     }
 
-    /// <summary>`systemctl is-active <unit>` on a node → true if "active".</summary>
+    /// <summary><c>systemctl is-active &lt;unit&gt;</c> on a node → true if "active".</summary>
     private async Task<bool> IsActiveAsync(string ip, string unit, CancellationToken ct)
     {
         var r = await _ssh.ExecuteAsync(T(ip), $"systemctl is-active {unit} 2>/dev/null", SshTimeout, ct).ConfigureAwait(false);
@@ -194,6 +206,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
     }
 
     // === parsing helpers (internal static for unit tests) ==================
+    /// <summary>Safely read a string property from a JSON element (empty string when absent or non-string).</summary>
     private static string Str(JsonElement e, string name)
         => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
 
@@ -278,6 +291,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
     }
 
     // === lazy KV (Grafana admin password) ==================================
+    /// <summary>Read the Grafana admin password from Vault KV (only the acl verbs need it); fails fast with an actionable hint when no operator token is configured.</summary>
     private async Task<Result<string>> AdminPasswordAsync(CancellationToken ct)
     {
         if (_vault is null)
@@ -287,6 +301,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
     }
 
     // === GetStatusAsync ====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -324,6 +339,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
     }
 
     // === HealthAsync =======================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -411,6 +427,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
         return Result.Ok(new HealthReport(ClusterName, overall, probes, DateTimeOffset.UtcNow));
     }
 
+    /// <summary>Append a Loki/Tempo ring's readiness + memberlist-count probes (index-0 node answers the shared <c>/memberlist</c> query).</summary>
     private async Task RingHealthAsync(List<NodeRecord> ring, RoleSpec spec, string label, List<HealthProbe> probes, CancellationToken ct)
     {
         int ready = 0;
@@ -430,6 +447,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
         }
     }
 
+    /// <summary>Append the Grafana state-DB streaming-replication probe (dynamically discovers which node is primary, then counts streaming standbys on it).</summary>
     private async Task PgReplicationHealthAsync(List<NodeRecord> pgs, List<HealthProbe> probes, CancellationToken ct)
     {
         // Dynamic primary detection (nopreempt VRRP — the primary can be either node).
@@ -453,6 +471,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
             "1 streaming standby"));
     }
 
+    /// <summary>Probe the MinIO S3 backend (Loki/Tempo object store) from a Loki node that already trusts the platform CA.</summary>
     private async Task<HealthProbe> S3ReachableAsync(List<NodeRecord> all, CancellationToken ct)
     {
         // Probe MinIO (the Loki/Tempo object store) health from a loki node, which already
@@ -467,6 +486,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
     }
 
     // === TopologyAsync =====================================================
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -528,6 +548,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
     }
 
     // === FailoverAsync (VRRP cutover for grafana / grafana-db) ==============
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -600,6 +621,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
     }
 
     // === ScaleOut (Loki/Tempo ring add/remove) =============================
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.NodeName))
@@ -636,6 +658,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
             sw.Elapsed, startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -680,12 +703,14 @@ public sealed class ObservabilityAdapter : IClusterAdapter
             sw.Elapsed, startedAt));
     }
 
+    /// <summary>Uniform refusal message for scale requests against a role that is fixed-size (not a runtime-scalable memberlist ring).</summary>
     private static string RingOnlyMessage(string role) =>
         $"{role} is not a runtime-scalable role. Only the Loki + Tempo memberlist rings scale at runtime; "
         + "Prometheus + Grafana HA are FIXED at 2 (both Proms scrape every target; Grafana is active-active behind a VRRP VIP), "
         + "Grafana-PG is a 2-node streaming pair, and OTel Collector is a fixed RR-DNS pair. Growing any of those is a terraform op.";
 
     // === Backup (graceful actionable N/A) ==================================
+    /// <inheritdoc />
     public Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<BackupResult>(
             "backup is graceful N/A for the observability tier — every piece of durable state already lives in a system with its "
@@ -695,12 +720,14 @@ public sealed class ObservabilityAdapter : IClusterAdapter
             + "Prometheus TSDB is intentionally ephemeral (HA = both Proms scrape every target; ADR-0038). Nothing here is "
             + "adapter-ownable to snapshot that isn't already durable or reproducible."));
 
+    /// <inheritdoc />
     public Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<RestoreResult>(
             "restore is graceful N/A — see `backup take` for why nothing is adapter-snapshotted. Recover via the component's own DR "
             + "path: MinIO EC heal, grafana-pg pg_basebackup re-seed (handbook §3.D), or re-apply the provisioned dashboards."));
 
     // === RotateCertAsync (force the node's vault-agent to re-render its leaves) ==
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -780,6 +807,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
     }
 
     // === AclAsync (Grafana users via /api/admin/users) =====================
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -841,6 +869,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
     }
 
     // === ApplyChaosAsync (nexus-chaos.sh on a ring node) ===================
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         if (!KnownChaosScenarios.Contains(scenario.ScenarioType, StringComparer.OrdinalIgnoreCase))
@@ -917,6 +946,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
         return Result.Ok(new ChaosOutcome(scenario.ScenarioType, victim.Name, observed, sw.Elapsed, startedAt, recovered));
     }
 
+    /// <summary>Base64-stream the embedded <c>nexus-chaos.sh</c> helper onto the victim node and mark it executable (idempotent).</summary>
     private async Task<Result<bool>> PushChaosHelperAsync(SshTarget target, CancellationToken cancellationToken)
     {
         var asm = typeof(RedisAdapter).Assembly;
@@ -935,6 +965,7 @@ public sealed class ObservabilityAdapter : IClusterAdapter
     }
 
     // === CanResizeVm =======================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         // Refuse the current VRRP VIP holders (resizing them flaps the front door); everything else is safe.
@@ -944,5 +975,6 @@ public sealed class ObservabilityAdapter : IClusterAdapter
     }
 
     // === helpers ===========================================================
+    /// <summary>Keep only the last <paramref name="n"/> characters of a string (used to trim noisy stderr/stdout in error messages).</summary>
     private static string Tail(string s, int n) => string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= n ? s : s.Substring(s.Length - n));
 }

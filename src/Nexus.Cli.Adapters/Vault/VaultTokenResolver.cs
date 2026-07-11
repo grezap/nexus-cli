@@ -13,8 +13,11 @@ public sealed class VaultTokenResolver : IVaultTokenResolver
 {
     private readonly IEnvironmentReader _env;
 
+    /// <summary>Creates a resolver that reads environment via <paramref name="env"/> (indirection kept so tests can inject a fake environment).</summary>
+    /// <param name="env">Abstraction over process environment-variable reads.</param>
     public VaultTokenResolver(IEnvironmentReader env) => _env = env;
 
+    /// <inheritdoc />
     public Result<VaultContext> Resolve()
     {
         var token = _env.GetVariable("VAULT_TOKEN");
@@ -40,12 +43,18 @@ public sealed class VaultTokenResolver : IVaultTokenResolver
     }
 }
 
+/// <summary>Thin seam over environment-variable reads so token resolution is unit-testable.</summary>
 public interface IEnvironmentReader
 {
+    /// <summary>Returns the value of environment variable <paramref name="name"/>, or <c>null</c> if unset.</summary>
+    /// <param name="name">The environment-variable name.</param>
+    /// <returns>The variable's value, or <c>null</c> when it is not defined.</returns>
     string? GetVariable(string name);
 }
 
+/// <summary>Production <see cref="IEnvironmentReader"/> backed by <see cref="Environment.GetEnvironmentVariable(string)"/>.</summary>
 public sealed class ProcessEnvironmentReader : IEnvironmentReader
 {
+    /// <inheritdoc />
     public string? GetVariable(string name) => Environment.GetEnvironmentVariable(name);
 }

@@ -5,8 +5,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Cluster;
 
+/// <summary>Implements <c>chaos &lt;cluster&gt; &lt;scenario&gt;</c>: injects a fault scenario for a bounded duration and reports whether the cluster recovered. Destructive; guarded by <c>--yes</c>.</summary>
 public sealed class ClusterChaosCommand : AsyncCommand<ClusterChaosSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         ClusterChaosSettings settings,

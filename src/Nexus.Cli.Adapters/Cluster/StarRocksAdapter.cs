@@ -90,6 +90,12 @@ public sealed class StarRocksAdapter : IClusterAdapter
     private string? _operatorPassword;
     private ClusterStatus? _lastStatus;
 
+    /// <summary>
+    /// Creates the adapter over the vms.yaml catalog, an SSH client + credentials for
+    /// on-node <c>mysql</c> dispatch, and an optional operator
+    /// <see cref="INexusVaultClient"/> (the Vault-KV source of the nexus-cluster-admin
+    /// password).
+    /// </summary>
     public StarRocksAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath, INexusVaultClient? vault)
     {
         _catalog = catalog;
@@ -99,7 +105,9 @@ public sealed class StarRocksAdapter : IClusterAdapter
         _vault = vault;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+    /// <inheritdoc />
     public string DisplayName => DisplayNameConst;
 
     // === node helpers ======================================================
@@ -218,6 +226,7 @@ public sealed class StarRocksAdapter : IClusterAdapter
     private static bool IsLeader(FeRow r) => r.Role.Equals("LEADER", StringComparison.OrdinalIgnoreCase);
 
     // === GetStatusAsync ====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var split = Split();
@@ -258,6 +267,7 @@ public sealed class StarRocksAdapter : IClusterAdapter
     }
 
     // === HealthAsync =======================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var split = Split();
@@ -301,6 +311,7 @@ public sealed class StarRocksAdapter : IClusterAdapter
     }
 
     // === TopologyAsync =====================================================
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -313,6 +324,7 @@ public sealed class StarRocksAdapter : IClusterAdapter
     }
 
     // === FailoverAsync (FE leader re-election, RTO measured) ================
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -389,6 +401,7 @@ public sealed class StarRocksAdapter : IClusterAdapter
     }
 
     // === ScaleOutAddAsync / RemoveAsync (BE join/leave) ====================
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -431,6 +444,7 @@ public sealed class StarRocksAdapter : IClusterAdapter
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.NodeName))
@@ -468,6 +482,7 @@ public sealed class StarRocksAdapter : IClusterAdapter
     // === BackupTakeAsync / RestoreAsync (BACKUP/RESTORE SNAPSHOT) ===========
     private static readonly Regex StateRx = new(@"\bState:\s*(\w+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -502,6 +517,7 @@ public sealed class StarRocksAdapter : IClusterAdapter
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.BackupId))
@@ -576,6 +592,7 @@ public sealed class StarRocksAdapter : IClusterAdapter
     private static CertRole RoleDescriptor(NodeRecord n) =>
         IsFe(n) ? new CertRole(FeTlsDir, FeSvc, "starrocks") : new CertRole(BeTlsDir, BeSvc, "starrocks");
 
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var split = Split();
@@ -657,6 +674,7 @@ public sealed class StarRocksAdapter : IClusterAdapter
     }
 
     // === AclAsync ==========================================================
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -718,6 +736,7 @@ public sealed class StarRocksAdapter : IClusterAdapter
     private static string Truncate(string s, int n) => s.Length <= n ? s : s[..n] + "…";
 
     // === ApplyChaosAsync ===================================================
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         if (!KnownChaosScenarios.Contains(scenario.ScenarioType, StringComparer.OrdinalIgnoreCase))
@@ -794,6 +813,7 @@ public sealed class StarRocksAdapter : IClusterAdapter
     }
 
     // === CanResizeVm =======================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null) return false;

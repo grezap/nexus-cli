@@ -5,8 +5,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.KafkaFailover;
 
+/// <summary>Implements <c>kafka failover west-to-east</c>: vmrun-suspends the entire kafka-west cluster to simulate a region loss, proves kafka-east (and its ecosystem clients) keeps serving via a produce/consume round-trip, then vmrun-resumes. Destructive (host-level); guarded by <c>--yes</c>.</summary>
 public sealed class KafkaFailoverWestToEastCommand : AsyncCommand<KafkaFailoverWestToEastSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         KafkaFailoverWestToEastSettings settings,

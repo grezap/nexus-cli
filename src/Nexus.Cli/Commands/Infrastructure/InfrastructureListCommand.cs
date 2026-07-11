@@ -4,8 +4,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Infrastructure;
 
+/// <summary>Implements <c>infra list</c>: enumerates every VM declared in vms.yaml with its live runtime state.</summary>
 public sealed class InfrastructureListCommand : AsyncCommand<InfrastructureListSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         InfrastructureListSettings settings,

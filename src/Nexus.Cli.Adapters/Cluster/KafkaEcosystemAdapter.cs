@@ -50,6 +50,7 @@ public sealed class KafkaEcosystemAdapter : IClusterAdapter
 
     private ClusterStatus? _lastStatus;
 
+    /// <summary>Constructs the adapter over an <see cref="ISshClient"/> transport and the <see cref="IVmsCatalog"/> node inventory.</summary>
     public KafkaEcosystemAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath)
     {
         _catalog = catalog;
@@ -58,12 +59,15 @@ public sealed class KafkaEcosystemAdapter : IClusterAdapter
         _sshKeyPath = sshKeyPath;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+    /// <inheritdoc />
     public string DisplayName => "Kafka ecosystem (Schema Registry, REST, Connect, ksqlDB, MirrorMaker 2)";
 
     /// <summary>Service profile per node, keyed off the hostname prefix.</summary>
     internal sealed record Svc(string Kind, string Unit, int HttpPort, string? HealthPath);
 
+    /// <summary>Maps a node hostname prefix to its <see cref="Svc"/> profile (unit, health port/path); MM2 has no HTTP surface.</summary>
     internal static Svc ServiceFor(string name)
     {
         if (name.StartsWith("schema-registry", StringComparison.OrdinalIgnoreCase))
@@ -82,6 +86,7 @@ public sealed class KafkaEcosystemAdapter : IClusterAdapter
     private SshTarget Ssh(NodeRecord n) => new(n.Vmnet11, 22, _sshUsername, _sshKeyPath);
 
     // === GetStatusAsync =====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -106,6 +111,7 @@ public sealed class KafkaEcosystemAdapter : IClusterAdapter
     }
 
     // === HealthAsync (systemctl + HTTPS health endpoint + MM2 journal) ======
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -144,6 +150,7 @@ public sealed class KafkaEcosystemAdapter : IClusterAdapter
     }
 
     // === TopologyAsync (service groups) =====================================
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -167,6 +174,7 @@ public sealed class KafkaEcosystemAdapter : IClusterAdapter
     }
 
     // === RotateCertAsync (re-issue + rebuild keystores + restart service) ===
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -237,6 +245,7 @@ public sealed class KafkaEcosystemAdapter : IClusterAdapter
     }
 
     // === ApplyChaosAsync (process-kill a service + recover) =================
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         var known = new[] { "network-partition", "packet-loss", "slow-disk", "cpu-starve", "memory-pressure", "process-kill" };
@@ -288,29 +297,36 @@ public sealed class KafkaEcosystemAdapter : IClusterAdapter
     }
 
     // === Deferred (not meaningful at the ecosystem layer) ===================
+    /// <inheritdoc />
     public Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<FailoverResult>(
             "kafka-ecosystem has no leader to fail over. For cross-region Kafka DR use `nexus failover-test cluster kafka` (MirrorMaker 2 east<->west); for a controller-leader move use `failover-test cluster kafka-east|kafka-west`."));
 
+    /// <inheritdoc />
     public Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<ScaleOutResult>(
             "kafka-ecosystem scale-out is an apply-on-demand IaC operation (add a node to vms.yaml + the kafka env and `kafka.ps1 apply`); the SR/Connect/ksqlDB services then HA-join via their group.id/cluster id."));
 
+    /// <inheritdoc />
     public Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<ScaleOutResult>(
             "kafka-ecosystem scale-out remove is managed via the nexus-infra-kafka terraform overlays (per-VM enable toggles)."));
 
+    /// <inheritdoc />
     public Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<BackupResult>(
             "kafka-ecosystem services are stateless clients of the brokers (Schema Registry's _schemas, Connect's config/offset/status, ksqlDB's command topic all live ON the brokers). Back up via `nexus backup take kafka-east <topic>`."));
 
+    /// <inheritdoc />
     public Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<RestoreResult>("see BackupTakeAsync -- ecosystem state lives on the brokers; restore via `nexus backup restore kafka-east <id>`."));
 
+    /// <inheritdoc />
     public Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<AclSnapshot>(
             "Kafka ACLs are enforced on the brokers. Use `nexus acl kafka-east|kafka-west list|grant|revoke ...` (the ecosystem service principals are already in super.users)."));
 
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null) return false;

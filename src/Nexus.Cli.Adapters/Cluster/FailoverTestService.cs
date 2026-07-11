@@ -48,6 +48,10 @@ public sealed class FailoverTestService : IFailoverTestService
     // VM boot after vmrun-suspend / vmrun-resume needs longer than a service restart.
     private static readonly TimeSpan VmRecoveryWaitDeadline = TimeSpan.FromMinutes(3);
 
+    /// <summary>
+    /// Constructs the service over the fleet catalog, SSH + vmrun transports, and the
+    /// HTTP client factory, plus the Consul/Nomad management tokens the pollers use.
+    /// </summary>
     public FailoverTestService(
         IVmsCatalog catalog,
         ISshClient ssh,
@@ -68,6 +72,7 @@ public sealed class FailoverTestService : IFailoverTestService
         _sshKeyPath = sshKeyPath;
     }
 
+    /// <inheritdoc />
     public async Task<Result<FailoverTestReport>> RunConsulLeaderAsync(
         string? targetNode,
         CancellationToken cancellationToken)
@@ -175,9 +180,11 @@ public sealed class FailoverTestService : IFailoverTestService
         return Result.Ok(report);
     }
 
+    /// <summary>Builds a Consul client against a node's TLS API endpoint (:8501) with the mgmt token.</summary>
     private ConsulClient MakeConsul(string ip) =>
         new(new ConsulClient.Settings($"https://{ip}:8501", _consulMgmtToken), _httpFactory);
 
+    /// <summary>Returns the current Consul leader RPC address from the first manager that answers.</summary>
     private async Task<Result<string>> TryGetLeaderAsync(
         IReadOnlyList<NodeRecord> managers,
         CancellationToken cancellationToken)
@@ -192,6 +199,7 @@ public sealed class FailoverTestService : IFailoverTestService
         return Result.Fail<string>("no manager returned a current Consul leader; cluster may already be failing.");
     }
 
+    /// <summary>Maps a raft RPC/leader address (host:port) back to its vms.yaml node name via the VMnet10 IP.</summary>
     private static string? MapToNodeName(string rpcAddr, IEnumerable<NodeRecord> managers)
     {
         var ip = rpcAddr.Split(':')[0];
@@ -200,6 +208,7 @@ public sealed class FailoverTestService : IFailoverTestService
 
     // ===== Nomad failover (v0.3.1) =========================================
 
+    /// <inheritdoc />
     public async Task<Result<FailoverTestReport>> RunNomadLeaderAsync(
         string? targetNode,
         CancellationToken cancellationToken)
@@ -305,9 +314,11 @@ public sealed class FailoverTestService : IFailoverTestService
             timeline));
     }
 
+    /// <summary>Builds a Nomad client against a node's TLS API endpoint (:4646) with the mgmt token.</summary>
     private NomadClient MakeNomad(string ip) =>
         new(new NomadClient.Settings($"https://{ip}:4646", _nomadMgmtToken), _httpFactory);
 
+    /// <summary>Returns the current Nomad leader address from the first manager that answers.</summary>
     private async Task<Result<string>> TryGetNomadLeaderAsync(
         IReadOnlyList<NodeRecord> managers,
         CancellationToken cancellationToken)
@@ -330,6 +341,7 @@ public sealed class FailoverTestService : IFailoverTestService
     // Consul/Nomad). Recovery uses vmrun start nogui. Healthy-wait window is
     // longer because VM cold-boot takes ~30-60s (vs ~1-5s for a service restart).
 
+    /// <inheritdoc />
     public async Task<Result<FailoverTestReport>> RunSwarmManagerAsync(
         string? targetNode,
         CancellationToken cancellationToken)
@@ -437,6 +449,7 @@ public sealed class FailoverTestService : IFailoverTestService
             timeline));
     }
 
+    /// <summary>Probes each manager over SSH+docker until one reports the current Swarm raft leader hostname.</summary>
     private async Task<Result<string>> TryGetSwarmLeaderAsync(
         IReadOnlyList<NodeRecord> managers,
         CancellationToken cancellationToken)
@@ -451,6 +464,11 @@ public sealed class FailoverTestService : IFailoverTestService
         return Result.Fail<string>("no manager returned a current Swarm raft leader; cluster may already be failing.");
     }
 
+    /// <summary>
+    /// Reads the Swarm leader hostname from one node via <c>docker node ls</c> (Swarm raft
+    /// has no HTTP API). Returns an empty string (not a failure) when no node reports Leader
+    /// yet, so callers can keep polling through an in-progress election.
+    /// </summary>
     private async Task<Result<string>> GetSwarmLeaderFromAsync(
         SshTarget target,
         CancellationToken cancellationToken)
@@ -473,6 +491,7 @@ public sealed class FailoverTestService : IFailoverTestService
         return Result.Ok(string.Empty); // no leader yet (election in progress)
     }
 
+    /// <summary>Reads the <c>docker node ls</c> Status column for each manager node (used to confirm all managers are Ready again post-recovery).</summary>
     private async Task<Result<IReadOnlyList<string>>> GetSwarmManagerStatusesAsync(
         SshTarget pollTarget,
         List<NodeRecord> managers,

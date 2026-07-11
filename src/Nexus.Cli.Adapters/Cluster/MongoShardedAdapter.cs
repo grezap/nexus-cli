@@ -107,6 +107,11 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     private string? _keyfile;                 // cached shared keyFile content (the password)
     private ClusterStatus? _lastStatus;       // populated on GetStatusAsync; consulted by CanResizeVm (sync)
 
+    /// <summary>
+    /// Constructs the adapter over a vms.yaml catalog, an SSH transport, the
+    /// lab SSH identity, and an optional Vault client. <paramref name="vault"/>
+    /// may be null; the keyFile-backed verbs then fail with a set-VAULT_* hint.
+    /// </summary>
     public MongoShardedAdapter(
         IVmsCatalog catalog,
         ISshClient ssh,
@@ -121,7 +126,10 @@ public sealed class MongoShardedAdapter : IClusterAdapter
         _vault = vault;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+
+    /// <inheritdoc />
     public string DisplayName => "MongoDB Sharded Cluster";
 
     // === Node classification (deterministic, from the vms.yaml name prefix) ==
@@ -129,6 +137,10 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     //   mongo-cfg-N      -> ("configsvr", "config",  27019)
     //   mongo-shard-K-N  -> ("shardsvr",  "shard-K", 27018)
     //   mongo-mongos-N   -> ("mongos",    "",        27017)
+    /// <summary>
+    /// Derive a node's (role, replica-set name, mongod/mongos port) purely from
+    /// its vms.yaml name prefix -- the catalog carries no structured role/port.
+    /// </summary>
     internal static (string Role, string RsName, int Port) Classify(string nodeName)
     {
         var n = nodeName.ToLowerInvariant();
@@ -147,18 +159,25 @@ public sealed class MongoShardedAdapter : IClusterAdapter
         return ("unknown", "", MongosPort);
     }
 
+    /// <summary>Nodes that classify into the given replica set (config or a data shard).</summary>
     private static List<NodeRecord> NodesForRs(IReadOnlyList<NodeRecord> all, string rsName) =>
         all.Where(n => Classify(n.Name).RsName == rsName).ToList();
 
+    /// <summary>The stateless mongos query-router nodes.</summary>
     private static List<NodeRecord> MongosNodes(IReadOnlyList<NodeRecord> all) =>
         all.Where(n => Classify(n.Name).Role == "mongos").ToList();
 
+    /// <summary>Distinct data-shard RS names (<c>shard-*</c>), ordinally ordered; excludes config + mongos.</summary>
     private static List<string> DataShardRsNames(IReadOnlyList<NodeRecord> all) =>
         all.Select(n => Classify(n.Name).RsName)
            .Where(rs => rs.StartsWith("shard-", StringComparison.Ordinal))
            .Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
 
     // === Credential (Vault KV keyFile content) ==============================
+    /// <summary>
+    /// Fetch (and memoize) the shared keyFile content from Vault KV -- the single
+    /// secret that doubles as both the <c>__system</c> and operator SCRAM password.
+    /// </summary>
     private async Task<Result<string>> GetKeyfileAsync(CancellationToken ct)
     {
         if (!string.IsNullOrEmpty(_keyfile)) return Result.Ok(_keyfile);
@@ -180,11 +199,13 @@ public sealed class MongoShardedAdapter : IClusterAdapter
 
     // __system / local -- the only principal the shard mongods accept; also valid
     // on the config mongods. Used for ALL direct-mongod RS operations.
+    /// <summary>mongosh auth args for the <c>__system</c>/<c>local</c> principal (direct-mongod ops).</summary>
     private static string SysAuth(string pwd) =>
         $"{TlsArgs} --username __system --password '{pwd}' --authenticationDatabase local --authenticationMechanism SCRAM-SHA-256";
 
     // nexus-sharded-admin / admin -- the root user that lives on the config-server
     // RS and is reachable THROUGH mongos. Used for all cluster-level operations.
+    /// <summary>mongosh auth args for the <c>nexus-sharded-admin</c>/<c>admin</c> root user (cluster ops via mongos).</summary>
     private static string OperatorAuth(string pwd) =>
         $"{TlsArgs} --username {OperatorUser} --password '{pwd}' --authenticationDatabase admin";
 
@@ -282,6 +303,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     }
 
     // === GetStatusAsync =====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -326,6 +348,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
         return Result.Ok(status);
     }
 
+    /// <summary>Roll per-RS + router health up to a red/yellow/green cluster verdict.</summary>
     private static string ComputeOverall(IReadOnlyList<ClusterMember> members, IReadOnlyList<string> rsNames)
     {
         if (members.Any(m => m.Status == "failed")) return "red";
@@ -349,6 +372,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     }
 
     // === HealthAsync ========================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -419,6 +443,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     }
 
     // === TopologyAsync (Shards POPULATED -- the sharded showcase) ===========
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -447,6 +472,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     }
 
     // === FailoverAsync (shard-primary rs.stepDown + per-shard re-election) ===
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -530,6 +556,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     }
 
     // === ScaleOutAddAsync (rs.add a member into a shard RS, apply-on-demand) =
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -584,6 +611,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     }
 
     // === ScaleOutRemoveAsync (rs.remove a member from a shard RS) ============
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.NodeName))
@@ -631,6 +659,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     }
 
     // === BackupTakeAsync (mongodump through mongos) =========================
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -674,6 +703,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     }
 
     // === BackupRestoreAsync (mongorestore round-trip into a verify namespace) =
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.BackupId))
@@ -727,6 +757,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     // the 11 nodes: force the node's OWN vault-agent to re-issue a fresh leaf, then
     // reload it ONLINE via MongoDB's rotateCertificates (no restart, no shard
     // re-election). Sequential + evidence-based per node.
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -795,6 +826,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     }
 
     // === AclAsync (config-server admin users, via mongos) ===================
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -837,6 +869,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
         return Result.Fail<AclSnapshot>($"unknown ACL verb '{operation.Verb}'; expected list|describe|grant|revoke");
     }
 
+    /// <summary>Parse the <c>getUsers()</c> JSON projection into <see cref="AclUser"/> rows.</summary>
     private static List<AclUser> ParseUsers(string stdout)
     {
         var users = new List<AclUser>();
@@ -855,6 +888,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     }
 
     // === ApplyChaosAsync (process-kill a shard mongod + RS rejoin) ==========
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         if (!KnownChaosScenarios.Contains(scenario.ScenarioType, StringComparer.OrdinalIgnoreCase))
@@ -906,8 +940,12 @@ public sealed class MongoShardedAdapter : IClusterAdapter
         return Result.Ok(new ChaosOutcome(scenario.ScenarioType, victim.Hostname, observed, sw.Elapsed, startedAt, recovered));
     }
 
+    /// <summary>Base64-stream the embedded <c>nexus-chaos.sh</c> helper onto the target and mark it executable.</summary>
     private async Task<Result<bool>> PushChaosHelperAsync(SshTarget target, CancellationToken cancellationToken)
     {
+        // Read the helper from the assembly's embedded resources (RedisAdapter's
+        // assembly is the anchor -- all adapters share it), normalize CRLF->LF so
+        // it runs under bash, then push it base64-encoded to survive the SSH shell.
         var asm = typeof(RedisAdapter).Assembly;
         var resName = asm.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith("nexus-chaos.sh", StringComparison.Ordinal));
         if (resName is null) return Result.Fail<bool>("embedded nexus-chaos.sh resource not found in the assembly");
@@ -924,6 +962,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     }
 
     // === CanResizeVm ========================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null) return false; // conservative: caller should GetStatusAsync first
@@ -935,6 +974,7 @@ public sealed class MongoShardedAdapter : IClusterAdapter
     }
 
     // === Helpers ============================================================
+    /// <summary>Return the last <paramref name="n"/> characters of <paramref name="s"/> (for compact error tails).</summary>
     private static string Tail(string s, int n)
     {
         if (string.IsNullOrEmpty(s)) return string.Empty;

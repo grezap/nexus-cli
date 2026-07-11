@@ -41,13 +41,21 @@ public sealed class SqlFciAdapter : IClusterAdapter
     private readonly SqlServerControl _c;
     private ClusterStatus? _lastStatus;
 
+    /// <summary>
+    /// Creates the FCI adapter, wrapping a shared <see cref="SqlServerControl"/> over the
+    /// vms.yaml catalog, SSH client + credentials, and an optional operator
+    /// <see cref="INexusVaultClient"/> (the Vault-KV source of the SQL login password).
+    /// </summary>
     public SqlFciAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath, INexusVaultClient? vault)
         => _c = new SqlServerControl(catalog, ssh, sshUsername, sshKeyPath, vault);
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+    /// <inheritdoc />
     public string DisplayName => DisplayNameConst;
 
     // === GetStatusAsync ====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -92,6 +100,7 @@ public sealed class SqlFciAdapter : IClusterAdapter
     }
 
     // === HealthAsync =======================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -155,6 +164,7 @@ public sealed class SqlFciAdapter : IClusterAdapter
     }
 
     // === TopologyAsync =====================================================
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -193,6 +203,7 @@ public sealed class SqlFciAdapter : IClusterAdapter
     }
 
     // === FailoverAsync (Move-ClusterGroup between FCI nodes) ================
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -281,11 +292,13 @@ public sealed class SqlFciAdapter : IClusterAdapter
     }
 
     // === ScaleOut (not tractable for a fixed 2-node FCI) ===================
+    /// <inheritdoc />
     public Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Ok(new ScaleOutResult("add", Array.Empty<string>(), "skipped",
             "An FCI is a fixed 2-node shared-storage instance — you don't add FCI nodes at runtime (that's a setup.exe /ACTION=AddNode rebuild). To grow READ capacity add an AG replica via `nexus scale-out add sqlserver-ag`; to grow the FCI nodes' resources use `nexus scale-up`.",
             TimeSpan.Zero, DateTimeOffset.UtcNow)));
 
+    /// <inheritdoc />
     public Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Ok(new ScaleOutResult("remove", Array.Empty<string>(), "skipped",
             "An FCI is a fixed 2-node shared-storage instance — removing a node would break the failover pair. Use the sqlserver-ag adapter to remove an AG replica instead.",
@@ -294,6 +307,7 @@ public sealed class SqlFciAdapter : IClusterAdapter
     // === Backup (BACKUP/RESTORE DATABASE nexus_demo round-trip) ============
     private const string BackupDir = "S:\\Backups";
 
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -328,6 +342,7 @@ public sealed class SqlFciAdapter : IClusterAdapter
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -373,6 +388,7 @@ public sealed class SqlFciAdapter : IClusterAdapter
     // The FCI checkpoints a SINGLE SuperSocketNetLib\Certificate thumbprint applied
     // to whichever node hosts it — so both nodes must carry the SAME cert. A per-node
     // rotate (different thumbprints) would break failover (live-caught bug, 2026-06-12).
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -436,6 +452,7 @@ public sealed class SqlFciAdapter : IClusterAdapter
     }
 
     // === AclAsync (SQL logins + server-role membership) ====================
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -498,6 +515,7 @@ public sealed class SqlFciAdapter : IClusterAdapter
     }
 
     // === ApplyChaosAsync (process-kill SQL on the active node → WSFC failover) ===
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -549,6 +567,7 @@ public sealed class SqlFciAdapter : IClusterAdapter
     }
 
     // === CanResizeVm =======================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null) return false;

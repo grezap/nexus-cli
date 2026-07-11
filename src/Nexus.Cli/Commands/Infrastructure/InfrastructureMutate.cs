@@ -6,8 +6,21 @@ using Spectre.Console;
 
 namespace Nexus.Cli.Commands.Infrastructure;
 
+/// <summary>
+/// Shared driver for the mutating infrastructure verbs (suspend/resume): previews
+/// the affected VMs, gates the mutation behind confirmation (or <c>--yes</c>),
+/// invokes the supplied service <c>action</c>, and renders the result.
+/// </summary>
 internal static class InfrastructureMutate
 {
+    /// <summary>
+    /// Runs a mutating infrastructure verb end-to-end and returns the process exit
+    /// code (0 all-ok, 1 some op failed, 2 error, 3 aborted).
+    /// </summary>
+    /// <param name="verb">Verb label used in prompts and rendered output (e.g. "suspend").</param>
+    /// <param name="settings">Parsed settings carrying the cluster/node target and flags.</param>
+    /// <param name="action">Service call that performs the mutation for the resolved target.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     public static async Task<int> RunAsync(
         string verb,
         InfrastructureMutationSettingsBase settings,

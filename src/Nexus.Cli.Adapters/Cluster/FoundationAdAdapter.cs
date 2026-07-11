@@ -68,6 +68,10 @@ public sealed class FoundationAdAdapter : IClusterAdapter
     private readonly string _sshKeyPath;
     private ClusterStatus? _lastStatus;
 
+    /// <summary>
+    /// Wires the catalog (for VIP/IP resolution, e.g. vault-1) and the SSH client
+    /// used to shell out to the DCs and the gateway, plus the key-auth identity.
+    /// </summary>
     public FoundationAdAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath)
     {
         _catalog = catalog;
@@ -76,9 +80,13 @@ public sealed class FoundationAdAdapter : IClusterAdapter
         _sshKeyPath = sshKeyPath;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+
+    /// <inheritdoc />
     public string DisplayName => DisplayNameConst;
 
+    /// <summary>SSH target for <paramref name="ip"/> on :22 with the adapter's key identity.</summary>
     private SshTarget T(string ip) => new(ip, 22, _sshUsername, _sshKeyPath);
 
     /// <summary>Run a PowerShell script on a Windows DC via EncodedCommand. Trimmed stdout on exit 0.</summary>
@@ -138,6 +146,7 @@ public sealed class FoundationAdAdapter : IClusterAdapter
     }
 
     // === GetStatusAsync ====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var (dc, alive) = await ReachableDcAsync(cancellationToken).ConfigureAwait(false);
@@ -185,14 +194,18 @@ public sealed class FoundationAdAdapter : IClusterAdapter
         return Result.Ok(status);
     }
 
+    /// <summary>True when the gateway's dnsmasq + nftables units are both active (Linux-SSH).</summary>
     private async Task<bool> GatewayUpAsync(CancellationToken ct)
     {
+        // `; true` keeps the pipeline exit 0 even when a unit is inactive, so we
+        // decide health by counting "active" tokens rather than the shell rc.
         var r = await _ssh.ExecuteAsync(T(GatewayIp),
             "systemctl is-active dnsmasq nftables 2>/dev/null | tr '\\n' ',' ; true", SshTimeout, ct).ConfigureAwait(false);
         return r.IsOk && r.Value!.Stdout.Split(',', StringSplitOptions.RemoveEmptyEntries).Count(s => s.Trim() == "active") >= 2;
     }
 
     // === HealthAsync =======================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var (dc, alive) = await ReachableDcAsync(cancellationToken).ConfigureAwait(false);
@@ -274,6 +287,7 @@ public sealed class FoundationAdAdapter : IClusterAdapter
     }
 
     // === TopologyAsync =====================================================
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -285,6 +299,7 @@ public sealed class FoundationAdAdapter : IClusterAdapter
     }
 
     // === AclAsync (AD users + groups) ======================================
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var (dc, alive) = await ReachableDcAsync(cancellationToken).ConfigureAwait(false);
@@ -394,6 +409,7 @@ public sealed class FoundationAdAdapter : IClusterAdapter
     private static readonly string[] FsmoRoleNames =
         ["PDCEmulator", "RIDMaster", "InfrastructureMaster", "DomainNamingMaster"];
 
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -484,6 +500,7 @@ public sealed class FoundationAdAdapter : IClusterAdapter
             StartedAtUtc: startedAt));
     }
 
+    /// <summary>Map a DC name to its hardcoded reality IP (ADR-0039); falls back to the name itself.</summary>
     private static string DcIp(string name) =>
         Dcs.FirstOrDefault(d => string.Equals(d.Name, name, StringComparison.OrdinalIgnoreCase))?.Ip ?? name;
 
@@ -543,12 +560,14 @@ public sealed class FoundationAdAdapter : IClusterAdapter
 
     // === Graceful, ACTIONABLE N/A for the remaining terraform mutators =======
 
+    /// <inheritdoc />
     public Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<ScaleOutResult>(
             "adding a domain controller is a terraform/Packer operation, not a runtime scale-out: add the VM + the "
             + "role-overlay-dc-nexus-N-promotion.tf overlay in nexus-infra-vmware/terraform/envs/foundation and re-apply "
             + "(Install-ADDSDomainController, ADR-0039). The forest is already HA at 2 DCs."));
 
+    /// <inheritdoc />
     public Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<ScaleOutResult>(
             "removing a domain controller requires graceful demotion (Uninstall-ADDSDomainController) + AD metadata cleanup, "
@@ -566,6 +585,7 @@ public sealed class FoundationAdAdapter : IClusterAdapter
     // DC; restore is the console-only DSRM authoritative-restore path
     // ([[feedback_ntdsutil_dsrm_console_mode_ssh]]) -- BackupRestoreAsync below
     // stays a graceful N/A.
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -635,6 +655,7 @@ public sealed class FoundationAdAdapter : IClusterAdapter
     internal static string Sanitize(string s) =>
         new string(s.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_').ToArray());
 
+    /// <inheritdoc />
     public Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<RestoreResult>(
             "AD authoritative restore (`ntdsutil` DSRM) is a console-only DR procedure (Server 2025 blocks it over SSH, "
@@ -658,6 +679,7 @@ public sealed class FoundationAdAdapter : IClusterAdapter
     private const string LdapsTtl = "2160h";
     private const string Vault1IpFallback = "192.168.70.121";
 
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var startedAt = DateTimeOffset.UtcNow;
@@ -710,6 +732,12 @@ public sealed class FoundationAdAdapter : IClusterAdapter
         return Result.Ok(new CertRotationResult(rotated, sw.Elapsed, startedAt));
     }
 
+    /// <summary>
+    /// Rotate one DC's LDAPS leaf end-to-end: issue+PFX on vault-1, SFTP-upload
+    /// the PFX/intermediate/root, import + chain-verify + restart NTDS in one SSH
+    /// session, then confirm :636 serves the new cert. Returns a per-node result
+    /// carrying the old/new serials or the failure reason (never throws).
+    /// </summary>
     private async Task<CertRotatedNode> RotateOneDcLdapsAsync(DcNode dc, bool isPdc, string vault1, string token, string rootPem, CancellationToken ct)
     {
         var fqdn = $"{dc.Name}.{Domain}";
@@ -811,6 +839,7 @@ public sealed class FoundationAdAdapter : IClusterAdapter
         return Result.Fail<string>("no handshake after 8 tries");
     }
 
+    /// <summary>Read the first PEM cert block from <c>VAULT_CACERT</c> (installed into each DC's Root store).</summary>
     private static Result<string> ReadRootPem()
     {
         var path = Environment.GetEnvironmentVariable("VAULT_CACERT");
@@ -825,6 +854,7 @@ public sealed class FoundationAdAdapter : IClusterAdapter
         catch (Exception ex) { return Result.Fail<string>($"failed to read VAULT_CACERT: {ex.Message}"); }
     }
 
+    /// <summary>vault-1's VMnet11 IP from the catalog, or <see cref="Vault1IpFallback"/> if absent.</summary>
     private string ResolveVault1Ip()
     {
         var loaded = _catalog.Load();
@@ -837,6 +867,7 @@ public sealed class FoundationAdAdapter : IClusterAdapter
         return Vault1IpFallback;
     }
 
+    /// <summary>Cryptographically-random alphanumeric token of length <paramref name="n"/> (the transient PFX password).</summary>
     private static string RandomToken(int n)
     {
         const string cs = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -911,6 +942,7 @@ try {
     // [ADR-0009]). The verb would therefore strand the very DC it "tests". The
     // 2-DC HA property it would demonstrate is already validated out-of-band by
     // smoke-0.M (host-level kill of a DC → auth + DNS continue on the survivor).
+    /// <inheritdoc />
     public Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<ChaosOutcome>(
             "chaos on a domain controller is a genuine N/A for this SSH-managed adapter: a meaningful DC chaos stops "
@@ -920,6 +952,7 @@ try {
             + "smoke-0.M (host-level kill of a DC → auth + DNS continue on the survivor)."));
 
     // === CanResizeVm =======================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null) return false;
@@ -929,5 +962,6 @@ try {
         return member.Role == "dc";
     }
 
+    /// <summary>Last <paramref name="n"/> chars of <paramref name="s"/> — trims chatty remote stderr for error messages.</summary>
     private static string Tail(string s, int n) => string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= n ? s : s.Substring(s.Length - n));
 }

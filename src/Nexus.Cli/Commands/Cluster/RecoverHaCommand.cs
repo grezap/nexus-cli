@@ -16,6 +16,7 @@ namespace Nexus.Cli.Commands.Cluster;
 /// </summary>
 public sealed class RecoverHaCommand : AsyncCommand<ClusterRecoverHaSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         ClusterRecoverHaSettings settings,

@@ -8,13 +8,26 @@ using Nexus.Cli.Core.Models;
 
 namespace Nexus.Cli.Adapters.Consul;
 
+/// <summary>
+/// CA-pinned HTTP <see cref="INexusConsulClient"/> for the Swarm-tier Consul
+/// agent. Probes <c>/v1/agent/members</c> + <c>/v1/status/leader</c> with the
+/// mgmt token in the <c>X-Consul-Token</c> header, translates Serf status codes
+/// to text, and reports an aggregate alive/failed roll-up. Talks HTTP from the
+/// build host (no consul binary linked) via a <see cref="NexusHttpClientFactory"/>.
+/// </summary>
 public sealed class ConsulClient : INexusConsulClient, IDisposable
 {
+    /// <summary>Connection settings for the Consul HTTP API.</summary>
+    /// <param name="BaseAddress">Base URL of the Consul agent (e.g. <c>https://host:8501</c>).</param>
+    /// <param name="MgmtToken">Consul management/bootstrap ACL token sent in <c>X-Consul-Token</c>.</param>
     public sealed record Settings(string BaseAddress, string MgmtToken);
 
     private readonly Settings _settings;
     private readonly HttpClient _http;
 
+    /// <summary>Creates a client bound to <paramref name="settings"/>, minting a CA-pinned <see cref="HttpClient"/> from <paramref name="httpFactory"/> and pre-seeding the ACL-token header.</summary>
+    /// <param name="settings">Base address + mgmt token for the target Consul agent.</param>
+    /// <param name="httpFactory">Factory that produces the CA-bundle-pinned HTTP client.</param>
     public ConsulClient(Settings settings, NexusHttpClientFactory httpFactory)
     {
         _settings = settings;
@@ -22,6 +35,7 @@ public sealed class ConsulClient : INexusConsulClient, IDisposable
         _http.DefaultRequestHeaders.Add("X-Consul-Token", _settings.MgmtToken);
     }
 
+    /// <inheritdoc />
     public async Task<Result<ConsulHealth>> GetHealthAsync(CancellationToken cancellationToken)
     {
         // /v1/agent/self under deny-mode returns 403 if the token is bad — robust auth probe.
@@ -80,6 +94,7 @@ public sealed class ConsulClient : INexusConsulClient, IDisposable
         }
     }
 
+    // Maps Serf's numeric member-status enum (as returned by /v1/agent/members) to text.
     private static string TranslateStatus(int s) => s switch
     {
         0 => "none",
@@ -90,5 +105,6 @@ public sealed class ConsulClient : INexusConsulClient, IDisposable
         _ => $"unknown({s})"
     };
 
+    /// <inheritdoc />
     public void Dispose() => _http.Dispose();
 }

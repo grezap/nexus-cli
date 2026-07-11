@@ -4,8 +4,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Cluster;
 
+/// <summary>Implements <c>topology &lt;cluster&gt;</c>: snapshots a cluster's membership/roles, optionally re-polling in a <c>--watch</c> loop.</summary>
 public sealed class ClusterTopologyCommand : AsyncCommand<ClusterTopologySettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         ClusterTopologySettings settings,

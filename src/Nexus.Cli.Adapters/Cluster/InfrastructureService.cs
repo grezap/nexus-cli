@@ -16,12 +16,14 @@ public sealed class InfrastructureService : IInfrastructureService
     private readonly IVmsCatalog _catalog;
     private readonly IVmrunClient _vmrun;
 
+    /// <summary>Constructs the service over the fleet catalog and the vmrun client.</summary>
     public InfrastructureService(IVmsCatalog catalog, IVmrunClient vmrun)
     {
         _catalog = catalog;
         _vmrun = vmrun;
     }
 
+    /// <inheritdoc />
     public async Task<Result<IReadOnlyList<VmStatus>>> ListAsync(CancellationToken cancellationToken)
     {
         var loaded = _catalog.Load();
@@ -39,6 +41,7 @@ public sealed class InfrastructureService : IInfrastructureService
         return Result.Ok<IReadOnlyList<VmStatus>>(rows);
     }
 
+    /// <inheritdoc />
     public async Task<Result<IReadOnlyList<VmStatus>>> StatusAsync(
         string clusterName,
         string? nodeName,
@@ -65,6 +68,7 @@ public sealed class InfrastructureService : IInfrastructureService
         return Result.Ok<IReadOnlyList<VmStatus>>(rows);
     }
 
+    /// <inheritdoc />
     public async Task<Result<IReadOnlyList<OpResult>>> SuspendAsync(
         string clusterName,
         string? nodeName,
@@ -103,6 +107,7 @@ public sealed class InfrastructureService : IInfrastructureService
         return Result.Ok<IReadOnlyList<OpResult>>(ops);
     }
 
+    /// <inheritdoc />
     public async Task<Result<IReadOnlyList<OpResult>>> ResumeAsync(
         string clusterName,
         string? nodeName,
@@ -139,6 +144,11 @@ public sealed class InfrastructureService : IInfrastructureService
         return Result.Ok<IReadOnlyList<OpResult>>(ops);
     }
 
+    /// <summary>
+    /// Resolves the set of running .vmx paths from vmrun. Returns null when vmrun is
+    /// unavailable (so state classifies as Unknown), or an empty set when the list
+    /// call fails (treat every VM as not-running rather than erroring the whole verb).
+    /// </summary>
     private async Task<IReadOnlySet<string>?> ResolveRunningSetAsync(CancellationToken cancellationToken)
     {
         if (!_vmrun.IsAvailable)
@@ -160,6 +170,11 @@ public sealed class InfrastructureService : IInfrastructureService
         return new VmStatus(clusterName, node, state, vmx);
     }
 
+    /// <summary>
+    /// Pure state-inference rules, ordered by precedence: no vmrun =&gt; Unknown; no .vmx
+    /// on disk =&gt; Missing (planned but not deployed); in the running set =&gt; Running; a
+    /// <c>.vmss</c> suspend sidecar present =&gt; Suspended; otherwise Stopped.
+    /// </summary>
     internal static VmRuntimeState ClassifyState(bool vmrunAvailable, bool vmxExists, bool hasSuspendedSidecar, bool inRunningSet)
     {
         if (!vmrunAvailable)

@@ -4,8 +4,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Infrastructure;
 
+/// <summary>Implements <c>infra status &lt;cluster&gt;</c>: reports the runtime state of a cluster's VMs (optionally a single node).</summary>
 public sealed class InfrastructureStatusCommand : AsyncCommand<InfrastructureStatusSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         InfrastructureStatusSettings settings,

@@ -16,16 +16,26 @@ namespace Nexus.Cli.Infrastructure;
 /// </summary>
 public sealed class FailoverTestBootstrapper : IDisposable
 {
+    /// <summary>Environment variable that overrides the SSH login user.</summary>
     public const string SshUserEnvVar = "NEXUS_SSH_USER";
+
+    /// <summary>SSH user assumed when <see cref="SshUserEnvVar"/> is unset.</summary>
     public const string DefaultSshUser = "nexusadmin";
 
     private readonly IVaultTokenResolver _tokenResolver;
     private NexusHttpClientFactory? _httpFactory;
     private VaultClient? _vault;
 
+    /// <summary>Creates the bootstrapper with the resolver used to obtain the Vault token/context.</summary>
+    /// <param name="tokenResolver">Resolves <c>VAULT_ADDR</c>/<c>VAULT_TOKEN</c>/<c>VAULT_CACERT</c> into a client context.</param>
     public FailoverTestBootstrapper(IVaultTokenResolver tokenResolver)
         => _tokenResolver = tokenResolver;
 
+    /// <summary>
+    /// Resolves the Vault context, reads the Consul + Nomad management tokens from KV, and wires
+    /// the catalog + SSH + vmrun clients into a ready <see cref="IFailoverTestService"/>.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the Vault KV reads.</param>
     public async Task<IFailoverTestService> BuildAsync(CancellationToken cancellationToken)
     {
         var ctx = _tokenResolver.Resolve();
@@ -71,6 +81,7 @@ public sealed class FailoverTestBootstrapper : IDisposable
             sshKey);
     }
 
+    /// <inheritdoc />
     public void Dispose()
     {
         _vault?.Dispose();

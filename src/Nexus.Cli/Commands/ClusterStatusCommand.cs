@@ -8,23 +8,33 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands;
 
+/// <summary>Settings for the top-level <c>cluster-status</c> verb (Swarm/Nomad/Portainer control-plane snapshot).</summary>
 public sealed class ClusterStatusSettings : CommandSettings
 {
+    /// <summary>Emit JSON to stdout instead of the human table view.</summary>
     [CommandOption("--json")]
     [Description("Emit JSON to stdout instead of the human table view.")]
     public bool Json { get; set; }
 
+    /// <summary>Include per-component HTTP timing in the human view.</summary>
     [CommandOption("-v|--verbose")]
     [Description("Include per-component HTTP timing in the human view.")]
     public bool Verbose { get; set; }
 
+    /// <summary>Disable ANSI color in the human view.</summary>
     [CommandOption("--no-color")]
     [Description("Disable ANSI color in the human view.")]
     public bool NoColor { get; set; }
 }
 
+/// <summary>
+/// Implements the top-level <c>cluster-status</c> verb: probes the Swarm control
+/// plane (Consul members, Nomad servers/clients, Portainer) and renders an
+/// aggregate health snapshot as a human table or JSON.
+/// </summary>
 public sealed class ClusterStatusCommand : AsyncCommand<ClusterStatusSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         ClusterStatusSettings settings,

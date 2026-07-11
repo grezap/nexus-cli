@@ -5,8 +5,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Demo;
 
+/// <summary>Implements <c>demo record &lt;demo-id&gt;</c>: writes a VHS .tape for a demo and renders it to a GIF when <c>vhs</c> is available.</summary>
 public sealed class DemoRecordCommand : AsyncCommand<DemoRecordSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         DemoRecordSettings settings,

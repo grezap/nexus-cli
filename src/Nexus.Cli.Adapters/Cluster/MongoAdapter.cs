@@ -92,6 +92,18 @@ public sealed class MongoAdapter : IClusterAdapter
     // Cached topology -- populated on GetStatusAsync; consulted by CanResizeVm (sync).
     private ClusterStatus? _lastStatus;
 
+    /// <summary>
+    /// Constructs the adapter over an SSH client (all engine ops shell out to
+    /// on-node <c>mongosh</c>/<c>mongodump</c>) and an optional
+    /// <see cref="INexusVaultClient"/>. <paramref name="vault"/> may be null
+    /// (VAULT_* env unset); verbs that need the operator password then fail with
+    /// an actionable message rather than throwing.
+    /// </summary>
+    /// <param name="catalog">Source of the mongo cluster's node records (from <c>vms.yaml</c>).</param>
+    /// <param name="ssh">Transport used to run native CLIs on the target node.</param>
+    /// <param name="sshUsername">SSH login (nexusadmin) for every node connection.</param>
+    /// <param name="sshKeyPath">Path to the private key authenticating the SSH login.</param>
+    /// <param name="vault">Vault client used to fetch the operator password; null when VAULT_* is unset.</param>
     public MongoAdapter(
         IVmsCatalog catalog,
         ISshClient ssh,
@@ -106,7 +118,10 @@ public sealed class MongoAdapter : IClusterAdapter
         _vault = vault;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+
+    /// <inheritdoc />
     public string DisplayName => "MongoDB Replica Set";
 
     // === Operator password (Vault KV) ======================================
@@ -158,6 +173,8 @@ public sealed class MongoAdapter : IClusterAdapter
     }
 
     // === GetStatusAsync ====================================================
+
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -253,6 +270,8 @@ public sealed class MongoAdapter : IClusterAdapter
     }
 
     // === HealthAsync =======================================================
+
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -303,6 +322,8 @@ public sealed class MongoAdapter : IClusterAdapter
     }
 
     // === TopologyAsync =====================================================
+
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -317,6 +338,8 @@ public sealed class MongoAdapter : IClusterAdapter
     }
 
     // === FailoverAsync (rs.stepDown on the PRIMARY) ========================
+
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -386,6 +409,8 @@ public sealed class MongoAdapter : IClusterAdapter
     }
 
     // === ScaleOutAddAsync (rs.add, apply-on-demand) ========================
+
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -434,6 +459,8 @@ public sealed class MongoAdapter : IClusterAdapter
     }
 
     // === ScaleOutRemoveAsync (rs.remove, primary-guard) ====================
+
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.NodeName))
@@ -493,6 +520,8 @@ public sealed class MongoAdapter : IClusterAdapter
     }
 
     // === BackupTakeAsync (mongodump --archive --gzip from a SECONDARY) =====
+
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -550,6 +579,8 @@ public sealed class MongoAdapter : IClusterAdapter
     }
 
     // === BackupRestoreAsync (mongorestore round-trip into a verify namespace) ==
+
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.BackupId))
@@ -609,6 +640,8 @@ public sealed class MongoAdapter : IClusterAdapter
     }
 
     // === RotateCertAsync (genuine re-issue via node's own Vault token) ======
+
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -688,6 +721,8 @@ public sealed class MongoAdapter : IClusterAdapter
     }
 
     // === AclAsync (db.getUsers list/describe; createUser/grantRoles grant) ==
+
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -730,6 +765,7 @@ public sealed class MongoAdapter : IClusterAdapter
         return Result.Fail<AclSnapshot>($"unknown ACL verb '{operation.Verb}'; expected list|describe|grant|revoke");
     }
 
+    /// <summary>Parse the JSON projection of <c>db.getUsers()</c> into <see cref="AclUser"/> records (role rendered <c>role@db</c>).</summary>
     private static List<AclUser> ParseUsers(string stdout)
     {
         var users = new List<AclUser>();
@@ -748,6 +784,8 @@ public sealed class MongoAdapter : IClusterAdapter
     }
 
     // === ApplyChaosAsync (embedded nexus-chaos.sh; process-kill nexus-mongo) =
+
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         if (!KnownChaosScenarios.Contains(scenario.ScenarioType, StringComparer.OrdinalIgnoreCase))
@@ -823,6 +861,8 @@ public sealed class MongoAdapter : IClusterAdapter
     }
 
     // === CanResizeVm =======================================================
+
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null) return false; // conservative: caller should GetStatusAsync first

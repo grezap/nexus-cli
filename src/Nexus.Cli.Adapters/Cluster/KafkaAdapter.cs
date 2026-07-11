@@ -24,6 +24,11 @@ public sealed class KafkaAdapter : IClusterAdapter
     private readonly IClusterAdapter _east;
     private readonly IClusterAdapter _west;
 
+    /// <summary>
+    /// Constructs the meta-cluster over the region-level DR service and the two
+    /// per-region <see cref="KafkaClusterAdapter"/> instances (<paramref name="east"/> /
+    /// <paramref name="west"/>) that every non-failover verb delegates to.
+    /// </summary>
     public KafkaAdapter(IKafkaFailoverService kafkaFailover, IClusterAdapter east, IClusterAdapter west)
     {
         _kafkaFailover = kafkaFailover;
@@ -31,11 +36,14 @@ public sealed class KafkaAdapter : IClusterAdapter
         _west = west;
     }
 
+    /// <inheritdoc />
     public string ClusterId => "kafka";
+    /// <inheritdoc />
     public string DisplayName => "Apache Kafka cross-region DR (kafka-east + kafka-west, MirrorMaker 2)";
 
     private (IClusterAdapter Adapter, string Tag)[] Regions => [(_east, "east"), (_west, "west")];
 
+    /// <summary>Returns the worse (more severe) of two health colors (green &lt; yellow &lt; red).</summary>
     // green < yellow < red — the merged health is the worst of the two regions.
     internal static string WorseOf(string a, string b)
     {
@@ -44,6 +52,7 @@ public sealed class KafkaAdapter : IClusterAdapter
     }
 
     // === GetStatusAsync (merge both regions) ===============================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var e = await _east.GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -61,6 +70,7 @@ public sealed class KafkaAdapter : IClusterAdapter
     }
 
     // === FailoverAsync (region-level MM2 DR; unchanged) ====================
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var direction = ParseDirection(request.Direction);
@@ -89,9 +99,11 @@ public sealed class KafkaAdapter : IClusterAdapter
     }
 
     // === Scale-out (route to the per-region ClusterId) =====================
+    /// <inheritdoc />
     public Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<ScaleOutResult>(ScaleOutRoutingMessage));
 
+    /// <inheritdoc />
     public Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<ScaleOutResult>(ScaleOutRoutingMessage));
 
@@ -102,6 +114,7 @@ public sealed class KafkaAdapter : IClusterAdapter
         + "terraform in nexus-infra-kafka (the KRaft quorum size is fixed at format time; ADR-0010).";
 
     // === HealthAsync (merge both regions; probe names region-prefixed) =====
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var e = await _east.HealthAsync(cancellationToken).ConfigureAwait(false);
@@ -122,6 +135,7 @@ public sealed class KafkaAdapter : IClusterAdapter
     }
 
     // === TopologyAsync (merge both regions) ================================
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var e = await _east.TopologyAsync(cancellationToken).ConfigureAwait(false);
@@ -137,6 +151,7 @@ public sealed class KafkaAdapter : IClusterAdapter
     }
 
     // === Backup (take/restore on BOTH regions; combined id) ================
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var startedAt = DateTimeOffset.UtcNow;
@@ -156,6 +171,7 @@ public sealed class KafkaAdapter : IClusterAdapter
             startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         var (eId, wId) = SplitBackupId(request.BackupId);
@@ -189,6 +205,7 @@ public sealed class KafkaAdapter : IClusterAdapter
     }
 
     // === RotateCertAsync (rotate both regions; merge nodes) ================
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var startedAt = DateTimeOffset.UtcNow;
@@ -208,6 +225,7 @@ public sealed class KafkaAdapter : IClusterAdapter
     }
 
     // === ApplyChaosAsync (delegate to the region owning the target) ========
+    /// <inheritdoc />
     public Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         var target = scenario.Target ?? "";
@@ -220,6 +238,7 @@ public sealed class KafkaAdapter : IClusterAdapter
     }
 
     // === AclAsync (apply to BOTH regions; merge) ===========================
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var e = await _east.AclAsync(operation, cancellationToken).ConfigureAwait(false);
@@ -237,6 +256,7 @@ public sealed class KafkaAdapter : IClusterAdapter
     }
 
     // === CanResizeVm (delegate to the region owning the VM) ================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (vmName.Contains("west", StringComparison.OrdinalIgnoreCase)) return _west.CanResizeVm(vmName, role);
@@ -244,6 +264,7 @@ public sealed class KafkaAdapter : IClusterAdapter
         return false;
     }
 
+    /// <summary>Parses the <c>--direction</c> flag (east-to-west / west-to-east + aliases) to a <see cref="KafkaFailoverDirection"/>; null if unrecognized.</summary>
     private static KafkaFailoverDirection? ParseDirection(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return null;

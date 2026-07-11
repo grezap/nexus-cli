@@ -42,25 +42,40 @@ namespace Nexus.Cli.Adapters.Cluster;
 internal sealed class SqlServerControl
 {
     // === vms.yaml + contract constants (live, probed 2026-06-12) ============
+    /// <summary>vms.yaml cluster name holding both the FCI pair and the AG replicas.</summary>
     public const string VmsCluster = "sqlserver";
+    /// <summary>The dedicated Vault-KV SQL operator login used for all T-SQL against the FCI/Listener.</summary>
     public const string OperatorUser = "nexus-cluster-admin";
+    /// <summary>The FCI virtual SQL server name (the AG primary), reachable at .16.</summary>
     public const string FciVirtualServer = "sqlfci";          // FCI virtual SQL name @ .16
+    /// <summary>The Always On AG Listener short name (the client front door).</summary>
     public const string ListenerName = "sql-ag-listener";     // AG Listener short name
+    /// <summary>The AG Listener FQDN, reachable at .17:1433.</summary>
     public const string ListenerFqdn = "sql-ag-listener.nexus.lab"; // @ .17:1433
+    /// <summary>The Always On Availability Group name.</summary>
     public const string AgName = "nexus-ag";
+    /// <summary>The demo database replicated by the AG (and backed up/restored by the verbs).</summary>
     public const string AgDb = "nexus_demo";
+    /// <summary>The Windows Server Failover Cluster (CNO) name.</summary>
     public const string WsfcCluster = "sql-fci-cluster";
+    /// <summary>The WSFC cluster group (role) that owns the FCI instance.</summary>
     public const string SqlServerGroup = "SQL Server (MSSQLSERVER)"; // the FCI cluster role
+    /// <summary>The Windows service name of the SQL Server engine.</summary>
     public const string SqlServiceName = "MSSQLSERVER";
+    /// <summary>Vault PKI intermediate mount that issues the SQL Server leaf certs.</summary>
     public const string PkiMount = "pki_int";
+    /// <summary>Vault PKI role used to issue SQL Server server certs.</summary>
     public const string PkiRole = "sqlserver-server";
 
     private const string VaultMount = "nexus";
     private const string OperatorPwdPath = "oltp/sqlserver/operator-password";
     private const string PwdField = "password";
 
+    /// <summary>Default timeout for a Windows-over-SSH PowerShell command.</summary>
     public static readonly TimeSpan SshTimeout = TimeSpan.FromSeconds(60);
+    /// <summary>Default timeout for a sqlcmd T-SQL round-trip.</summary>
     public static readonly TimeSpan SqlTimeout = TimeSpan.FromSeconds(90);
+    /// <summary>Poll interval used while waiting for cluster/AG state transitions.</summary>
     public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
     private readonly IVmsCatalog _catalog;
@@ -70,6 +85,11 @@ internal sealed class SqlServerControl
     private readonly INexusVaultClient? _vault;
     private string? _operatorPassword;
 
+    /// <summary>
+    /// Creates the control plane over the vms.yaml catalog, an SSH client + credentials
+    /// (the Windows-SSH transport), and an optional operator <see cref="INexusVaultClient"/>
+    /// (the Vault-KV source of the SQL operator password + the PKI issuer for cert-rotate).
+    /// </summary>
     public SqlServerControl(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath, INexusVaultClient? vault)
     {
         _catalog = catalog;
@@ -79,10 +99,13 @@ internal sealed class SqlServerControl
         _vault = vault;
     }
 
+    /// <summary>The optional operator Vault client (null when the operator token is not set).</summary>
     public INexusVaultClient? Vault => _vault;
 
     // === node discovery ====================================================
+    /// <summary>True if the node is an FCI node (sql-fci*).</summary>
     public static bool IsFci(NodeRecord n) => n.Name.StartsWith("sql-fci", StringComparison.OrdinalIgnoreCase);
+    /// <summary>True if the node is a standalone AG replica (sql-ag-rep*).</summary>
     public static bool IsRep(NodeRecord n) => n.Name.StartsWith("sql-ag-rep", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Split vms.yaml cluster `sqlserver` into FCI pair + AG replica pair.</summary>
@@ -96,12 +119,14 @@ internal sealed class SqlServerControl
         return Result.Ok(((IReadOnlyList<NodeRecord>)fci, (IReadOnlyList<NodeRecord>)rep));
     }
 
+    /// <summary>All sqlserver-cluster nodes (FCI pair + AG replicas), or empty if discovery fails.</summary>
     public IReadOnlyList<NodeRecord> AllNodes()
     {
         var s = Split();
         return s.IsOk ? s.Value.Fci.Concat(s.Value.Rep).ToList() : Array.Empty<NodeRecord>();
     }
 
+    /// <summary>Look up a cluster node by name (case-insensitive), or null if not found.</summary>
     public NodeRecord? NodeByName(string name)
     {
         var s = Split();
@@ -109,9 +134,11 @@ internal sealed class SqlServerControl
         return s.Value.Fci.Concat(s.Value.Rep).FirstOrDefault(n => string.Equals(n.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>Build an SSH target (port 22, adapter credentials) for a node IP.</summary>
     public SshTarget T(string ip) => new(ip, 22, _sshUsername, _sshKeyPath);
 
     // === operator password =================================================
+    /// <summary>Lazily fetch (and cache) the nexus-cluster-admin password from Vault KV.</summary>
     public async Task<Result<string>> OperatorPwdAsync(CancellationToken ct)
     {
         if (!string.IsNullOrEmpty(_operatorPassword)) return Result.Ok(_operatorPassword);
@@ -219,12 +246,14 @@ internal sealed class SqlServerControl
         return Result.Ok((p[0].Trim(), p[1].Trim()));
     }
 
+    /// <summary>True if <paramref name="nodeName"/> reports WSFC state Up (probed from <paramref name="ip"/>).</summary>
     public async Task<bool> NodeStateUpAsync(string ip, string nodeName, CancellationToken ct)
     {
         var nodes = await ClusterNodesAsync(ip, ct).ConfigureAwait(false);
         return nodes.IsOk && nodes.Value!.TryGetValue(nodeName, out var st) && st.Equals("Up", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>True if the named Windows service is Running on the node.</summary>
     public async Task<bool> ServiceRunningAsync(string ip, string svc, CancellationToken ct)
     {
         var r = await WinPsAsync(ip, $"Write-Output (Get-Service {svc} -EA SilentlyContinue).Status", ct).ConfigureAwait(false);
@@ -232,8 +261,11 @@ internal sealed class SqlServerControl
     }
 
     // === string helpers ====================================================
+    /// <summary>Last <paramref name="n"/> chars of a string (for trimming long stderr into error messages).</summary>
     public static string Tail(string s, int n) => string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= n ? s : s.Substring(s.Length - n));
+    /// <summary>Truncate a string to <paramref name="n"/> chars with an ellipsis.</summary>
     public static string Truncate(string s, int n) => s.Length <= n ? s : s[..n] + "…";
+    /// <summary>UTF-8 base64-encode a string (for shipping payloads through the SSH transport).</summary>
     public static string B64(string s) => Convert.ToBase64String(Encoding.UTF8.GetBytes(s));
 
     /// <summary>Parse pipe-delimited tuple rows (sqlcmd -h -1 -W with a|b|c SELECT).</summary>

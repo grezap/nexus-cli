@@ -147,6 +147,12 @@ public sealed class VitessAdapter : IClusterAdapter
     private string? _dbaPwd;
     private ClusterStatus? _lastStatus;
 
+    /// <summary>
+    /// Creates the adapter over the vms.yaml catalog, an SSH client + credentials for
+    /// on-node <c>vtctldclient</c>/<c>mysql</c> dispatch, and an optional operator
+    /// <see cref="INexusVaultClient"/> (the Vault-KV source of the vtgate <c>nexus</c> +
+    /// <c>vt_dba</c> passwords; the gRPC control plane needs no password, mTLS only).
+    /// </summary>
     public VitessAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath, INexusVaultClient? vault)
     {
         _catalog = catalog;
@@ -156,7 +162,9 @@ public sealed class VitessAdapter : IClusterAdapter
         _vault = vault;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+    /// <inheritdoc />
     public string DisplayName => DisplayNameConst;
 
     // === Node classification (deterministic, from the vms.yaml name) =========
@@ -334,6 +342,7 @@ public sealed class VitessAdapter : IClusterAdapter
     }
 
     // === GetStatusAsync =====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -416,6 +425,7 @@ public sealed class VitessAdapter : IClusterAdapter
     }
 
     // === HealthAsync ========================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -502,6 +512,7 @@ public sealed class VitessAdapter : IClusterAdapter
     }
 
     // === TopologyAsync (Shards POPULATED -- the sharded showcase) ===========
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -542,6 +553,7 @@ public sealed class VitessAdapter : IClusterAdapter
     };
 
     // === FailoverAsync (graceful PlannedReparentShard to a healthy replica) ==
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -634,6 +646,7 @@ public sealed class VitessAdapter : IClusterAdapter
     }
 
     // === ScaleOutAddAsync (re-join a removed tablet to its shard) ============
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -692,6 +705,7 @@ public sealed class VitessAdapter : IClusterAdapter
     }
 
     // === ScaleOutRemoveAsync (DeleteTablets + stop services) ================
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.NodeName))
@@ -748,6 +762,7 @@ public sealed class VitessAdapter : IClusterAdapter
     // REPLICA in each shard and streams a compressed xtrabackup image (backup
     // .xbstream.gz + MANIFEST) into the repo -- the PRIMARY is never touched and
     // serving is uninterrupted. This replaces the pre-0.O.1 logical mysqldump.
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -795,6 +810,7 @@ public sealed class VitessAdapter : IClusterAdapter
     // rows. --at <YYYY-mm-DD.HHMMSS> (RestoreRequest.AtTimestamp) selects a
     // specific backup; omit for the latest. (The command layer also gates the
     // destructive form behind an interactive/--yes confirmation.)
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.BackupId))
@@ -928,6 +944,7 @@ public sealed class VitessAdapter : IClusterAdapter
     }
 
     // === RotateCertAsync (per-node Vault PKI; gRPC + vtgate listener reload) ==
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -1041,6 +1058,7 @@ public sealed class VitessAdapter : IClusterAdapter
     // === AclAsync (vtgate static-auth users in vtgate_creds.json) ===========
     private const string VtgateCreds = "/etc/nexus-vitess/vtgate_creds.json";
 
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -1171,6 +1189,7 @@ public sealed class VitessAdapter : IClusterAdapter
         "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 
     // === ApplyChaosAsync (process-kill a tablet + rejoin) ===================
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         if (!KnownChaosScenarios.Contains(scenario.ScenarioType, StringComparer.OrdinalIgnoreCase))
@@ -1252,6 +1271,7 @@ public sealed class VitessAdapter : IClusterAdapter
     }
 
     // === CanResizeVm ========================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null) return false;

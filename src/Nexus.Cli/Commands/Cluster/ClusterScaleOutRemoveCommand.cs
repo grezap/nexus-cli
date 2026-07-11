@@ -5,8 +5,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Cluster;
 
+/// <summary>Implements <c>scale-out remove &lt;cluster&gt; &lt;node&gt;</c>: drains (or force-removes) a node from a cluster. Destructive; guarded by <c>--yes</c>.</summary>
 public sealed class ClusterScaleOutRemoveCommand : AsyncCommand<ClusterScaleOutRemoveSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         ClusterScaleOutRemoveSettings settings,

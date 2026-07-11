@@ -5,8 +5,10 @@ using Spectre.Console;
 
 namespace Nexus.Cli.Commands.Demo;
 
+/// <summary>Rendering helpers for the demo verbs (human tables via Spectre.Console, JSON via source-gen DTOs).</summary>
 internal static class DemoRender
 {
+    /// <summary>Renders the demo catalog as a human table.</summary>
     public static void EmitListHuman(IEnumerable<DemoSpec> demos)
     {
         var arr = demos.OrderBy(d => d.Id, StringComparer.Ordinal).ToList();
@@ -25,6 +27,7 @@ internal static class DemoRender
         AnsiConsole.Write(t);
     }
 
+    /// <summary>Emits the demo catalog as a JSON array of specs.</summary>
     public static void EmitListJson(IEnumerable<DemoSpec> demos)
     {
         var dtos = demos.Select(d => new DemoSpecJson
@@ -47,6 +50,7 @@ internal static class DemoRender
         Console.WriteLine(sb.ToString());
     }
 
+    /// <summary>Renders a demo-run report (per-step exit/duration and first-failure stderr tail) for humans.</summary>
     public static void EmitRunHuman(DemoRunReport report)
     {
         var (label, color) = report.Status switch
@@ -82,6 +86,7 @@ internal static class DemoRender
         }
     }
 
+    /// <summary>Emits a demo-run report as JSON.</summary>
     public static void EmitRunJson(DemoRunReport r)
     {
         var dto = new DemoRunReportJson
@@ -104,6 +109,7 @@ internal static class DemoRender
         Console.WriteLine(JsonSerializer.Serialize(dto, NexusJsonContext.Default.DemoRunReportJson));
     }
 
+    /// <summary>Renders a demo-record report (tape/output paths and vhs availability) for humans.</summary>
     public static void EmitRecordHuman(DemoRecordReport r)
     {
         var (label, color) = r.VhsAvailable
@@ -121,6 +127,7 @@ internal static class DemoRender
             AnsiConsole.MarkupLine($"  vhs hint       : [yellow]{Markup.Escape(r.VhsUnavailableMessage)}[/]");
     }
 
+    /// <summary>Emits a demo-record report as JSON.</summary>
     public static void EmitRecordJson(DemoRecordReport r)
     {
         var dto = new DemoRecordReportJson

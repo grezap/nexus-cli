@@ -117,6 +117,12 @@ public sealed class CitusAdapter : IClusterAdapter
     private string? _operatorPassword;
     private ClusterStatus? _lastStatus;
 
+    /// <summary>
+    /// Constructs the adapter over an <see cref="ISshClient"/> transport and the
+    /// <see cref="IVmsCatalog"/> node inventory. <paramref name="vault"/> is optional
+    /// -- null degrades operator-authenticated verbs (they surface a Vault-setup hint
+    /// rather than throwing).
+    /// </summary>
     public CitusAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath, INexusVaultClient? vault)
     {
         _catalog = catalog;
@@ -126,7 +132,9 @@ public sealed class CitusAdapter : IClusterAdapter
         _vault = vault;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+    /// <inheritdoc />
     public string DisplayName => DisplayNameConst;
 
     // === node classification (deterministic, from the vms.yaml name) ==========
@@ -279,6 +287,7 @@ public sealed class CitusAdapter : IClusterAdapter
     }
 
     // === GetStatusAsync ====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -345,6 +354,7 @@ public sealed class CitusAdapter : IClusterAdapter
     }
 
     // === HealthAsync =======================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -421,6 +431,7 @@ public sealed class CitusAdapter : IClusterAdapter
     }
 
     // === TopologyAsync (Shards POPULATED -- worker-group shard placements) ===
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -480,6 +491,7 @@ public sealed class CitusAdapter : IClusterAdapter
             : Result.Ok(g);
     }
 
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -555,6 +567,7 @@ public sealed class CitusAdapter : IClusterAdapter
     }
 
     // === ScaleOut (Patroni member add/remove within a group) ================
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -606,6 +619,7 @@ public sealed class CitusAdapter : IClusterAdapter
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.NodeName))
@@ -646,6 +660,7 @@ public sealed class CitusAdapter : IClusterAdapter
     }
 
     // === Backup (operator COPY round-trip of the distributed dataset) ========
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -692,6 +707,7 @@ public sealed class CitusAdapter : IClusterAdapter
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.BackupId))
@@ -739,6 +755,7 @@ public sealed class CitusAdapter : IClusterAdapter
     }
 
     // === RotateCertAsync (per-node Vault PKI; PG reload, etcd restart) =======
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -833,6 +850,7 @@ public sealed class CitusAdapter : IClusterAdapter
     // === AclAsync (PG roles via the operator over the coordinator VIP) =======
     private static readonly string[] ProtectedRoles = ["nexus-cluster-admin", "postgres", "citus_app", "replicator", "rewind"];
 
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -893,6 +911,7 @@ public sealed class CitusAdapter : IClusterAdapter
     }
 
     // === ApplyChaosAsync (process-kill a PG member + Patroni rejoin) =========
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         if (!KnownChaosScenarios.Contains(scenario.ScenarioType, StringComparer.OrdinalIgnoreCase))
@@ -969,6 +988,7 @@ public sealed class CitusAdapter : IClusterAdapter
     }
 
     // === CanResizeVm =======================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null) return false;

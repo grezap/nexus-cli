@@ -12,8 +12,18 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli;
 
+/// <summary>
+/// Composition root + entry point for the <c>nexus</c> CLI. Roots trimmer metadata,
+/// builds the MS.DI-backed <see cref="Spectre.Console.Cli.CommandApp"/>, and registers every verb branch.
+/// </summary>
 internal static class Program
 {
+    /// <summary>
+    /// Process entry point: forces UTF-8 output, keeps command/settings metadata alive for the trimmer,
+    /// configures the Spectre <see cref="Spectre.Console.Cli.CommandApp"/> with all verbs, and runs it.
+    /// </summary>
+    /// <param name="args">Raw command-line arguments passed to the CLI.</param>
+    /// <returns>The process exit code returned by the resolved command.</returns>
     [UnconditionalSuppressMessage("AOT", "IL3050",
         Justification = "Spectre.Console.Cli's reflection use is bounded; commands are pre-registered via TypeRegistrar.")]
     [UnconditionalSuppressMessage("Trimming", "IL2026",

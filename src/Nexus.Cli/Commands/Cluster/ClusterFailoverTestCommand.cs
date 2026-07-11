@@ -5,8 +5,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Cluster;
 
+/// <summary>Implements <c>failover-test &lt;cluster&gt;</c>: drives a controlled primary/leader failover on a cluster and measures RTO. Destructive; guarded by <c>--yes</c>.</summary>
 public sealed class ClusterFailoverTestCommand : AsyncCommand<ClusterFailoverTestSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         ClusterFailoverTestSettings settings,

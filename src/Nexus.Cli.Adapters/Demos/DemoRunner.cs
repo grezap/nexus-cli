@@ -25,8 +25,11 @@ public sealed class DemoRunner : IDemoRunner
     private static readonly TimeSpan StepTimeout = TimeSpan.FromMinutes(5);
     private const int StdoutTailLines = 12;
 
+    /// <summary>Creates a runner that renders recordings through <paramref name="vhs"/>.</summary>
+    /// <param name="vhs">VHS client used by <see cref="RecordAsync"/> to render the .tape to a GIF.</param>
     public DemoRunner(IVhsClient vhs) => _vhs = vhs;
 
+    /// <inheritdoc />
     public async Task<Result<DemoRunReport>> RunAsync(
         DemoSpec spec,
         CancellationToken cancellationToken)
@@ -111,6 +114,7 @@ public sealed class DemoRunner : IDemoRunner
             sw.Elapsed));
     }
 
+    /// <inheritdoc />
     public async Task<Result<DemoRecordReport>> RecordAsync(
         DemoSpec spec,
         string outputDirectory,
@@ -155,6 +159,7 @@ public sealed class DemoRunner : IDemoRunner
             sw.Elapsed));
     }
 
+    /// <summary>Renders a demo spec into a VHS .tape script: header + per-step Type/Enter/Sleep triplets, with the GIF path baked into the <c>Output</c> directive.</summary>
     internal static string BuildTape(DemoSpec spec, string outputGifPath)
     {
         var sb = new StringBuilder();
@@ -178,6 +183,9 @@ public sealed class DemoRunner : IDemoRunner
         return sb.ToString();
     }
 
+    // Run one demo step through the platform shell (cmd.exe /c or /bin/sh -c) so the
+    // step line can use pipes/redirects/env-expansion; a per-step timeout caps runaway
+    // commands. Returns FULL stdout/stderr (the caller truncates for display only).
     private static async Task<(int ExitCode, string Stdout, string Stderr)> ExecShellAsync(
         string command,
         CancellationToken cancellationToken)
@@ -217,6 +225,7 @@ public sealed class DemoRunner : IDemoRunner
         }
     }
 
+    // Keep only the last n lines of text (trimmed) for a compact step report.
     private static string TailLines(string text, int n)
     {
         if (string.IsNullOrEmpty(text)) return string.Empty;
