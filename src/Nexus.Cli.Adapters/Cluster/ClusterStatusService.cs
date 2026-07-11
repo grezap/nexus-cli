@@ -5,12 +5,18 @@ using Nexus.Cli.Core.Models;
 
 namespace Nexus.Cli.Adapters.Cluster;
 
+/// <summary>
+/// Aggregates the Swarm/Nomad orchestration tier's health by fanning out to the
+/// Consul, Nomad, and Portainer HTTP clients in parallel and folding their results
+/// into a single <see cref="ClusterStatusReport"/> (with per-component latencies).
+/// </summary>
 public sealed class ClusterStatusService : IClusterStatusService
 {
     private readonly INexusConsulClient _consul;
     private readonly INexusNomadClient _nomad;
     private readonly INexusPortainerClient _portainer;
 
+    /// <summary>Constructs the service over the three orchestration-tier HTTP clients.</summary>
     public ClusterStatusService(
         INexusConsulClient consul,
         INexusNomadClient nomad,
@@ -21,6 +27,7 @@ public sealed class ClusterStatusService : IClusterStatusService
         _portainer = portainer;
     }
 
+    /// <inheritdoc />
     public async Task<ClusterStatusReport> GetStatusAsync(CancellationToken cancellationToken)
     {
         var consulTask = TimedAsync(_consul.GetHealthAsync(cancellationToken));
@@ -52,6 +59,11 @@ public sealed class ClusterStatusService : IClusterStatusService
         return (r, Stopwatch.GetElapsedTime(start).TotalMilliseconds);
     }
 
+    /// <summary>
+    /// Rolls the three component results into one level: any failed fetch is Red;
+    /// a reachable-but-degraded component (lost Consul leader / &lt;6 alive, no single
+    /// Nomad leader or a non-ready client, unreachable Portainer) is Yellow; else Green.
+    /// </summary>
     private static HealthLevel ComputeOverall(
         Result<ConsulHealth> consul,
         Result<NomadHealth> nomad,

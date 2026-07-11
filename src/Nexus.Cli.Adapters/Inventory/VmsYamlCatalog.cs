@@ -14,14 +14,18 @@ namespace Nexus.Cli.Adapters.Inventory;
 /// </summary>
 public sealed class VmsYamlCatalog : IVmsCatalog
 {
+    /// <summary>Environment variable naming an explicit path to <c>vms.yaml</c>.</summary>
     public const string PathEnvVar = "NEXUS_VMS_YAML";
 
     private readonly string? _explicitPath;
     private IReadOnlyDictionary<string, ClusterRecord>? _cache;
     private string? _loadError;
 
+    /// <summary>Creates a catalog, optionally pinned to <paramref name="explicitPath"/> (highest-priority source over the env var and the sibling-checkout fallback).</summary>
+    /// <param name="explicitPath">Explicit path to vms.yaml; when null, resolution falls back to the env var then the sibling checkout.</param>
     public VmsYamlCatalog(string? explicitPath = null) => _explicitPath = explicitPath;
 
+    /// <inheritdoc />
     public Result<IReadOnlyDictionary<string, ClusterRecord>> Load()
     {
         if (_cache is not null)
@@ -49,6 +53,7 @@ public sealed class VmsYamlCatalog : IVmsCatalog
         }
     }
 
+    /// <inheritdoc />
     public Result<ClusterRecord> GetCluster(string name)
     {
         var loaded = Load();
@@ -60,6 +65,8 @@ public sealed class VmsYamlCatalog : IVmsCatalog
         return Result.Fail<ClusterRecord>($"unknown cluster '{name}'. Known: {known}");
     }
 
+    // Resolve vms.yaml by priority: explicit ctor arg, then env var, then the
+    // conventional sibling checkout ../nexus-platform-plan/docs/infra/vms.yaml.
     private string? ResolvePath()
     {
         if (!string.IsNullOrWhiteSpace(_explicitPath) && File.Exists(_explicitPath))
@@ -73,6 +80,7 @@ public sealed class VmsYamlCatalog : IVmsCatalog
         return File.Exists(sibling) ? sibling : null;
     }
 
+    /// <summary>Flow-maps vms.yaml lines into cluster records; merges every top-level <c>clusters:</c> block in file order.</summary>
     internal static IReadOnlyDictionary<string, ClusterRecord> Parse(string[] lines)
     {
         var result = new Dictionary<string, ClusterRecord>(StringComparer.Ordinal);

@@ -18,6 +18,7 @@ namespace Nexus.Cli.Adapters.Ssh;
 /// </summary>
 public static class SshKeyDiscovery
 {
+    /// <summary>Environment variable that, when set to an existing file, overrides the default key search.</summary>
     public const string KeyEnvVar = "NEXUS_SSH_KEY";
 
     private static readonly string[] DefaultRelativePaths =
@@ -27,6 +28,10 @@ public static class SshKeyDiscovery
         Path.Combine(".ssh", "id_rsa"),
     };
 
+    /// <summary>
+    /// Resolves the SSH private-key path: <see cref="KeyEnvVar"/> first, then the
+    /// preference-ordered <c>~/.ssh</c> candidates. Returns <c>null</c> when none exist.
+    /// </summary>
     public static string? Resolve()
     {
         var env = Environment.GetEnvironmentVariable(KeyEnvVar);
@@ -46,6 +51,7 @@ public static class SshKeyDiscovery
         return null;
     }
 
+    /// <summary>Operator-facing guidance shown when <see cref="Resolve"/> finds no usable key.</summary>
     public static string UnavailableMessage()
         => $"no SSH private key found. Set {KeyEnvVar} to an absolute path, or place a key at " +
            $"{Path.Combine("~", ".ssh", "nexus_gateway_ed25519")} (preferred — the lab-canonical name), " +

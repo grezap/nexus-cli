@@ -16,14 +16,18 @@ namespace Nexus.Cli.Adapters.Demos;
 /// </summary>
 public sealed class JsonDemoCatalog : IDemoCatalog
 {
+    /// <summary>Environment variable naming the directory of <c>&lt;id&gt;.json</c> demo specs.</summary>
     public const string DemosDirEnvVar = "NEXUS_DEMOS_PATH";
 
     private readonly string? _explicitDir;
     private IReadOnlyDictionary<string, DemoSpec>? _cache;
     private string? _loadError;
 
+    /// <summary>Creates a catalog, optionally pinned to <paramref name="explicitDir"/> (highest-priority source over the env var and sibling fallbacks).</summary>
+    /// <param name="explicitDir">Explicit demos directory; when null, resolution falls back to the env var then convention paths.</param>
     public JsonDemoCatalog(string? explicitDir = null) => _explicitDir = explicitDir;
 
+    /// <inheritdoc />
     public Result<IReadOnlyDictionary<string, DemoSpec>> Load()
     {
         if (_cache is not null)
@@ -86,6 +90,7 @@ public sealed class JsonDemoCatalog : IDemoCatalog
         }
     }
 
+    /// <inheritdoc />
     public Result<DemoSpec> GetDemo(string id)
     {
         var loaded = Load();
@@ -100,6 +105,8 @@ public sealed class JsonDemoCatalog : IDemoCatalog
                 : $"unknown demo '{id}'. Known: {known}");
     }
 
+    // Resolve the demos directory by priority: explicit ctor arg, then the env var,
+    // then cwd ./docs/demos/, then ../docs/demos/ (running from artifacts/<rid>/).
     private string? ResolveDir()
     {
         if (!string.IsNullOrWhiteSpace(_explicitDir) && Directory.Exists(_explicitDir))

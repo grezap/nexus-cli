@@ -24,6 +24,12 @@ internal static class AotRoots
         DynamicallyAccessedMemberTypes.PublicConstructors |
         DynamicallyAccessedMemberTypes.PublicProperties;
 
+    /// <summary>
+    /// No-op anchor whose sole purpose is to carry the <see cref="DynamicDependencyAttribute"/>
+    /// roots attached to it. Called once from <c>Program.Main</c> so the trimmer treats every
+    /// referenced Command + Settings type (and their ctors/properties) as reachable and does
+    /// not strip the metadata Spectre.Console.Cli reflects on at boot.
+    /// </summary>
     [DynamicDependency(CommandRoots, typeof(ClusterStatusCommand))]
     [DynamicDependency(SettingsRoots, typeof(ClusterStatusSettings))]
 

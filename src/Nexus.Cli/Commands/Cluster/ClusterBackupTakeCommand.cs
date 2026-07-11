@@ -5,8 +5,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Cluster;
 
+/// <summary>Implements <c>backup take &lt;cluster&gt;</c>: captures a backup of a cluster to a (default or specified) destination.</summary>
 public sealed class ClusterBackupTakeCommand : AsyncCommand<ClusterBackupTakeSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         ClusterBackupTakeSettings settings,

@@ -17,9 +17,16 @@ namespace Nexus.Cli.Infrastructure;
 /// </summary>
 public static class KafkaFailoverBootstrapper
 {
+    /// <summary>Environment variable that overrides the SSH login user.</summary>
     public const string SshUserEnvVar = "NEXUS_SSH_USER";
+
+    /// <summary>SSH user assumed when <see cref="SshUserEnvVar"/> is unset.</summary>
     public const string DefaultSshUser = "nexusadmin";
 
+    /// <summary>
+    /// Wires the catalog + SSH key/user + vmrun client into a <see cref="IKafkaFailoverService"/>
+    /// for the <c>kafka failover</c> verb. No Vault tokens are read (brokers use their on-disk mTLS keystore).
+    /// </summary>
     public static IKafkaFailoverService Build()
     {
         var catalog = new VmsYamlCatalog();

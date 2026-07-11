@@ -6,7 +6,7 @@ namespace Nexus.Cli.Core.Abstractions;
 /// Opt-in capability for clusters that expose a declarative, atomic
 /// high-availability recovery step beyond the generic <see cref="IClusterAdapter"/>
 /// surface (nexus-cli v0.8.1, ADR-0022). The only implementor is
-/// <see cref="Nexus.Cli.Adapters.Cluster.VaultAdapter"/>: the foundation Vault
+/// <c>VaultAdapter</c> (in Nexus.Cli.Adapters — not referenced from Core): the foundation Vault
 /// trust root sits at the bottom of the auto-unseal chain (vault-transit is
 /// Shamir-only), so a build-host reboot leaves the HA nodes failed until the
 /// transit node is unsealed. <c>recover-ha</c> wraps the
@@ -23,5 +23,6 @@ namespace Nexus.Cli.Core.Abstractions;
 /// </summary>
 public interface IRecoverableCluster
 {
+    /// <summary>Runs the cluster's atomic HA recovery step (the <c>recover-ha</c> verb).</summary>
     Task<Result<RecoverHaResult>> RecoverHaAsync(CancellationToken cancellationToken);
 }

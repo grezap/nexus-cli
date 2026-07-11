@@ -13,8 +13,10 @@ namespace Nexus.Cli.Adapters.Vmware;
 /// </summary>
 public sealed class VmrunProcessClient : IVmrunClient
 {
+    /// <inheritdoc />
     public bool IsAvailable => VmrunPaths.IsAvailable();
 
+    /// <inheritdoc />
     public async Task<Result<IReadOnlySet<string>>> ListRunningVmxPathsAsync(CancellationToken cancellationToken)
     {
         var (ok, stdout, stderr) = await RunAsync(BuildListArgs(), cancellationToken).ConfigureAwait(false);
@@ -23,30 +25,35 @@ public sealed class VmrunProcessClient : IVmrunClient
         return Result.Ok<IReadOnlySet<string>>(ParseRunningList(stdout));
     }
 
+    /// <inheritdoc />
     public async Task<Result<bool>> SuspendAsync(string vmxPath, CancellationToken cancellationToken)
     {
         var (ok, _, stderr) = await RunAsync(BuildSuspendArgs(vmxPath), cancellationToken).ConfigureAwait(false);
         return ok ? Result.Ok(true) : Result.Fail<bool>(stderr);
     }
 
+    /// <inheritdoc />
     public async Task<Result<bool>> ResumeAsync(string vmxPath, CancellationToken cancellationToken)
     {
         var (ok, _, stderr) = await RunAsync(BuildResumeArgs(vmxPath), cancellationToken).ConfigureAwait(false);
         return ok ? Result.Ok(true) : Result.Fail<bool>(stderr);
     }
 
+    /// <inheritdoc />
     public async Task<Result<bool>> StopAsync(string vmxPath, bool hard, CancellationToken cancellationToken)
     {
         var (ok, _, stderr) = await RunAsync(BuildStopArgs(vmxPath, hard), cancellationToken).ConfigureAwait(false);
         return ok ? Result.Ok(true) : Result.Fail<bool>(stderr);
     }
 
+    /// <inheritdoc />
     public async Task<Result<bool>> StartAsync(string vmxPath, CancellationToken cancellationToken)
     {
         var (ok, _, stderr) = await RunAsync(BuildResumeArgs(vmxPath), cancellationToken).ConfigureAwait(false);
         return ok ? Result.Ok(true) : Result.Fail<bool>(stderr);
     }
 
+    /// <inheritdoc />
     public async Task<Result<bool>> GrowVirtualDiskAsync(string vmdkPath, int newSizeGb, CancellationToken cancellationToken)
     {
         var vdm = VmrunPaths.ResolveVdiskManager();
@@ -73,6 +80,8 @@ public sealed class VmrunProcessClient : IVmrunClient
     internal static string[] BuildGrowDiskArgs(string vmdkPath, int newSizeGb)
         => new[] { "-x", $"{newSizeGb.ToString(System.Globalization.CultureInfo.InvariantCulture)}GB", vmdkPath };
 
+    // Parse `vmrun list` stdout into a case-insensitive set of running .vmx paths,
+    // dropping the trailing "Total running VMs:" summary line.
     internal static IReadOnlySet<string> ParseRunningList(string stdout)
     {
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

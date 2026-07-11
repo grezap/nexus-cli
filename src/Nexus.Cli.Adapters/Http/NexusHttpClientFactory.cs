@@ -17,6 +17,13 @@ public sealed class NexusHttpClientFactory : IDisposable
     private readonly TimeSpan _timeout;
     private readonly List<HttpClient> _clients = new();
 
+    /// <summary>
+    /// Loads the PEM at <paramref name="caBundlePath"/> and splits it into self-signed
+    /// roots (custom trust anchors) and intermediates (staged into ExtraStore). Throws
+    /// if the file is missing or contains no roots to anchor validation.
+    /// </summary>
+    /// <param name="caBundlePath">Path to the operator's CA bundle (PEM).</param>
+    /// <param name="timeout">Per-request timeout; defaults to 10 seconds when null.</param>
     public NexusHttpClientFactory(string caBundlePath, TimeSpan? timeout = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(caBundlePath);
@@ -43,6 +50,11 @@ public sealed class NexusHttpClientFactory : IDisposable
         _timeout = timeout ?? TimeSpan.FromSeconds(10);
     }
 
+    /// <summary>
+    /// Creates a new <see cref="HttpClient"/> whose TLS validation is pinned to the
+    /// loaded CA bundle via <see cref="ValidateChain"/>. The instance is tracked and
+    /// disposed with this factory.
+    /// </summary>
     public HttpClient Create()
     {
         var handler = new SocketsHttpHandler
@@ -63,6 +75,10 @@ public sealed class NexusHttpClientFactory : IDisposable
         return client;
     }
 
+    // Custom RemoteCertificateValidationCallback: rebuild the chain against our own
+    // roots (CustomRootTrust ignores the system store) with intermediates staged into
+    // ExtraStore, so validation succeeds against the lab CA regardless of Schannel's
+    // machine trust or intermediate-resolution quirks.
     private bool ValidateChain(
         object _,
         X509Certificate? certificate,
@@ -97,6 +113,7 @@ public sealed class NexusHttpClientFactory : IDisposable
         return policyChain.Build(serverCert);
     }
 
+    /// <inheritdoc />
     public void Dispose()
     {
         foreach (var c in _clients) c.Dispose();

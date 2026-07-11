@@ -5,8 +5,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Cluster;
 
+/// <summary>Implements <c>acl &lt;cluster&gt; &lt;verb&gt;</c>: reads (list/describe) or mutates (grant/revoke) a cluster's access-control state. Mutations guarded by <c>--yes</c>.</summary>
 public sealed class ClusterAclCommand : AsyncCommand<ClusterAclSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         ClusterAclSettings settings,

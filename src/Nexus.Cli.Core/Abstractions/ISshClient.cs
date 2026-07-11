@@ -2,8 +2,13 @@ using Nexus.Cli.Core.Models;
 
 namespace Nexus.Cli.Core.Abstractions;
 
+/// <summary>
+/// SSH/SFTP transport to fleet nodes: runs remote commands and moves raw files in
+/// both directions, the backbone every adapter uses to reach on-node native CLIs.
+/// </summary>
 public interface ISshClient
 {
+    /// <summary>Executes <paramref name="command"/> on <paramref name="target"/> under <paramref name="timeout"/> and returns its exit code and output.</summary>
     Task<Result<SshExecResult>> ExecuteAsync(
         SshTarget target,
         string command,

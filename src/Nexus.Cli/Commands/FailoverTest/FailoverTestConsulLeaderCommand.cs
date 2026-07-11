@@ -5,8 +5,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.FailoverTest;
 
+/// <summary>Implements <c>failover-test consul-leader</c>: stops the current Consul leader, measures raft re-election RTO, then auto-recovers. Destructive; guarded by <c>--yes</c>.</summary>
 public sealed class FailoverTestConsulLeaderCommand : AsyncCommand<FailoverTestConsulLeaderSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         FailoverTestConsulLeaderSettings settings,

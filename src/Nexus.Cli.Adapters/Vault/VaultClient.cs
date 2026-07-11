@@ -8,11 +8,21 @@ using Nexus.Cli.Core.Models;
 
 namespace Nexus.Cli.Adapters.Vault;
 
+/// <summary>
+/// CA-pinned HTTP <see cref="INexusVaultClient"/> for KV-v2 reads and PKI leaf
+/// issuance. Sends the operator's token in the <c>X-Vault-Token</c> header (the
+/// locked auth model, ADR-0004: the token stays on the build host) and decodes
+/// responses via the source-gen <see cref="NexusJsonContext"/> (AOT-clean, no
+/// reflection). The vault binary is never linked.
+/// </summary>
 public sealed class VaultClient : INexusVaultClient, IDisposable
 {
     private readonly VaultContext _context;
     private readonly HttpClient _http;
 
+    /// <summary>Creates a client bound to <paramref name="context"/>, minting a CA-pinned <see cref="HttpClient"/> from <paramref name="httpFactory"/> and pre-seeding the token header.</summary>
+    /// <param name="context">Resolved Vault address + token + CA-bundle path.</param>
+    /// <param name="httpFactory">Factory that produces the CA-bundle-pinned HTTP client.</param>
     public VaultClient(VaultContext context, NexusHttpClientFactory httpFactory)
     {
         _context = context;
@@ -20,6 +30,7 @@ public sealed class VaultClient : INexusVaultClient, IDisposable
         _http.DefaultRequestHeaders.Add("X-Vault-Token", _context.Token);
     }
 
+    /// <inheritdoc />
     public async Task<Result<string>> ReadKvFieldAsync(
         string mount,
         string path,
@@ -58,6 +69,7 @@ public sealed class VaultClient : INexusVaultClient, IDisposable
         }
     }
 
+    /// <inheritdoc />
     public async Task<Result<PkiIssueData>> IssuePkiCertAsync(
         string pkiMount,
         string role,
@@ -110,8 +122,10 @@ public sealed class VaultClient : INexusVaultClient, IDisposable
         }
     }
 
+    // Cap an untrusted Vault error body before surfacing it in a failure message.
     private static string Trunc(string s, int n) =>
         string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= n ? s : s[..n]);
 
+    /// <inheritdoc />
     public void Dispose() => _http.Dispose();
 }

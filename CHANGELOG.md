@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Docs — solution-wide documentation pass + build-enforced XML docs
+
+- Applied the portfolio code-docs standing rule to the whole codebase: **XML `<summary>` docs on every
+  public type/method/property** across `Nexus.Cli`, `Nexus.Cli.Core`, and `Nexus.Cli.Adapters`
+  (~1,600 members), plus analytical inline comments on the non-obvious SSH/parse/ordering/guard logic.
+- New **[`docs/architecture.md`](./docs/architecture.md)** — analytic Mermaid diagrams: the layered
+  architecture, the `IClusterAdapter` SPI dispatch, a command's end-to-end flow, and the CLI's blast-radius
+  on the lab (what each verb touches, and how the pieces affect each other).
+- **Enforced in build**: `GenerateDocumentationFile=true` on `src` makes any undocumented public member a
+  `CS1591` error under warnings-as-errors (the test project opts out). No code changed — **330/330 tests
+  unchanged; AOT footprint unaffected** (doc comments are compile-time only).
+
 ## [0.8.12] — 2026-07-10
 
 Infra-hardening (pre-Phase-1), item 4 of 4 (the LAST) — **0.N.1 mongo-sharded wire mTLS**. Paired with the

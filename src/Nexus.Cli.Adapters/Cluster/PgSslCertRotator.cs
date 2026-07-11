@@ -127,6 +127,7 @@ internal static class PgSslCertRotator
             .ThenBy(n => n.Name, StringComparer.Ordinal)
             .ToList();
 
+    /// <summary>Read a node's current leaf serial via on-node <c>openssl x509 -serial</c> ("(unknown)" if unreadable) — the before/after proof of a real rotation.</summary>
     private static async Task<string> SerialAsync(
         ISshClient ssh, Func<string, SshTarget> target, string ip, string certPath, TimeSpan sshTimeout, CancellationToken ct)
     {
@@ -136,5 +137,6 @@ internal static class PgSslCertRotator
         return r.IsOk && r.Value!.Stdout.Trim().Length > 0 ? r.Value.Stdout.Trim() : "(unknown)";
     }
 
+    /// <summary>Last <paramref name="n"/> chars of <paramref name="s"/> (for truncating stdout/stderr in error messages).</summary>
     private static string Tail(string s, int n) => s.Length <= n ? s : s[^n..];
 }

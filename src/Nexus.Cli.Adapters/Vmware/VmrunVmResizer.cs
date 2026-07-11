@@ -33,6 +33,13 @@ public sealed class VmrunVmResizer : IVmResizer
     private static readonly TimeSpan SshTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan GuestReadyDeadline = TimeSpan.FromMinutes(4);
 
+    /// <summary>Creates the resizer with its collaborators and the SSH identity used for in-guest filesystem extends.</summary>
+    /// <param name="catalog">vms.yaml catalog used to resolve a VM name to its cluster + on-disk location.</param>
+    /// <param name="vmrun">vmrun/vdiskmanager client that performs power ops and disk grows.</param>
+    /// <param name="registry">Cluster-adapter registry consulted for the write-primary safety gate.</param>
+    /// <param name="ssh">SSH client used to read guest disk size and run the in-guest grow scripts.</param>
+    /// <param name="sshUsername">Username for guest SSH (the lab-canonical <c>nexusadmin</c>).</param>
+    /// <param name="sshKeyPath">Path to the private key used for guest SSH.</param>
     public VmrunVmResizer(
         IVmsCatalog catalog,
         IVmrunClient vmrun,
@@ -49,6 +56,7 @@ public sealed class VmrunVmResizer : IVmResizer
         _sshKeyPath = sshKeyPath;
     }
 
+    /// <inheritdoc />
     public async Task<Result<ScaleUpResult>> ScaleUpAsync(ScaleUpRequest request, CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
@@ -194,6 +202,8 @@ public sealed class VmrunVmResizer : IVmResizer
     }
 
     // === VM resolution =====================================================
+    // Find the vms.yaml cluster + NodeRecord that owns vmName (case-insensitive);
+    // failure lists all known VM names to aid the operator.
     private Result<(string ClusterName, NodeRecord Node)> ResolveVm(string vmName)
     {
         var loaded = _catalog.Load();
@@ -273,12 +283,14 @@ public sealed class VmrunVmResizer : IVmResizer
     }
 
     // === .vmx parse / edit =================================================
+    /// <summary>Reads an integer <c>key = "n"</c> value from .vmx lines; null if missing/non-numeric.</summary>
     internal static int? ParseVmxInt(IReadOnlyList<string> lines, string key)
     {
         var val = ParseVmxValue(lines, key);
         return int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : null;
     }
 
+    /// <summary>Reads a raw <c>key = "value"</c> string from .vmx lines (quotes stripped); null if absent.</summary>
     internal static string? ParseVmxValue(IReadOnlyList<string> lines, string key)
     {
         foreach (var raw in lines)

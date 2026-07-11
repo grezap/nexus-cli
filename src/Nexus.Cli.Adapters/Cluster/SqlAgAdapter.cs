@@ -41,10 +41,17 @@ public sealed class SqlAgAdapter : IClusterAdapter
     private readonly SqlServerControl _c;
     private ClusterStatus? _lastStatus;
 
+    /// <summary>
+    /// Creates the AG adapter, wrapping a shared <see cref="SqlServerControl"/> over the
+    /// vms.yaml catalog, SSH client + credentials, and an optional operator
+    /// <see cref="INexusVaultClient"/> (the Vault-KV source of the SQL login password).
+    /// </summary>
     public SqlAgAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath, INexusVaultClient? vault)
         => _c = new SqlServerControl(catalog, ssh, sshUsername, sshKeyPath, vault);
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+    /// <inheritdoc />
     public string DisplayName => DisplayNameConst;
 
     // === replica-state read (from the primary via the FCI) =================
@@ -80,6 +87,7 @@ public sealed class SqlAgAdapter : IClusterAdapter
     }
 
     // === GetStatusAsync ====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -115,6 +123,7 @@ public sealed class SqlAgAdapter : IClusterAdapter
     }
 
     // === HealthAsync =======================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -149,6 +158,7 @@ public sealed class SqlAgAdapter : IClusterAdapter
     }
 
     // === TopologyAsync =====================================================
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -168,6 +178,7 @@ public sealed class SqlAgAdapter : IClusterAdapter
     }
 
     // === FailoverAsync (graceful AG failover: sync → ALTER FAILOVER → fail back) ===
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -287,6 +298,7 @@ public sealed class SqlAgAdapter : IClusterAdapter
             $"ALTER AVAILABILITY GROUP [{SqlServerControl.AgName}] MODIFY REPLICA ON N'{replica}' WITH (AVAILABILITY_MODE = ASYNCHRONOUS_COMMIT)", ct).ConfigureAwait(false);
 
     // === ScaleOut (remove/add an AG secondary replica) =====================
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -309,6 +321,7 @@ public sealed class SqlAgAdapter : IClusterAdapter
             sw.Elapsed, startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -431,6 +444,7 @@ public sealed class SqlAgAdapter : IClusterAdapter
     // === Backup (BACKUP/RESTORE DATABASE nexus_demo round-trip via the AG primary) ===
     private const string BackupDir = "S:\\Backups";
 
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -459,6 +473,7 @@ public sealed class SqlAgAdapter : IClusterAdapter
             size, sw.Elapsed, startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -495,6 +510,7 @@ public sealed class SqlAgAdapter : IClusterAdapter
     private static string Sanitize(string s) => System.Text.RegularExpressions.Regex.Replace(s, "[^A-Za-z0-9_]", "_");
 
     // === RotateCertAsync (per-node rotate of the 2 standalone AG replicas) ==
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -526,6 +542,7 @@ public sealed class SqlAgAdapter : IClusterAdapter
     }
 
     // === AclAsync (AG-relevant server logins, via the primary) =============
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -582,6 +599,7 @@ public sealed class SqlAgAdapter : IClusterAdapter
     }
 
     // === ApplyChaosAsync (process-kill SQL on a secondary replica → resync) ==
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
@@ -624,11 +642,12 @@ public sealed class SqlAgAdapter : IClusterAdapter
     }
 
     // === CanResizeVm =======================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null) return false;
         var member = _lastStatus.Members.FirstOrDefault(m => string.Equals(m.Hostname, vmName, StringComparison.OrdinalIgnoreCase));
         if (member is null) return false;
-        return member.Role != "primary";
+        return member.Role != "primary"; // refuse the AG primary (its failover would interrupt writes)
     }
 }

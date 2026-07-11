@@ -5,8 +5,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Cluster;
 
+/// <summary>Implements <c>backup restore &lt;cluster&gt; &lt;backup-id&gt;</c>: restores a cluster from a prior backup (optionally point-in-time). Destructive; guarded by <c>--yes</c>.</summary>
 public sealed class ClusterBackupRestoreCommand : AsyncCommand<ClusterBackupRestoreSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         ClusterBackupRestoreSettings settings,

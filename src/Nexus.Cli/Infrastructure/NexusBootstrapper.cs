@@ -26,8 +26,14 @@ public sealed class NexusBootstrapper : IDisposable
     private PortainerClient? _portainer;
 
     // Vault KV paths (frozen 0.E.4 close-out canon).
+
+    /// <summary>KV path (under the <c>nexus</c> mount) holding the Consul management token.</summary>
     public const string ConsulMgmtTokenPath = "swarm/consul-bootstrap-token";
+
+    /// <summary>KV path (under the <c>nexus</c> mount) holding the Nomad management token.</summary>
     public const string NomadMgmtTokenPath = "swarm/nomad-bootstrap-token";
+
+    /// <summary>KV path (under the <c>nexus</c> mount) holding the Portainer admin credential.</summary>
     public const string PortainerAdminPath = "portainer/admin-bcrypt";
 
     // Endpoint defaults for the lab. Override via env vars NEXUS_CONSUL_ADDR,
@@ -37,9 +43,16 @@ public sealed class NexusBootstrapper : IDisposable
     private const string NomadDefault = "https://192.168.70.111:4646";
     private const string PortainerDefault = "https://portainer.nexus.lab:9443";
 
+    /// <summary>Creates the bootstrapper with the resolver used to obtain the Vault token/context.</summary>
+    /// <param name="tokenResolver">Resolves the Vault address/token/CA bundle from the process environment.</param>
     public NexusBootstrapper(IVaultTokenResolver tokenResolver)
         => _tokenResolver = tokenResolver;
 
+    /// <summary>
+    /// Resolves the Vault context, reads the Consul/Nomad management tokens + Portainer admin password
+    /// from KV, and wires the Consul/Nomad/Portainer HTTP clients into an <see cref="IClusterStatusService"/>.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the Vault KV reads.</param>
     public async Task<IClusterStatusService> BuildClusterStatusServiceAsync(
         CancellationToken cancellationToken)
     {
@@ -96,6 +109,7 @@ public sealed class NexusBootstrapper : IDisposable
         return string.IsNullOrWhiteSpace(v) ? fallback : v;
     }
 
+    /// <inheritdoc />
     public void Dispose()
     {
         _portainer?.Dispose();

@@ -101,6 +101,11 @@ public sealed class RegistryAdapter : IClusterAdapter
     // Cached VIP holder (for CanResizeVm after a status/health call).
     private string? _dbVipHolder;
 
+    /// <summary>
+    /// Creates the adapter over the vms.yaml catalog, an SSH client + credentials for
+    /// node-local ops, and an optional operator <see cref="INexusVaultClient"/> (only
+    /// needed for the KV Harbor-admin credential; PG/Redis/VRRP run over SSH).
+    /// </summary>
     public RegistryAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath, INexusVaultClient? vault)
     {
         _catalog = catalog;
@@ -110,7 +115,9 @@ public sealed class RegistryAdapter : IClusterAdapter
         _vault = vault;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+    /// <inheritdoc />
     public string DisplayName => DisplayNameConst;
 
     // === node classification ===============================================
@@ -299,6 +306,7 @@ public sealed class RegistryAdapter : IClusterAdapter
     }
 
     // === GetStatusAsync ====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -339,6 +347,7 @@ public sealed class RegistryAdapter : IClusterAdapter
     }
 
     // === HealthAsync =======================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -451,6 +460,7 @@ public sealed class RegistryAdapter : IClusterAdapter
     }
 
     // === TopologyAsync =====================================================
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -488,6 +498,7 @@ public sealed class RegistryAdapter : IClusterAdapter
     }
 
     // === FailoverAsync (datastore VRRP cutover) ============================
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -592,9 +603,11 @@ public sealed class RegistryAdapter : IClusterAdapter
     }
 
     // === ScaleOut (graceful actionable N/A) ================================
+    /// <inheritdoc />
     public Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<ScaleOutResult>(ScaleOutNaMessage));
 
+    /// <inheritdoc />
     public Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(Result.Fail<ScaleOutResult>(ScaleOutNaMessage));
 
@@ -606,6 +619,7 @@ public sealed class RegistryAdapter : IClusterAdapter
         + "nexus-infra-registry (new VM + overlay + re-apply); it is not a runtime adapter action.";
 
     // === Backup (pg_dump the Harbor metadata DB round-trip) ================
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -640,6 +654,7 @@ public sealed class RegistryAdapter : IClusterAdapter
         return Result.Ok(new BackupResult($"{tag} ({tables} tables @ {primaryNode.Name}:{dest})", $"{primaryNode.Name}:{dest}", bytes, sw.Elapsed, startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -682,6 +697,7 @@ public sealed class RegistryAdapter : IClusterAdapter
     }
 
     // === RotateCertAsync (force vault-agent re-render + reload) =============
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -745,6 +761,7 @@ public sealed class RegistryAdapter : IClusterAdapter
     }
 
     // === AclAsync (Harbor users via /api/v2.0/users) =======================
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -816,6 +833,7 @@ public sealed class RegistryAdapter : IClusterAdapter
     }
 
     // === ApplyChaosAsync (nexus-chaos.sh on a non-VIP node) ================
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         if (!KnownChaosScenarios.Contains(scenario.ScenarioType, StringComparer.OrdinalIgnoreCase))
@@ -915,6 +933,7 @@ public sealed class RegistryAdapter : IClusterAdapter
     }
 
     // === CanResizeVm =======================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         // Refuse the current datastore VIP holder (resizing it flaps PG + Redis); everything else is safe

@@ -109,6 +109,11 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
     private string? _lastSwarmLeader;
     private string? _lastNomadLeader;
 
+    /// <summary>
+    /// Creates the adapter over the vms.yaml catalog, an SSH client + credentials for
+    /// node-local ops, and an optional operator <see cref="INexusVaultClient"/> (the
+    /// Vault-KV source of the Consul/Nomad management tokens + Portainer admin password).
+    /// </summary>
     public SwarmAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath, INexusVaultClient? vault)
     {
         _catalog = catalog;
@@ -118,7 +123,9 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
         _vault = vault;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+    /// <inheritdoc />
     public string DisplayName => DisplayNameConst;
 
     // === node classification (from the vms.yaml name) ======================
@@ -260,6 +267,7 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
     }
 
     // === GetStatusAsync ====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -316,6 +324,7 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
     }
 
     // === HealthAsync =======================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -388,6 +397,7 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
     }
 
     // === TopologyAsync =====================================================
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -460,6 +470,7 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
     }
 
     // === FailoverAsync (REUSE FailoverTestService) ==========================
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var svcR = await ServicesAsync(cancellationToken).ConfigureAwait(false);
@@ -499,6 +510,7 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
     }
 
     // === ScaleOut (drain/demote a node; reversible) =========================
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.NodeName))
@@ -569,6 +581,7 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -633,6 +646,7 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
     }
 
     // === Backup (consul snapshot + kv export + nomad snapshot) ==============
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -708,6 +722,7 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         // GUARD: `consul snapshot restore` / `nomad operator snapshot restore` REPLACE
@@ -777,6 +792,7 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
     }
 
     // === RotateCertAsync (vault-agent re-render; consul rolling, nomad parallel) ===
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -909,6 +925,7 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
         return false;
     }
 
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -1002,6 +1019,7 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
     }
 
     // === ApplyChaosAsync (nexus-chaos.sh on a WORKER; docker restart after nft) ===
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         if (!KnownChaosScenarios.Contains(scenario.ScenarioType, StringComparer.OrdinalIgnoreCase))
@@ -1095,6 +1113,7 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
     }
 
     // === CanResizeVm =======================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         // Refuse the current Swarm raft leader OR the Nomad raft leader; everything else is safe.
@@ -1115,5 +1134,6 @@ public sealed class SwarmAdapter : IClusterAdapter, IDisposable
     private static string Sanitize(string s) => System.Text.RegularExpressions.Regex.Replace(s, "[^A-Za-z0-9_-]", "_");
     private static string Tail(string s, int n) => string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= n ? s : s.Substring(s.Length - n));
 
+    /// <inheritdoc />
     public void Dispose() => _svc?.Http.Dispose();
 }

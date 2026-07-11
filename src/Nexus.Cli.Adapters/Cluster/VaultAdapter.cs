@@ -79,6 +79,12 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
     private bool _adminTried;
     private ClusterStatus? _lastStatus;
 
+    /// <summary>
+    /// Creates the adapter over the vms.yaml catalog, an SSH client + credentials for
+    /// node-local ops (service control, transit unseal), and an optional operator
+    /// <see cref="INexusVaultClient"/> reused for the cert-rotate PKI issue. The
+    /// HTTP control plane resolves the operator <c>VAULT_TOKEN</c> from the environment.
+    /// </summary>
     public VaultAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath, INexusVaultClient? vault)
     {
         _catalog = catalog;
@@ -88,7 +94,9 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
         _vault = vault;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+    /// <inheritdoc />
     public string DisplayName => DisplayNameConst;
 
     // === node classification (from the vms.yaml name) ======================
@@ -169,6 +177,7 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
     }
 
     // === GetStatusAsync ====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -212,6 +221,7 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
     }
 
     // === HealthAsync =======================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -264,6 +274,7 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
     }
 
     // === TopologyAsync (Raft peer set; not sharded) =========================
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -289,6 +300,7 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
     }
 
     // === FailoverAsync (sys/step-down on the active node) ===================
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -347,6 +359,7 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
     }
 
     // === ScaleOut (stop/start a STANDBY HA node) ============================
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.NodeName))
@@ -386,6 +399,7 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -435,6 +449,7 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
     }
 
     // === Backup (raft snapshot save + non-destructive inspect) ==============
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var adminR = Admin();
@@ -469,6 +484,7 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         // Refuse: `vault operator raft snapshot restore` REPLACES the entire data
@@ -482,6 +498,7 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
     }
 
     // === RotateCertAsync (pki_int/vault-server; SIGHUP reload, active LAST) ==
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -547,6 +564,7 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
     }
 
     // === AclAsync (Vault ACL policies + AppRoles) ===========================
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var adminR = Admin();
@@ -614,6 +632,7 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
     }
 
     // === ApplyChaosAsync (process-kill a STANDBY vault + Raft rejoin) ========
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         if (!KnownChaosScenarios.Contains(scenario.ScenarioType, StringComparer.OrdinalIgnoreCase))
@@ -717,6 +736,7 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
         catch (JsonException ex) { return Result.Fail<(List<string>, int)>($"init file is not valid JSON: {ex.Message}"); }
     }
 
+    /// <inheritdoc />
     public async Task<Result<RecoverHaResult>> RecoverHaAsync(CancellationToken cancellationToken)
     {
         var nodesR = Nodes();
@@ -796,6 +816,7 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
     }
 
     // === CanResizeVm =======================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null) return false;
@@ -809,5 +830,6 @@ public sealed class VaultAdapter : IClusterAdapter, IRecoverableCluster, IDispos
     private static string Tail(string s, int n) => string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= n ? s : s.Substring(s.Length - n));
     private static string B64(string s) => Convert.ToBase64String(Encoding.UTF8.GetBytes(s));
 
+    /// <inheritdoc />
     public void Dispose() => _admin?.Dispose();
 }

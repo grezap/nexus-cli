@@ -80,6 +80,12 @@ public sealed class PatroniAdapter : IClusterAdapter
     private string? _operatorPassword;
     private ClusterStatus? _lastStatus;
 
+    /// <summary>
+    /// Constructs the Patroni adapter over the vms.yaml catalog + SSH client (operator username/key
+    /// used for every on-node <c>patronictl</c>/<c>psql</c>/<c>etcdctl</c> call) and an OPTIONAL
+    /// Vault client — Vault is consulted lazily for the <c>nexus-cluster-admin</c> password, so the
+    /// Patroni-plane verbs (status/topology/failover) work without an operator token.
+    /// </summary>
     public PatroniAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath, INexusVaultClient? vault)
     {
         _catalog = catalog;
@@ -89,14 +95,20 @@ public sealed class PatroniAdapter : IClusterAdapter
         _vault = vault;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+    /// <inheritdoc />
     public string DisplayName => DisplayNameConst;
 
     // === node helpers ======================================================
+    /// <summary>True when the node is a Patroni PG node (<c>pg-*</c> by vms.yaml name convention).</summary>
     private static bool IsPg(NodeRecord n) => n.Name.StartsWith("pg-", StringComparison.OrdinalIgnoreCase);
+    /// <summary>True when the node is an etcd DCS node (<c>etcd-*</c>).</summary>
     private static bool IsEtcd(NodeRecord n) => n.Name.StartsWith("etcd-", StringComparison.OrdinalIgnoreCase);
+    /// <summary>True when the node is an HAProxy LB node (<c>haproxy-*</c>).</summary>
     private static bool IsHaproxy(NodeRecord n) => n.Name.StartsWith("haproxy-", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Split the vms.yaml <c>postgres</c> cluster into its PG / etcd / HAProxy tiers; fails if no <c>pg-*</c> node exists.</summary>
     private Result<(IReadOnlyList<NodeRecord> Pg, IReadOnlyList<NodeRecord> Etcd, IReadOnlyList<NodeRecord> Haproxy)> Split()
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -108,6 +120,7 @@ public sealed class PatroniAdapter : IClusterAdapter
         return Result.Ok(((IReadOnlyList<NodeRecord>)pg, (IReadOnlyList<NodeRecord>)etcd, (IReadOnlyList<NodeRecord>)ha));
     }
 
+    /// <summary>The keepalived VRRP VIP fronting HAProxy → the current Patroni leader (writes always target this).</summary>
     private static string Vip()
     {
         // HAProxy VRRP VIP fronting the leader. vms.yaml cluster 'postgres'
@@ -117,6 +130,7 @@ public sealed class PatroniAdapter : IClusterAdapter
     }
 
     // === Vault password ====================================================
+    /// <summary>Lazily fetch + cache the <c>nexus-cluster-admin</c> password from Vault KV; fails fast with an actionable hint when no operator token is configured.</summary>
     private async Task<Result<string>> OperatorPwdAsync(CancellationToken ct)
     {
         if (!string.IsNullOrEmpty(_operatorPassword)) return Result.Ok(_operatorPassword);
@@ -158,6 +172,7 @@ public sealed class PatroniAdapter : IClusterAdapter
         return Result.Ok(exec.Value.Stdout.Trim());
     }
 
+    /// <summary><c>systemctl is-active</c> on a node → true only on an exact <c>active</c> prefix (avoids the <c>inactive</c> substring trap).</summary>
     private async Task<bool> IsActiveAsync(string nodeIp, string unit, CancellationToken ct)
     {
         var t = new SshTarget(nodeIp, 22, _sshUsername, _sshKeyPath);
@@ -168,6 +183,7 @@ public sealed class PatroniAdapter : IClusterAdapter
     }
 
     // === patronictl list --format json parsing =============================
+    /// <summary>One row of <c>patronictl list --format json</c> (a PG cluster member as Patroni sees it).</summary>
     private sealed record PgMember(string Cluster, string Member, string Host, string Role, string State, double? LagMb);
 
     /// <summary>Parse `patronictl list --format json` from the first reachable PG node.</summary>
@@ -201,18 +217,21 @@ public sealed class PatroniAdapter : IClusterAdapter
         return Result.Fail<(string, IReadOnlyList<PgMember>, string)>("could not read patronictl list from any pg node");
     }
 
+    /// <summary>Normalize a Patroni role (<c>Leader</c>/<c>Standby Leader</c>/<c>Replica</c>) to the adapter's <c>primary</c>/<c>replica</c> vocabulary.</summary>
     private static string RoleOf(PgMember m) =>
         m.Role.Equals("Leader", StringComparison.OrdinalIgnoreCase) ? "primary"
         : m.Role.Contains("Standby", StringComparison.OrdinalIgnoreCase) ? "replica"
         : m.Role.Equals("Replica", StringComparison.OrdinalIgnoreCase) ? "replica"
         : m.Role.ToLowerInvariant();
 
+    /// <summary>Map a Patroni member <c>State</c> to the adapter's health vocabulary (<c>alive</c>/<c>syncing</c>/<c>failed</c>).</summary>
     private static string StatusOf(PgMember m) =>
         m.State is "running" or "streaming" ? "alive"
         : m.State is "starting" or "stopping" or "creating replica" or "in archive recovery" ? "syncing"
         : "failed";
 
     // === GetStatusAsync ====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var split = Split();
@@ -259,6 +278,7 @@ public sealed class PatroniAdapter : IClusterAdapter
         return Result.Ok(s);
     }
 
+    /// <summary>True if the given HAProxy node currently owns the VRRP VIP (the <c>/</c> suffix anchors the CIDR match so <c>.6</c> can't match <c>.60</c>).</summary>
     private async Task<bool> HoldsVipAsync(string nodeIp, string vip, CancellationToken ct)
     {
         var t = new SshTarget(nodeIp, 22, _sshUsername, _sshKeyPath);
@@ -267,6 +287,7 @@ public sealed class PatroniAdapter : IClusterAdapter
     }
 
     // === HealthAsync =======================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var split = Split();
@@ -344,6 +365,7 @@ public sealed class PatroniAdapter : IClusterAdapter
     }
 
     // === TopologyAsync =====================================================
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -356,6 +378,7 @@ public sealed class PatroniAdapter : IClusterAdapter
     }
 
     // === FailoverAsync (patronictl switchover, RTO via VIP) ================
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -445,6 +468,7 @@ public sealed class PatroniAdapter : IClusterAdapter
     }
 
     // === ScaleOutAddAsync / RemoveAsync (Patroni replica join/leave) =======
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -493,6 +517,7 @@ public sealed class PatroniAdapter : IClusterAdapter
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.NodeName))
@@ -531,6 +556,7 @@ public sealed class PatroniAdapter : IClusterAdapter
     }
 
     // === BackupTakeAsync / RestoreAsync (pg_dump round-trip) ===============
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -582,6 +608,7 @@ public sealed class PatroniAdapter : IClusterAdapter
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.BackupId))
@@ -635,8 +662,10 @@ public sealed class PatroniAdapter : IClusterAdapter
     }
 
     // === RotateCertAsync (Vault re-issue per node, rolling reload/restart) ==
+    /// <summary>Per-tier cert facts: the TLS dir, file-owner group, systemd unit, whether a reload (vs restart) picks up the new leaf, and the allowed PKI domain.</summary>
     private sealed record CertRole(string TlsDir, string Group, string Svc, bool Reload, string Domain);
 
+    /// <summary>Resolve the <see cref="CertRole"/> for a node from its tier (all tiers share the single <c>patroni-server</c> PKI role + <c>patroni.nexus.lab</c> domain).</summary>
     private static CertRole RoleDescriptor(NodeRecord n) =>
         // All 8 nodes share the single PKI role 'patroni-server', whose
         // allowed_domains is 'patroni.nexus.lab' (the original etcd/haproxy certs
@@ -646,6 +675,7 @@ public sealed class PatroniAdapter : IClusterAdapter
         : IsHaproxy(n) ? new CertRole("/etc/nexus-haproxy/tls", "haproxy", "nexus-haproxy", Reload: true, "patroni.nexus.lab")
         : new CertRole(PgTlsDir, "postgres", "nexus-patroni", Reload: true, "patroni.nexus.lab");
 
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var split = Split();
@@ -732,6 +762,7 @@ public sealed class PatroniAdapter : IClusterAdapter
     }
 
     // === AclAsync ==========================================================
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -778,6 +809,7 @@ public sealed class PatroniAdapter : IClusterAdapter
         return Result.Fail<AclSnapshot>($"unknown ACL verb '{operation.Verb}'; expected list|describe|grant|revoke");
     }
 
+    /// <summary>Parse the pipe-delimited <c>rolname|FLAG,FLAG</c> rows from the <c>\du</c>-equivalent query into <see cref="AclUser"/>s.</summary>
     private static List<AclUser> ParseRoles(string stdout)
     {
         var users = new List<AclUser>();
@@ -794,6 +826,7 @@ public sealed class PatroniAdapter : IClusterAdapter
     }
 
     // === ApplyChaosAsync ===================================================
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         if (!KnownChaosScenarios.Contains(scenario.ScenarioType, StringComparer.OrdinalIgnoreCase))
@@ -859,6 +892,7 @@ public sealed class PatroniAdapter : IClusterAdapter
             Recovered: recovered));
     }
 
+    /// <summary>Base64-stream the embedded <c>nexus-chaos.sh</c> helper onto the victim node and mark it executable (idempotent).</summary>
     private async Task<Result<bool>> PushChaosHelperAsync(SshTarget target, CancellationToken cancellationToken)
     {
         var asm = typeof(RedisAdapter).Assembly;
@@ -877,6 +911,7 @@ public sealed class PatroniAdapter : IClusterAdapter
     }
 
     // === CanResizeVm =======================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null) return false;
@@ -885,6 +920,8 @@ public sealed class PatroniAdapter : IClusterAdapter
         return member.Role != "primary"; // refuse the current Patroni leader
     }
 
+    /// <summary>Keep only the last <paramref name="n"/> characters of a string (trims noisy stdout/stderr in error messages).</summary>
     private static string Tail(string s, int n) => string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= n ? s : s.Substring(s.Length - n));
+    /// <summary>UTF-8 base64-encode a string for safe transport through the remote shell (cert/key material carries newlines + PEM markers).</summary>
     private static string B64(string s) => Convert.ToBase64String(Encoding.UTF8.GetBytes(s));
 }

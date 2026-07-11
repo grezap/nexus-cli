@@ -1,10 +1,17 @@
 namespace Nexus.Cli.Adapters.Vhs;
 
+/// <summary>
+/// Locates the charmbracelet/vhs binary used by <c>demo record</c>. Prefers the
+/// <see cref="PathEnvVar"/> override, else walks <c>PATH</c> (adding the <c>.exe</c>
+/// suffix on Windows, since manual resolution does not benefit from PATHEXT).
+/// </summary>
 public static class VhsPaths
 {
+    /// <summary>Environment variable that, when set to an existing file, overrides the PATH walk.</summary>
     public const string PathEnvVar = "NEXUS_VHS_PATH";
     private const string ExeName = "vhs";
 
+    /// <summary>Resolves the vhs executable path, or <c>null</c> if it cannot be found.</summary>
     public static string? Resolve()
     {
         var env = Environment.GetEnvironmentVariable(PathEnvVar);
@@ -32,8 +39,10 @@ public static class VhsPaths
         return null;
     }
 
+    /// <summary>True when a vhs binary can be resolved on this host.</summary>
     public static bool IsAvailable() => Resolve() is not null;
 
+    /// <summary>Operator-facing install guidance shown when vhs is unavailable.</summary>
     public static string UnavailableMessage()
         => $"vhs not found on PATH. Install from https://github.com/charmbracelet/vhs " +
            $"(winget install charmbracelet.vhs / brew install vhs / scoop install vhs) " +

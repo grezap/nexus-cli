@@ -68,6 +68,11 @@ public sealed class PerconaAdapter : IClusterAdapter
     private string? _proxysqlPassword;
     private ClusterStatus? _lastStatus;
 
+    /// <summary>
+    /// Constructs the adapter over a vms.yaml catalog, an SSH transport, the lab
+    /// SSH identity, and an optional Vault client. <paramref name="vault"/> may be
+    /// null; the Vault-backed verbs then fail with a set-VAULT_* hint.
+    /// </summary>
     public PerconaAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath, INexusVaultClient? vault)
     {
         _catalog = catalog;
@@ -77,13 +82,20 @@ public sealed class PerconaAdapter : IClusterAdapter
         _vault = vault;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+
+    /// <inheritdoc />
     public string DisplayName => "Percona XtraDB Cluster";
 
     // === node helpers ======================================================
+    /// <summary>True when the node is a PXC (Galera) backend (<c>pxc*</c> name prefix).</summary>
     private static bool IsPxc(NodeRecord n) => n.Name.StartsWith("pxc", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True when the node is a ProxySQL front-end (<c>proxysql*</c> name prefix).</summary>
     private static bool IsProxysql(NodeRecord n) => n.Name.StartsWith("proxysql", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Partition the cluster's vms.yaml nodes into (PXC backends, ProxySQL front-ends); fails if no PXC node exists.</summary>
     private Result<(IReadOnlyList<NodeRecord> Pxc, IReadOnlyList<NodeRecord> Proxysql)> Split()
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -95,6 +107,7 @@ public sealed class PerconaAdapter : IClusterAdapter
     }
 
     // === Vault passwords ===================================================
+    /// <summary>Fetch (and memoize) the <c>nexus-cluster-admin</c> SQL password from Vault KV.</summary>
     private async Task<Result<string>> OperatorPwdAsync(CancellationToken ct)
     {
         if (!string.IsNullOrEmpty(_operatorPassword)) return Result.Ok(_operatorPassword);
@@ -108,6 +121,7 @@ public sealed class PerconaAdapter : IClusterAdapter
         return Result.Ok(_operatorPassword!);
     }
 
+    /// <summary>Fetch (and memoize) the ProxySQL <c>:6032</c> admin password from Vault KV.</summary>
     private async Task<Result<string>> ProxysqlPwdAsync(CancellationToken ct)
     {
         if (!string.IsNullOrEmpty(_proxysqlPassword)) return Result.Ok(_proxysqlPassword);
@@ -172,6 +186,7 @@ public sealed class PerconaAdapter : IClusterAdapter
     }
 
     // === GetStatusAsync ====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var split = Split();
@@ -241,6 +256,7 @@ public sealed class PerconaAdapter : IClusterAdapter
     }
 
     // === HealthAsync =======================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var split = Split();
@@ -279,6 +295,7 @@ public sealed class PerconaAdapter : IClusterAdapter
     }
 
     // === TopologyAsync =====================================================
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -291,6 +308,7 @@ public sealed class PerconaAdapter : IClusterAdapter
     }
 
     // === FailoverAsync (ProxySQL writer failover) ==========================
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -356,6 +374,7 @@ public sealed class PerconaAdapter : IClusterAdapter
     }
 
     // === ScaleOutAddAsync / RemoveAsync (Galera join/leave) ================
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -410,6 +429,7 @@ public sealed class PerconaAdapter : IClusterAdapter
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.NodeName))
@@ -444,6 +464,7 @@ public sealed class PerconaAdapter : IClusterAdapter
     }
 
     // === BackupTakeAsync / RestoreAsync (mysqldump round-trip) =============
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -492,6 +513,7 @@ public sealed class PerconaAdapter : IClusterAdapter
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.BackupId))
@@ -544,6 +566,7 @@ public sealed class PerconaAdapter : IClusterAdapter
     }
 
     // === RotateCertAsync (Vault re-issue per node, rolling restart) =========
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var split = Split();
@@ -620,6 +643,7 @@ public sealed class PerconaAdapter : IClusterAdapter
     }
 
     // === AclAsync ==========================================================
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -657,6 +681,7 @@ public sealed class PerconaAdapter : IClusterAdapter
         return Result.Fail<AclSnapshot>($"unknown ACL verb '{operation.Verb}'; expected list|describe|grant|revoke");
     }
 
+    /// <summary>Parse tab-separated <c>user\thost</c> rows from <c>mysql.user</c> into <see cref="AclUser"/> entries.</summary>
     private static List<AclUser> ParseUsers(string stdout)
     {
         var users = new List<AclUser>();
@@ -670,6 +695,7 @@ public sealed class PerconaAdapter : IClusterAdapter
     }
 
     // === ApplyChaosAsync ===================================================
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         if (!KnownChaosScenarios.Contains(scenario.ScenarioType, StringComparer.OrdinalIgnoreCase))
@@ -730,8 +756,12 @@ public sealed class PerconaAdapter : IClusterAdapter
             Recovered: recovered));
     }
 
+    /// <summary>Base64-stream the embedded <c>nexus-chaos.sh</c> helper onto the target and mark it executable.</summary>
     private async Task<Result<bool>> PushChaosHelperAsync(SshTarget target, CancellationToken cancellationToken)
     {
+        // Read the helper from the assembly's embedded resources (RedisAdapter's
+        // assembly is the anchor -- all adapters share it), normalize CRLF->LF so
+        // it runs under bash, then push it base64-encoded to survive the SSH shell.
         var asm = typeof(RedisAdapter).Assembly;
         var resName = asm.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith("nexus-chaos.sh", StringComparison.Ordinal));
         if (resName is null) return Result.Fail<bool>("embedded nexus-chaos.sh resource not found in the assembly");
@@ -748,6 +778,7 @@ public sealed class PerconaAdapter : IClusterAdapter
     }
 
     // === CanResizeVm =======================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null) return false;
@@ -756,6 +787,9 @@ public sealed class PerconaAdapter : IClusterAdapter
         return member.Role != "primary"; // refuse the current ProxySQL writer
     }
 
+    /// <summary>Return the last <paramref name="n"/> characters of <paramref name="s"/> (for compact error tails).</summary>
     private static string Tail(string s, int n) => string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= n ? s : s.Substring(s.Length - n));
+
+    /// <summary>UTF-8 base64-encode a string so PEM material survives the SSH shell verbatim.</summary>
     private static string B64(string s) => Convert.ToBase64String(Encoding.UTF8.GetBytes(s));
 }

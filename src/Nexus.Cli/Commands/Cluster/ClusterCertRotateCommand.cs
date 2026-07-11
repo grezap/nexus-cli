@@ -4,8 +4,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Cluster;
 
+/// <summary>Implements <c>cert-rotate &lt;cluster&gt;</c>: rotates the cluster's TLS/mTLS leaf certificates across every node. Stateful; guarded by <c>--yes</c>.</summary>
 public sealed class ClusterCertRotateCommand : AsyncCommand<ClusterCertRotateSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         ClusterCertRotateSettings settings,

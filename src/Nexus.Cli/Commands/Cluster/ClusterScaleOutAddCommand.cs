@@ -5,8 +5,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Cluster;
 
+/// <summary>Implements <c>scale-out add &lt;cluster&gt;</c>: horizontally grows a cluster by adding one or more nodes of a given role. Stateful; guarded by <c>--yes</c>.</summary>
 public sealed class ClusterScaleOutAddCommand : AsyncCommand<ClusterScaleOutAddSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         ClusterScaleOutAddSettings settings,

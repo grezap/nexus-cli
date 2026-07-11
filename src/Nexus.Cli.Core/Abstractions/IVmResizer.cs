@@ -18,6 +18,7 @@ namespace Nexus.Cli.Core.Abstractions;
 /// </summary>
 public interface IVmResizer
 {
+    /// <summary>Vertically resizes a VM's CPU/RAM/disk per <paramref name="request"/> (the <c>scale-up</c> verb).</summary>
     Task<Result<ScaleUpResult>> ScaleUpAsync(
         ScaleUpRequest request,
         CancellationToken cancellationToken);

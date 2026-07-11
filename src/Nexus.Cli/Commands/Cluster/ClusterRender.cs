@@ -11,6 +11,11 @@ namespace Nexus.Cli.Commands.Cluster;
 // Each EmitX{Human,Json} pair takes the SPI domain record + emits to stdout.
 // ===========================================================================
 
+/// <summary>
+/// Rendering helpers for the cluster verbs: each <c>EmitXHuman</c> writes a
+/// Spectre.Console table/rule view and each <c>EmitXJson</c> emits a
+/// source-generated (AOT-clean) DTO to stdout for the matching SPI record.
+/// </summary>
 internal static class ClusterRender
 {
     private static string HealthColor(string overall) => overall switch
@@ -31,6 +36,7 @@ internal static class ClusterRender
 
     // --- cluster-status ----------------------------------------------------
 
+    /// <summary>Renders a cluster-status snapshot as a human members table.</summary>
     public static void EmitClusterStatusHuman(ClusterStatus s)
     {
         var color = HealthColor(s.OverallHealth);
@@ -54,6 +60,7 @@ internal static class ClusterRender
             AnsiConsole.MarkupLineInterpolated($"  leader: [bold]{s.Leader}[/]");
     }
 
+    /// <summary>Emits a cluster-status snapshot as JSON.</summary>
     public static void EmitClusterStatusJson(ClusterStatus s)
     {
         var dto = new ClusterStatusOutputJson
@@ -78,6 +85,7 @@ internal static class ClusterRender
 
     // --- failover-test -----------------------------------------------------
 
+    /// <summary>Renders a failover-test result (RTO, primaries, phase timeline) for humans.</summary>
     public static void EmitFailoverHuman(FailoverResult r)
     {
         var color = r.NewPrimary is null ? "red" : "green";
@@ -100,6 +108,7 @@ internal static class ClusterRender
         AnsiConsole.Write(tl);
     }
 
+    /// <summary>Emits a failover-test result as JSON.</summary>
     public static void EmitFailoverJson(FailoverResult r)
     {
         var dto = new ClusterFailoverOutputJson
@@ -125,6 +134,7 @@ internal static class ClusterRender
 
     // --- scale-out ---------------------------------------------------------
 
+    /// <summary>Renders a scale-out (add/remove) result and affected nodes for humans.</summary>
     public static void EmitScaleOutHuman(ScaleOutResult r)
     {
         var color = r.Outcome == "ok" ? "green" : r.Outcome == "partial" ? "yellow" : "red";
@@ -142,6 +152,7 @@ internal static class ClusterRender
         }
     }
 
+    /// <summary>Emits a scale-out result as JSON.</summary>
     public static void EmitScaleOutJson(ScaleOutResult r)
     {
         var dto = new ClusterScaleOutOutputJson
@@ -158,6 +169,7 @@ internal static class ClusterRender
 
     // --- scale-up ----------------------------------------------------------
 
+    /// <summary>Renders a scale-up (VM resize) result with old/new resource values for humans.</summary>
     public static void EmitScaleUpHuman(ScaleUpResult r)
     {
         var color = r.Outcome == "ok" ? "green" : r.Outcome == "skipped" ? "yellow" : "red";
@@ -173,6 +185,7 @@ internal static class ClusterRender
         AnsiConsole.Write(t);
     }
 
+    /// <summary>Emits a scale-up result as JSON.</summary>
     public static void EmitScaleUpJson(ScaleUpResult r)
     {
         var dto = new ClusterScaleUpOutputJson
@@ -193,6 +206,7 @@ internal static class ClusterRender
 
     // --- health ------------------------------------------------------------
 
+    /// <summary>Renders a health report (per-probe status table) for humans.</summary>
     public static void EmitHealthHuman(HealthReport r)
     {
         var color = HealthColor(r.OverallHealth);
@@ -212,6 +226,7 @@ internal static class ClusterRender
         AnsiConsole.Write(t);
     }
 
+    /// <summary>Emits a health report as JSON.</summary>
     public static void EmitHealthJson(HealthReport r)
     {
         var dto = new ClusterHealthOutputJson
@@ -233,6 +248,7 @@ internal static class ClusterRender
 
     // --- topology ----------------------------------------------------------
 
+    /// <summary>Renders a topology snapshot (nodes and, if present, shards) for humans.</summary>
     public static void EmitTopologyHuman(TopologySnapshot r)
     {
         AnsiConsole.Write(new Rule(
@@ -251,6 +267,7 @@ internal static class ClusterRender
         }
     }
 
+    /// <summary>Emits a topology snapshot as JSON.</summary>
     public static void EmitTopologyJson(TopologySnapshot r)
     {
         var dto = new ClusterTopologyOutputJson
@@ -277,6 +294,7 @@ internal static class ClusterRender
 
     // --- backup take -------------------------------------------------------
 
+    /// <summary>Renders a backup-take result (id, size, destination) for humans.</summary>
     public static void EmitBackupHuman(BackupResult r)
     {
         AnsiConsole.Write(new Rule(
@@ -286,6 +304,7 @@ internal static class ClusterRender
         AnsiConsole.MarkupLineInterpolated($"  started     : {r.StartedAtUtc:u}");
     }
 
+    /// <summary>Emits a backup-take result as JSON.</summary>
     public static void EmitBackupJson(BackupResult r)
     {
         var dto = new ClusterBackupOutputJson
@@ -301,6 +320,7 @@ internal static class ClusterRender
 
     // --- backup restore ----------------------------------------------------
 
+    /// <summary>Renders a backup-restore result for humans.</summary>
     public static void EmitRestoreHuman(RestoreResult r)
     {
         AnsiConsole.Write(new Rule(
@@ -310,6 +330,7 @@ internal static class ClusterRender
         AnsiConsole.MarkupLineInterpolated($"  started        : {r.StartedAtUtc:u}");
     }
 
+    /// <summary>Emits a backup-restore result as JSON.</summary>
     public static void EmitRestoreJson(RestoreResult r)
     {
         var dto = new ClusterRestoreOutputJson
@@ -324,6 +345,7 @@ internal static class ClusterRender
 
     // --- cert-rotate -------------------------------------------------------
 
+    /// <summary>Renders a cert-rotation result (per-node old/new serials) for humans.</summary>
     public static void EmitCertRotationHuman(CertRotationResult r)
     {
         var any = r.RotatedNodes.Any(n => !string.IsNullOrEmpty(n.Error));
@@ -338,6 +360,7 @@ internal static class ClusterRender
         AnsiConsole.Write(t);
     }
 
+    /// <summary>Emits a cert-rotation result as JSON.</summary>
     public static void EmitCertRotationJson(CertRotationResult r)
     {
         var dto = new ClusterCertRotationOutputJson
@@ -357,6 +380,7 @@ internal static class ClusterRender
 
     // --- chaos -------------------------------------------------------------
 
+    /// <summary>Renders a chaos outcome (recovery verdict + observed impact) for humans.</summary>
     public static void EmitChaosHuman(ChaosOutcome r)
     {
         var color = r.Recovered ? "green" : "yellow";
@@ -370,6 +394,7 @@ internal static class ClusterRender
         AnsiConsole.Write(t);
     }
 
+    /// <summary>Emits a chaos outcome as JSON.</summary>
     public static void EmitChaosJson(ChaosOutcome r)
     {
         var dto = new ClusterChaosOutputJson
@@ -393,6 +418,7 @@ internal static class ClusterRender
 
     // --- acl ---------------------------------------------------------------
 
+    /// <summary>Renders an ACL snapshot (users, enabled flag, permissions) for humans.</summary>
     public static void EmitAclHuman(AclSnapshot r)
     {
         AnsiConsole.Write(new Rule(
@@ -409,6 +435,7 @@ internal static class ClusterRender
         AnsiConsole.Write(t);
     }
 
+    /// <summary>Emits an ACL snapshot as JSON.</summary>
     public static void EmitAclJson(AclSnapshot r)
     {
         var dto = new ClusterAclOutputJson
@@ -428,6 +455,7 @@ internal static class ClusterRender
 
     // --- recover-ha (v0.8.1) ----------------------------------------------
 
+    /// <summary>Renders a recover-ha result (transit/leader state + per-node seal status) for humans.</summary>
     public static void EmitRecoverHaHuman(RecoverHaResult r)
     {
         var color = r.AllUnsealed ? "green" : "yellow";
@@ -441,6 +469,7 @@ internal static class ClusterRender
         AnsiConsole.Write(t);
     }
 
+    /// <summary>Emits a recover-ha result as JSON.</summary>
     public static void EmitRecoverHaJson(RecoverHaResult r)
     {
         var dto = new RecoverHaOutputJson

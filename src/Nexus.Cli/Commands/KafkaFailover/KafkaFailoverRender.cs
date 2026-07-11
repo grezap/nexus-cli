@@ -5,8 +5,10 @@ using Spectre.Console;
 
 namespace Nexus.Cli.Commands.KafkaFailover;
 
+/// <summary>Rendering helpers for the kafka-failover verbs (human timeline table, JSON via source-gen DTO).</summary>
 internal static class KafkaFailoverRender
 {
+    /// <summary>Renders a kafka-failover report (source/target clusters, RTO, recovery, phase timeline) for humans.</summary>
     public static void EmitHuman(KafkaFailoverReport r)
     {
         var (label, color) = (r.TargetServedAfterFailure, r.Recovery) switch
@@ -43,6 +45,7 @@ internal static class KafkaFailoverRender
         AnsiConsole.Write(t);
     }
 
+    /// <summary>Emits a kafka-failover report as JSON.</summary>
     public static void EmitJson(KafkaFailoverReport r)
     {
         var dto = new KafkaFailoverJsonOutput

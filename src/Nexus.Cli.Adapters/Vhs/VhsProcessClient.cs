@@ -13,10 +13,13 @@ namespace Nexus.Cli.Adapters.Vhs;
 /// </summary>
 public sealed class VhsProcessClient : IVhsClient
 {
+    /// <inheritdoc />
     public bool IsAvailable => VhsPaths.IsAvailable();
 
+    /// <inheritdoc />
     public string UnavailableMessage() => VhsPaths.UnavailableMessage();
 
+    /// <inheritdoc />
     public async Task<Result<int>> RenderAsync(
         string tapeFilePath,
         CancellationToken cancellationToken)

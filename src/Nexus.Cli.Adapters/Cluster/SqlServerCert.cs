@@ -29,6 +29,8 @@ internal static class SqlServerCert
 {
     private const string PfxTempPwd = "nexustempbake";
 
+    /// <summary>A build-host-issued cert bundle ready to ship to a node: the base64 PFX
+    /// (leaf + key), the base64 intermediate + root CA PEMs, and the leaf serial.</summary>
     internal sealed record CertArtifacts(string PfxB64, string InterB64, string RootB64, string Serial);
 
     /// <summary>Read the serial of the cert currently in My matching a CN (the "old" serial).</summary>

@@ -98,6 +98,11 @@ public sealed class ClickHouseAdapter : IClusterAdapter
     private string? _operatorPassword;
     private ClusterStatus? _lastStatus;
 
+    /// <summary>
+    /// Wires the adapter to the vms.yaml catalog, the SSH transport, the login
+    /// identity for on-node shell-out, and the optional Vault client used to
+    /// fetch the <c>nexus-cluster-admin</c> operator password on demand.
+    /// </summary>
     public ClickHouseAdapter(IVmsCatalog catalog, ISshClient ssh, string sshUsername, string sshKeyPath, INexusVaultClient? vault)
     {
         _catalog = catalog;
@@ -107,14 +112,22 @@ public sealed class ClickHouseAdapter : IClusterAdapter
         _vault = vault;
     }
 
+    /// <inheritdoc />
     public string ClusterId => ClusterName;
+
+    /// <inheritdoc />
     public string DisplayName => DisplayNameConst;
 
     // === node helpers ======================================================
+    /// <summary>True for the dedicated Keeper coordination nodes (<c>ch-keeper*</c>).</summary>
     private static bool IsKeeper(NodeRecord n) => n.Name.StartsWith("ch-keeper", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True for the data-plane replica nodes (<c>ch-shard*</c>).</summary>
     private static bool IsData(NodeRecord n) => n.Name.StartsWith("ch-shard", StringComparison.OrdinalIgnoreCase);
 
     private static readonly Regex ShardRepRx = new(@"ch-shard(\d+)-rep(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>Extracts the (shard, replica) ordinals from a <c>ch-shardN-repM</c> node name; (0,0) if unmatched.</summary>
     private static (int Shard, int Replica) ShardRep(NodeRecord n)
     {
         var m = ShardRepRx.Match(n.Name);
@@ -123,6 +136,11 @@ public sealed class ClickHouseAdapter : IClusterAdapter
             : (0, 0);
     }
 
+    /// <summary>
+    /// Splits the vms.yaml cluster into ordered data + Keeper node lists.
+    /// Ordinal name sort keeps shard/replica iteration deterministic; fails if
+    /// no <c>ch-shard*</c> data node is present.
+    /// </summary>
     private Result<(IReadOnlyList<NodeRecord> Data, IReadOnlyList<NodeRecord> Keeper)> Split()
     {
         var cluster = _catalog.GetCluster(ClusterName);
@@ -133,9 +151,14 @@ public sealed class ClickHouseAdapter : IClusterAdapter
         return Result.Ok(((IReadOnlyList<NodeRecord>)data, (IReadOnlyList<NodeRecord>)keeper));
     }
 
+    /// <summary>Builds an SSH target (port 22, configured key/user) for the given node IP.</summary>
     private SshTarget T(string ip) => new(ip, 22, _sshUsername, _sshKeyPath);
 
     // === Vault password ====================================================
+    /// <summary>
+    /// Lazily resolves the <c>nexus-cluster-admin</c> password from Vault KV and
+    /// memoises it; fails with an actionable hint when no Vault client is wired.
+    /// </summary>
     private async Task<Result<string>> OperatorPwdAsync(CancellationToken ct)
     {
         if (!string.IsNullOrEmpty(_operatorPassword)) return Result.Ok(_operatorPassword);
@@ -164,6 +187,7 @@ public sealed class ClickHouseAdapter : IClusterAdapter
         return Result.Ok(exec.Value.Stdout.Trim());
     }
 
+    /// <summary>True if the given systemd unit reports <c>active</c> on the node.</summary>
     private async Task<bool> IsActiveAsync(string nodeIp, string unit, CancellationToken ct)
     {
         // `; true` so ssh always reports success; exact-prefix match dodges the
@@ -225,6 +249,7 @@ public sealed class ClickHouseAdapter : IClusterAdapter
     }
 
     // === GetStatusAsync ====================================================
+    /// <inheritdoc />
     public async Task<Result<ClusterStatus>> GetStatusAsync(CancellationToken cancellationToken)
     {
         var split = Split();
@@ -263,6 +288,7 @@ public sealed class ClickHouseAdapter : IClusterAdapter
     }
 
     // === HealthAsync =======================================================
+    /// <inheritdoc />
     public async Task<Result<HealthReport>> HealthAsync(CancellationToken cancellationToken)
     {
         var split = Split();
@@ -327,6 +353,7 @@ public sealed class ClickHouseAdapter : IClusterAdapter
     }
 
     // === TopologyAsync =====================================================
+    /// <inheritdoc />
     public async Task<Result<TopologySnapshot>> TopologyAsync(CancellationToken cancellationToken)
     {
         var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -363,6 +390,7 @@ public sealed class ClickHouseAdapter : IClusterAdapter
     }
 
     // === FailoverAsync (Keeper RAFT leader re-election, RTO measured) =======
+    /// <inheritdoc />
     public async Task<Result<FailoverResult>> FailoverAsync(FailoverRequest request, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -431,6 +459,7 @@ public sealed class ClickHouseAdapter : IClusterAdapter
     }
 
     // === ScaleOutAddAsync / RemoveAsync (data replica join/leave) ===========
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutAddAsync(ScaleOutAddRequest request, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -481,6 +510,7 @@ public sealed class ClickHouseAdapter : IClusterAdapter
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<ScaleOutResult>> ScaleOutRemoveAsync(ScaleOutRemoveRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.NodeName))
@@ -517,6 +547,7 @@ public sealed class ClickHouseAdapter : IClusterAdapter
     }
 
     // === BackupTakeAsync / RestoreAsync (native BACKUP/RESTORE round-trip) ==
+    /// <inheritdoc />
     public async Task<Result<BackupResult>> BackupTakeAsync(BackupRequest request, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -557,6 +588,7 @@ public sealed class ClickHouseAdapter : IClusterAdapter
             StartedAtUtc: startedAt));
     }
 
+    /// <inheritdoc />
     public async Task<Result<RestoreResult>> BackupRestoreAsync(RestoreRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.BackupId))
@@ -601,9 +633,12 @@ public sealed class ClickHouseAdapter : IClusterAdapter
 
     // === RotateCertAsync (Vault re-issue per node, rolling restart) =========
     private sealed record CertRole(string TlsDir, string Svc);
+
+    /// <summary>Maps a node to its TLS material directory + systemd unit (Keeper vs. server).</summary>
     private static CertRole RoleDescriptor(NodeRecord n) =>
         IsKeeper(n) ? new CertRole(KeeperTlsDir, KeeperSvc) : new CertRole(ServerTlsDir, ServerSvc);
 
+    /// <inheritdoc />
     public async Task<Result<CertRotationResult>> RotateCertAsync(CancellationToken cancellationToken)
     {
         var split = Split();
@@ -691,6 +726,7 @@ public sealed class ClickHouseAdapter : IClusterAdapter
     }
 
     // === AclAsync ==========================================================
+    /// <inheritdoc />
     public async Task<Result<AclSnapshot>> AclAsync(AclOperation operation, CancellationToken cancellationToken)
     {
         var split = Split();
@@ -738,11 +774,13 @@ public sealed class ClickHouseAdapter : IClusterAdapter
             }
             var g = await ChQueryAsync(coord, pwd.Value!, sql, cancellationToken).ConfigureAwait(false);
             if (g.IsFail) return Result.Fail<AclSnapshot>($"acl {verb} failed: {g.Error}");
+            // Re-describe the mutated user so the caller sees the post-change grant state.
             return await AclAsync(new AclOperation("describe", operation.User), cancellationToken).ConfigureAwait(false);
         }
         return Result.Fail<AclSnapshot>($"unknown ACL verb '{operation.Verb}'; expected list|describe|grant|revoke");
     }
 
+    /// <summary>Parses the <c>name|priv,priv</c> rows from the ACL list query into <see cref="AclUser"/> records.</summary>
     private static List<AclUser> ParseUsers(string stdout)
     {
         var users = new List<AclUser>();
@@ -759,6 +797,7 @@ public sealed class ClickHouseAdapter : IClusterAdapter
     }
 
     // === ApplyChaosAsync ===================================================
+    /// <inheritdoc />
     public async Task<Result<ChaosOutcome>> ApplyChaosAsync(ChaosScenario scenario, CancellationToken cancellationToken)
     {
         if (!KnownChaosScenarios.Contains(scenario.ScenarioType, StringComparer.OrdinalIgnoreCase))
@@ -820,6 +859,10 @@ public sealed class ClickHouseAdapter : IClusterAdapter
             Recovered: recovered));
     }
 
+    /// <summary>
+    /// Installs the embedded <c>nexus-chaos.sh</c> helper (shared across adapters,
+    /// hence loaded from <see cref="RedisAdapter"/>'s assembly) onto the target node.
+    /// </summary>
     private async Task<Result<bool>> PushChaosHelperAsync(SshTarget target, CancellationToken cancellationToken)
     {
         var asm = typeof(RedisAdapter).Assembly;
@@ -838,6 +881,7 @@ public sealed class ClickHouseAdapter : IClusterAdapter
     }
 
     // === CanResizeVm =======================================================
+    /// <inheritdoc />
     public bool CanResizeVm(string vmName, string role)
     {
         if (_lastStatus is null) return false;
@@ -849,6 +893,9 @@ public sealed class ClickHouseAdapter : IClusterAdapter
         return member.Role != "keeper-leader";
     }
 
+    /// <summary>Returns the last <paramref name="n"/> chars of <paramref name="s"/> (for truncating error tails).</summary>
     private static string Tail(string s, int n) => string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= n ? s : s.Substring(s.Length - n));
+
+    /// <summary>Base64-encodes a UTF-8 string for safe transport through the remote shell.</summary>
     private static string B64(string s) => Convert.ToBase64String(Encoding.UTF8.GetBytes(s));
 }

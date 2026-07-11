@@ -40,6 +40,17 @@ public sealed class KafkaFailoverService : IKafkaFailoverService
     private static readonly TimeSpan SourceRecoveryDeadline = TimeSpan.FromMinutes(4);   // cold VM boot + KRaft quorum re-form
     private static readonly TimeSpan SourceRecoveryPollInterval = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// Constructs the failover service over a VM catalog (to resolve the
+    /// east/west broker VMX paths + service IPs), a <see cref="IVmrunClient"/>
+    /// for HOST-LEVEL suspend/resume, and an <see cref="ISshClient"/> for the
+    /// on-node Kafka CLI probes.
+    /// </summary>
+    /// <param name="catalog">Source of the kafka-east/kafka-west broker records (from <c>vms.yaml</c>).</param>
+    /// <param name="ssh">Transport used to run the on-node Kafka CLI probes.</param>
+    /// <param name="vmrun">vmrun.exe wrapper used to suspend/resume source brokers on the host.</param>
+    /// <param name="sshUsername">SSH login (nexusadmin) for every broker connection.</param>
+    /// <param name="sshKeyPath">Path to the private key authenticating the SSH login.</param>
     public KafkaFailoverService(
         IVmsCatalog catalog,
         ISshClient ssh,
@@ -54,6 +65,7 @@ public sealed class KafkaFailoverService : IKafkaFailoverService
         _sshKeyPath = sshKeyPath;
     }
 
+    /// <inheritdoc />
     public async Task<Result<KafkaFailoverReport>> RunAsync(
         KafkaFailoverDirection direction,
         CancellationToken cancellationToken)
@@ -80,6 +92,8 @@ public sealed class KafkaFailoverService : IKafkaFailoverService
         if (targetCluster.IsFail)
             return Result.Fail<KafkaFailoverReport>(targetCluster.Error!);
 
+        // Name-prefix filter keeps only the cluster's own broker VMs (e.g.
+        // kafka-east-1/2/3), excluding any co-catalogued non-broker nodes.
         var sourceBrokers = sourceCluster.Value!.Nodes
             .Where(n => n.Name.StartsWith(sourceName, StringComparison.Ordinal))
             .ToList();

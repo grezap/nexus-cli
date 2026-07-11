@@ -4,8 +4,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.Cluster;
 
+/// <summary>Implements <c>health &lt;cluster&gt;</c>: runs the adapter's deep health probes and renders a per-node report.</summary>
 public sealed class ClusterHealthCommand : AsyncCommand<ClusterHealthSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         ClusterHealthSettings settings,

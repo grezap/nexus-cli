@@ -7,6 +7,8 @@
     <IsAotCompatible>false</IsAotCompatible>
     <IsTrimmable>false</IsTrimmable>
     <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <!-- Tests are self-documenting via descriptive method names; no XML-doc requirement. -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <Description>NetArchTest layer rules + JSON contract round-trips + env-resolver permutations.</Description>
   </PropertyGroup>
 

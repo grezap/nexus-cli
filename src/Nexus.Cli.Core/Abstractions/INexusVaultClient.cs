@@ -2,6 +2,11 @@ using Nexus.Cli.Core.Models;
 
 namespace Nexus.Cli.Core.Abstractions;
 
+/// <summary>
+/// Minimal Vault HTTP-API client: reads KV-v2 secret fields and issues PKI leaf
+/// certificates on behalf of nodes that cannot mint their own (e.g. the SQL Server
+/// cert-rotate verb).
+/// </summary>
 public interface INexusVaultClient
 {
     /// <summary>

@@ -5,8 +5,10 @@ using Spectre.Console.Cli;
 
 namespace Nexus.Cli.Commands.FailoverTest;
 
+/// <summary>Implements <c>failover-test swarm-manager</c>: vmrun-suspends the current Docker Swarm raft leader VM (a host-level outage), measures RTO, then vmrun-resumes. Destructive; guarded by <c>--yes</c>.</summary>
 public sealed class FailoverTestSwarmManagerCommand : AsyncCommand<FailoverTestSwarmManagerSettings>
 {
+    /// <inheritdoc />
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
         FailoverTestSwarmManagerSettings settings,

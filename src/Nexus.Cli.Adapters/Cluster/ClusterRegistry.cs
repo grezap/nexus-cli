@@ -5,7 +5,7 @@ namespace Nexus.Cli.Adapters.Cluster;
 
 /// <summary>
 /// Dictionary-backed implementation of <see cref="IClusterRegistry"/>.
-/// Populated at DI bootstrap (<see cref="Nexus.Cli.Infrastructure.ClusterBootstrapper"/>);
+/// Populated at DI bootstrap (<c>ClusterBootstrapper</c>, in Nexus.Cli);
 /// adapter lookups are O(1) by id (case-insensitive per the established
 /// lookup-by-name convention used by JsonDemoCatalog + VmsCatalog).
 /// </summary>
@@ -13,6 +13,12 @@ public sealed class ClusterRegistry : IClusterRegistry
 {
     private readonly Dictionary<string, IClusterAdapter> _adapters;
 
+    /// <summary>
+    /// Builds the registry from the DI-injected adapter set, indexing each by its
+    /// <see cref="IClusterAdapter.ClusterId"/> (case-insensitive). Throws on an empty
+    /// or duplicate id so mis-registration fails fast at bootstrap rather than at
+    /// first lookup.
+    /// </summary>
     public ClusterRegistry(IEnumerable<IClusterAdapter> adapters)
     {
         _adapters = new Dictionary<string, IClusterAdapter>(StringComparer.OrdinalIgnoreCase);
@@ -30,8 +36,10 @@ public sealed class ClusterRegistry : IClusterRegistry
         Ids = _adapters.Keys.OrderBy(k => k, StringComparer.Ordinal).ToList();
     }
 
+    /// <inheritdoc />
     public IReadOnlyList<string> Ids { get; }
 
+    /// <inheritdoc />
     public Result<IClusterAdapter> GetAdapter(string clusterId)
     {
         if (string.IsNullOrWhiteSpace(clusterId))

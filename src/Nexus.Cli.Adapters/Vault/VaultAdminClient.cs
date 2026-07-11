@@ -11,13 +11,32 @@ using Nexus.Cli.Core.Models;
 
 namespace Nexus.Cli.Adapters.Vault;
 
-// Per-node status (sealed/role/version) + a raft peer row.
+/// <summary>Point-in-time status of a single Vault node: seal state, version, and its HA/leader role.</summary>
+/// <param name="Address">Full node address (<c>https://ip:8200</c>).</param>
+/// <param name="Sealed">True when the node is sealed.</param>
+/// <param name="Initialized">True when the node has been initialized.</param>
+/// <param name="Type">Seal type (e.g. <c>transit</c>, <c>shamir</c>).</param>
+/// <param name="Version">Vault server version string.</param>
+/// <param name="ClusterName">Raft cluster name reported by the node.</param>
+/// <param name="HaEnabled">True when HA is enabled on the node.</param>
+/// <param name="IsActive">True when this node is the active (leader) node.</param>
+/// <param name="LeaderAddress">Address of the current active node as seen by this node.</param>
 public sealed record VaultNodeStatus(
     string Address, bool Sealed, bool Initialized, string Type, string Version,
     string ClusterName, bool HaEnabled, bool IsActive, string LeaderAddress);
 
+/// <summary>One row of the raft peer set (<c>/sys/storage/raft/configuration</c>).</summary>
+/// <param name="NodeId">Raft node id.</param>
+/// <param name="Address">Raft advertise address.</param>
+/// <param name="Leader">True when this peer is the raft leader.</param>
+/// <param name="Voter">True when this peer is a voting member.</param>
 public sealed record VaultRaftPeer(string NodeId, string Address, bool Leader, bool Voter);
 
+/// <summary>Parsed <c>meta.json</c> from a raft snapshot archive (the non-destructive inspect).</summary>
+/// <param name="Index">Raft log index captured by the snapshot.</param>
+/// <param name="Term">Raft term captured by the snapshot.</param>
+/// <param name="Version">Snapshot format version.</param>
+/// <param name="Size">Snapshot payload size in bytes.</param>
 public sealed record VaultSnapshotMeta(long Index, long Term, int Version, long Size);
 
 /// <summary>
@@ -41,6 +60,8 @@ public sealed class VaultAdminClient : IDisposable
     private readonly NexusHttpClientFactory _factory;
     private readonly HttpClient _http;
 
+    /// <summary>Creates a control-plane client for the Vault HA cluster described by <paramref name="ctx"/>, minting its own CA-pinned client (90s timeout to accommodate snapshot streams).</summary>
+    /// <param name="ctx">Resolved Vault address + token + CA-bundle path.</param>
     public VaultAdminClient(VaultContext ctx)
     {
         _ctx = ctx;
@@ -50,6 +71,7 @@ public sealed class VaultAdminClient : IDisposable
         _http.DefaultRequestHeaders.Add("X-Vault-Token", ctx.Token);
     }
 
+    /// <summary>The default (active-forwarded) Vault address this client targets for cluster-wide reads.</summary>
     public string DefaultAddress => _ctx.Address;
 
     /// <summary>Per-node status: seal-status (sealed/version) + leader (active/standby). addr = full https://ip:8200.</summary>
@@ -110,12 +132,15 @@ public sealed class VaultAdminClient : IDisposable
         catch (TaskCanceledException) { return Result.Fail<bool>("step-down timed out"); }
     }
 
+    /// <summary>Lists ACL policy names (<c>sys/policies/acl</c>).</summary>
     public Task<Result<List<string>>> ListPoliciesAsync(CancellationToken ct) =>
         ListKeysAsync($"{_ctx.Address}/v1/sys/policies/acl?list=true", ct);
 
+    /// <summary>Lists AppRole role names (<c>auth/approle/role</c>).</summary>
     public Task<Result<List<string>>> ListApprolesAsync(CancellationToken ct) =>
         ListKeysAsync($"{_ctx.Address}/v1/auth/approle/role?list=true", ct);
 
+    // Shared LIST helper: GETs a ?list=true endpoint and returns the data.keys array.
     private async Task<Result<List<string>>> ListKeysAsync(string url, CancellationToken ct)
     {
         try
@@ -127,6 +152,7 @@ public sealed class VaultAdminClient : IDisposable
         catch (TaskCanceledException) { return Result.Fail<List<string>>("list timed out"); }
     }
 
+    /// <summary>Reads the HCL body of ACL policy <paramref name="name"/> (empty string if it has none).</summary>
     public async Task<Result<string>> ReadPolicyAsync(string name, CancellationToken ct)
     {
         try
@@ -157,6 +183,7 @@ public sealed class VaultAdminClient : IDisposable
         catch (TaskCanceledException) { return Result.Fail<bool>("write policy timed out"); }
     }
 
+    /// <summary>Deletes ACL policy <paramref name="name"/> (acl revoke).</summary>
     public async Task<Result<bool>> DeletePolicyAsync(string name, CancellationToken ct)
     {
         try
@@ -227,8 +254,10 @@ public sealed class VaultAdminClient : IDisposable
         catch (IOException ex) { return Result.Fail<VaultSnapshotMeta>($"snapshot read error: {ex.Message}"); }
     }
 
+    // Cap an untrusted Vault error body before surfacing it in a failure message.
     private static string Trunc(string s, int n) => string.IsNullOrEmpty(s) ? "" : (s.Length <= n ? s : s[..n]);
 
+    /// <inheritdoc />
     public void Dispose()
     {
         _http.Dispose();
