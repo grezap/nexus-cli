@@ -7,7 +7,7 @@
 
   <ItemGroup Label="CLI framework">
     <PackageVersion Include="Spectre.Console.Cli" Version="0.55.0" />
-    <PackageVersion Include="Spectre.Console" Version="0.55.0" />
+    <PackageVersion Include="Spectre.Console" Version="0.55.2" />
   </ItemGroup>
 
   <ItemGroup Label="SSH (v0.3 failover-test) -- managed, AOT-compatible">
