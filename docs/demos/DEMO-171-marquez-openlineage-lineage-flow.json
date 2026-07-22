@@ -1,0 +1,82 @@
+{
+  "id": "DEMO-171-marquez-openlineage-lineage-flow",
+  "title": "Marquez / OpenLineage: emit a 2-job / 3-dataset run graph and read the downstream lineage back over TLS",
+  "description": "0.Q.1 (2026-07-21, ADR-0043) stands up the platform's OpenLineage backend -- a Marquez node (.127) fronted by nginx TLS (:443 -> api :5000, admin :5001, web :3000) at https://marquez.nexus.lab, backed by a dedicated PG17 HA pair (marquez-pg-1/2 @ .134/.135) with a keepalived VRRP VIP marquez-db.nexus.lab (.136) that Marquez reaches sslmode=verify-full. This demo does exactly what a real emitter (dataflow-studio, Prefect, Spark) does: the committed data-flow script POSTs OpenLineage run events describing a two-stage pipeline `raw.orders --[curate-orders]--> curated.orders --[load-dwh]--> dwh.fact_order`, each job as a START then a COMPLETE event (every POST returns 201), then reads the graph back through the REST read model -- the namespace, both jobs, all three datasets, and the lineage edges. This is the `if I change raw.orders, what downstream breaks?` view Marquez exists to answer, proven on live lab data rather than asserted. All probes are SSH-local-curl on the marquez node against its own CA (the Windows build host's schannel curl cannot validate the leaf by IP SAN). Namespace `nexus-lineage-demo`, kept distinct from the apply-time exit-gate namespace `nexus-lineage`. Cold-rebuild-proven 2026-07-21.",
+  "prerequisites": {
+    "vmsAlive": [
+      "marquez",
+      "marquez-pg-1",
+      "marquez-pg-2"
+    ],
+    "envVars": [
+      "NEXUS_SSH_KEY"
+    ],
+    "smokeGate": "smoke-0.Q.1.ps1 ALL PASSED (reachability; docker-compose services up; Marquez API/admin/web + nginx TLS front door; PG streaming replication `streaming`; VIP .136 bound on exactly one pg node + TLS through the VIP with sslmode=verify-full; leaf SANs carry the VIP; an OpenLineage run-event round-trip). marquez node compose up, marquez-pg pair replicating."
+  },
+  "steps": [
+    {
+      "command": "pwsh -File ../nexus-infra-platform-tools/scripts/marquez-lineage-demo.ps1",
+      "waitAfterSeconds": 5,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "curate-orders START:  201",
+        "load-dwh      DONE:   201",
+        "raw.orders",
+        "curated.orders",
+        "dwh.fact_order",
+        "Lineage graph verified"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "four OpenLineage POSTs each return 201 (curate-orders START+COMPLETE, load-dwh START+COMPLETE) into namespace `nexus-lineage-demo` at https://marquez.nexus.lab/api/v1/lineage; then the read-back lists 2 jobs (curate-orders, load-dwh) + 3 datasets (raw.orders, curated.orders, dwh.fact_order) + the downstream edges from raw.orders, and prints `Lineage graph verified`. This is a real emitter round-trip over the nginx TLS front door -- exactly what dataflow-studio/Prefect/Spark do."
+        },
+        {
+          "where": "ssh nexusadmin@192.168.70.127 'docker compose -f /etc/nexus-marquez/docker-compose.yml ps'",
+          "what": "the marquez api/web/nginx containers are Up while the events land -- the tier is serving OpenLineage ingest (:5000) behind the :443 terminator, not just running idle"
+        }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.127 \"curl -sS --cacert /etc/ssl/certs/platform-tools-ca.pem --resolve marquez.nexus.lab:443:192.168.70.127 https://marquez.nexus.lab/api/v1/lineage?nodeId=dataset:nexus-lineage-demo:raw.orders'&'depth=10 | grep -o '\\\"name\\\":\\\"[^\\\"]*\\\"' | sort -u\"",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "raw.orders",
+        "curate-orders",
+        "curated.orders",
+        "load-dwh",
+        "dwh.fact_order"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "an INDEPENDENT operator read of the read model: `GET /api/v1/lineage?nodeId=dataset:nexus-lineage-demo:raw.orders&depth=10` returns the full downstream graph -- raw.orders -> curate-orders -> curated.orders -> load-dwh -> dwh.fact_order. Traversing from the source dataset reaches the DWH fact through both jobs, proving the edges (not just the nodes) persisted."
+        },
+        {
+          "where": "ssh nexusadmin@192.168.70.127 'curl -sS --cacert /etc/ssl/certs/platform-tools-ca.pem --resolve marquez.nexus.lab:443:192.168.70.127 https://marquez.nexus.lab/api/v1/namespaces/nexus-lineage-demo/jobs'",
+          "what": "the read model lists both jobs (curate-orders, load-dwh) in namespace `nexus-lineage-demo`, each with its input/output dataset facets -- the job-centric view of the same graph"
+        }
+      ]
+    },
+    {
+      "command": "ssh -i $NEXUS_SSH_KEY nexusadmin@192.168.70.134 \"sudo -u postgres psql -d marquez -c 'SELECT state, sync_state FROM pg_stat_replication'\"",
+      "waitAfterSeconds": 3,
+      "expectedExitCode": 0,
+      "expectedOutputContains": [
+        "streaming"
+      ],
+      "observe": [
+        {
+          "where": "stdout",
+          "what": "marquez-pg-1 (.134, primary) shows its replica (.135) `streaming` -- the lineage graph the demo just emitted is committed to the dedicated PG17 pair and is being shipped to the standby. The backend HA is real, not decorative."
+        },
+        {
+          "where": "ssh nexusadmin@192.168.70.134 'ip -brief addr | grep 136'",
+          "what": "the keepalived VRRP VIP marquez-db.nexus.lab (.136) is held by exactly one pg node -- the address Marquez connects to sslmode=verify-full. A failover moves this VIP; the leaf SANs carry .136 so verify-full survives the move."
+        }
+      ]
+    }
+  ],
+  "whatProves": "The 0.Q.1 Marquez / OpenLineage tier receives lineage and answers downstream-impact queries end-to-end over its TLS front door: a real emitter round-trip POSTs a 2-job / 3-dataset run graph (`raw.orders --[curate-orders]--> curated.orders --[load-dwh]--> dwh.fact_order`, each START+COMPLETE, every POST 201) into namespace `nexus-lineage-demo` at https://marquez.nexus.lab/api/v1/lineage, and the read model returns the full graph -- both jobs, all three datasets, and the edges traversable from raw.orders via `/api/v1/lineage?nodeId=...&depth=10`. The lineage persists to a dedicated PG17 HA pair (marquez-pg-1/2) whose keepalived VIP marquez-db.nexus.lab (.136) Marquez reaches sslmode=verify-full, with streaming replication to the standby. Delivered as a cold-rebuild-proven tier (ADR-0043, 2026-07-21)."
+}
