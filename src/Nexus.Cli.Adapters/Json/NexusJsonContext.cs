@@ -924,6 +924,56 @@ public sealed class RecoverHaOutputJson
     public List<RecoverHaNodeJson> Nodes { get; set; } = new();
 }
 
+// === Deploy (deploy verb, v0.9) ============================================
+
+/// <summary>JSON shape of one deploy-plan step.</summary>
+public sealed class DeployStepJson
+{
+    /// <summary>Short stable step name.</summary>
+    public string Name { get; set; } = "";
+    /// <summary>The shell command the step runs.</summary>
+    public string Command { get; set; } = "";
+    /// <summary>One-line description of the step.</summary>
+    public string Description { get; set; } = "";
+}
+
+/// <summary>JSON shape of a project deploy plan (the dry-run output).</summary>
+public sealed class DeployPlanJson
+{
+    /// <summary>The project id.</summary>
+    public string Project { get; set; } = "";
+    /// <summary>The repo path the steps run from.</summary>
+    public string RepoPath { get; set; } = "";
+    /// <summary>The ordered deploy steps.</summary>
+    public List<DeployStepJson> Steps { get; set; } = [];
+}
+
+/// <summary>JSON shape of one executed deploy step.</summary>
+public sealed class DeployStepResultJson
+{
+    /// <summary>The step name.</summary>
+    public string Name { get; set; } = "";
+    /// <summary>Process exit code.</summary>
+    public int ExitCode { get; set; }
+    /// <summary>Step duration in seconds.</summary>
+    public double DurationSec { get; set; }
+    /// <summary>Trailing lines of combined output.</summary>
+    public string OutputTail { get; set; } = "";
+}
+
+/// <summary>JSON shape of a deploy execution report.</summary>
+public sealed class DeployReportJson
+{
+    /// <summary>The deployed project id.</summary>
+    public string Project { get; set; } = "";
+    /// <summary>Terminal status (Ok / StepFailed).</summary>
+    public string Status { get; set; } = "";
+    /// <summary>Per-step results in execution order.</summary>
+    public List<DeployStepResultJson> Steps { get; set; } = [];
+    /// <summary>Total wall-clock time in seconds.</summary>
+    public double TotalDurationSec { get; set; }
+}
+
 // === Source-gen context ====================================================
 
 /// <summary>
@@ -974,4 +1024,6 @@ public sealed class RecoverHaOutputJson
 [JsonSerializable(typeof(VaultPolicyReadResponse))]
 [JsonSerializable(typeof(VaultSnapshotMetaDto))]
 [JsonSerializable(typeof(RecoverHaOutputJson))]
+[JsonSerializable(typeof(DeployPlanJson))]
+[JsonSerializable(typeof(DeployReportJson))]
 public partial class NexusJsonContext : JsonSerializerContext;

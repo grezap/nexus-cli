@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Nexus.Cli.Commands;
 using Nexus.Cli.Commands.Cluster;
 using Nexus.Cli.Commands.Demo;
+using Nexus.Cli.Commands.Deploy;
 using Nexus.Cli.Commands.FailoverTest;
 using Nexus.Cli.Commands.Infrastructure;
 using Nexus.Cli.Commands.KafkaFailover;
@@ -45,7 +46,7 @@ internal static class Program
         app.Configure(config =>
         {
             config.SetApplicationName("nexus");
-            config.SetApplicationVersion("0.6.0");
+            config.SetApplicationVersion("0.9.0");
 
             config.AddCommand<ClusterStatusCommand>("cluster-status")
                 .WithDescription("Health of Consul + Nomad + Portainer in the live lab cluster.")
@@ -194,6 +195,12 @@ internal static class Program
                     .WithExample(["demo", "record", "DEMO-01-cluster-status"])
                     .WithExample(["demo", "record", "DEMO-01-cluster-status", "--output-dir", "./out"]);
             });
+
+            config.AddCommand<DeployCommand>("deploy")
+                .WithDescription("Plan (default) or execute an application project's end-to-end deploy (build → migrate → deploy).")
+                .WithExample(["deploy", "dataflow-studio"])
+                .WithExample(["deploy", "dataflow-studio", "--json"])
+                .WithExample(["deploy", "dataflow-studio", "--execute", "--yes"]);
         });
 
         return await app.RunAsync(args).ConfigureAwait(false);

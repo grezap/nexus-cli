@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-07-25
+
+### Added — `deploy` verb + the DataFlow Studio demo (Phase 1 application deploy)
+
+- **New top-level `deploy <project>` verb.** Plans an application project's end-to-end deploy — build the
+  container images, run the OltpDb / StarRocks / ClickHouse migrations, then deploy the Api tier to
+  Kubernetes — from the project's own committed `deploy/` recipes. Dry-run by default (prints the plan);
+  `--execute --yes` runs the steps (shelling out), stopping on the first failure. `--json` for the plan +
+  report. Currently knows `dataflow-studio`.
+  - Layered per the SPI conventions: `IDeployPlanner`/`IDeployRunner` + models in `Nexus.Cli.Core`, the
+    `DataflowStudioDeployPlanner` + `DeployRunner` in `Nexus.Cli.Adapters`, the command + bootstrapper in
+    the host. Source-gen JSON DTOs (`DeployPlanJson`/`DeployReportJson`) + `AotRoots` entries — AOT-clean.
+- **New demo `DEMO-DFS-01-dataflow-studio`** (`docs/demos/`): `nexus demo run DEMO-DFS-01-dataflow-studio`
+  plans the DataFlow Studio deploy (idempotent dry-run) + shows the JSON plan.
+- **`--version` now reports `0.9.0`** (was a stale `0.6.0`).
+- **Verified:** build 0/0; **336 tests** (+7 deploy planner/runner); `deploy dataflow-studio` renders the
+  five-step plan; `demo list` discovers the new spec; AOT **28.34 MB ≤ 30** (win-x64) — unchanged.
+
 ### Docs — solution-wide documentation pass + build-enforced XML docs
 
 - Applied the portfolio code-docs standing rule to the whole codebase: **XML `<summary>` docs on every

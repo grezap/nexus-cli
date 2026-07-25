@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using Nexus.Cli.Commands;
 using Nexus.Cli.Commands.Cluster;
 using Nexus.Cli.Commands.Demo;
+using Nexus.Cli.Commands.Deploy;
 using Nexus.Cli.Commands.FailoverTest;
 using Nexus.Cli.Commands.Infrastructure;
 using Nexus.Cli.Commands.KafkaFailover;
@@ -90,5 +91,9 @@ internal static class AotRoots
     // v0.8.1 recover-ha (IRecoverableCluster; foundation vault)
     [DynamicDependency(CommandRoots, typeof(RecoverHaCommand))]
     [DynamicDependency(SettingsRoots, typeof(ClusterRecoverHaSettings))]
+
+    // v0.9 deploy (application-project end-to-end deploy)
+    [DynamicDependency(CommandRoots, typeof(DeployCommand))]
+    [DynamicDependency(SettingsRoots, typeof(DeploySettings))]
     public static void KeepAlive() { }
 }

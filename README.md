@@ -4,7 +4,7 @@
 [![Native AOT](https://img.shields.io/badge/publish-Native%20AOT-blue)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Blueprint](https://img.shields.io/badge/blueprint-nexus--platform--plan-orange)](https://github.com/grezap/nexus-platform-plan)
-[![Phase](https://img.shields.io/badge/phase-v0.8.12%20%E2%9C%85%20infra--hardening%20COMPLETE%20(4%2F4)%3A%20mongo--sharded%20wire%20mTLS%20(0.N.1)-brightgreen)](./CHANGELOG.md)
+[![Phase](https://img.shields.io/badge/phase-v0.9.0%20%E2%9C%85%20Phase--1%3A%20deploy%20verb%20(DataFlow%20Studio)-brightgreen)](./CHANGELOG.md)
 
 The operator surface for the **NexusPlatform lab** (140 VMs built through Phase 0.P) — a single **≤30 MB** Native AOT binary that introspects, drives, and recovers the lab's Tier-1 (Vault, AD, gateway) and Tier-2 (Docker Swarm + Nomad + Consul + Portainer) control planes. No raw `terraform`, no `vault` CLI, no `docker stack` for daily ops; one tool, predictable verbs, panic buttons everywhere.
 
@@ -12,7 +12,12 @@ The operator surface for the **NexusPlatform lab** (140 VMs built through Phase 
 >
 > **New to the tool stack (Vault, Consul, Nomad, Portainer)?** See the [tool stack glossary](https://github.com/grezap/nexus-platform-plan/blob/main/docs/glossary.md) for plain-English definitions of each.
 >
-> **Current state (v0.8.12): pre-Phase-1 infra-hardening COMPLETE (4/4) — 0.N.1 mongo-sharded wire mTLS.**
+> **Current state (v0.9.0): Phase 1 — the `deploy` verb deploys the first application project.**
+> `nexus deploy dataflow-studio` plans (and, with `--execute --yes`, runs) DataFlow Studio's end-to-end
+> container deploy — build images → migrate (OltpDb / StarRocks / ClickHouse) → deploy the Api tier to
+> Kubernetes. All pre-Phase-1 infra + hardening (4/4) remain COMPLETE (history below).
+>
+> **v0.8.12 — pre-Phase-1 infra-hardening COMPLETE (4/4): 0.N.1 mongo-sharded wire mTLS.**
 > The 11-VM sharded MongoDB cluster went from keyFile-only to full **Vault-PKI wire mTLS** (`requireTLS` +
 > per-host leaf certs, parity with the 0.G.2 mongo RS), delivered as an **11-VM cold-rebuild that succeeded
 > in a single from-zero pass (92 resources, zero transients)**. `MongoShardedAdapter` now dials every

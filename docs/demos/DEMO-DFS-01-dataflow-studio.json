@@ -1,0 +1,31 @@
+{
+  "id": "DEMO-DFS-01-dataflow-studio",
+  "title": "DataFlow Studio — plan the end-to-end deploy",
+  "description": "Runs `nexus deploy dataflow-studio` to plan the application project's container deploy end-to-end (build images → run the OltpDb / StarRocks / ClickHouse migrations → deploy the Api tier to Kubernetes). The dry-run is idempotent and needs no lab. DataFlow Studio itself is the CDC → curated Avro → StarRocks DWH + ClickHouse telemetry pipeline that observes itself across three planes (Tempo traces, ClickHouse pipeline_events, Marquez lineage).",
+  "prerequisites": {
+    "vmsAlive": [],
+    "envVars": []
+  },
+  "steps": [
+    {
+      "command": "nexus deploy dataflow-studio --no-color",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["dataflow-studio", "build-images", "migrate-starrocks", "deploy-k8s"],
+      "observe": [
+        { "where": "stdout", "what": "a five-step deploy plan table (build-images → migrate-oltp → migrate-starrocks → migrate-clickhouse → deploy-k8s), each row showing the exact docker/kubectl command it would run" },
+        { "where": "the note under the header", "what": "'(dry-run — re-run with --execute --yes to apply)' — nothing is executed" }
+      ]
+    },
+    {
+      "command": "nexus deploy dataflow-studio --json",
+      "waitAfterSeconds": 1,
+      "expectedExitCode": 0,
+      "expectedOutputContains": ["project", "dataflow-studio", "build-images"],
+      "observe": [
+        { "where": "stdout", "what": "the same plan as machine-readable JSON (project, repoPath, steps[]) for piping into other tooling" }
+      ]
+    }
+  ],
+  "whatProves": "A single AOT binary plans an application project's full container deploy — build, migrate (three engines), and deploy to Kubernetes — from the project's own committed deploy/ recipes; the deployed project is a governed, self-observing CDC-to-DWH pipeline."
+}

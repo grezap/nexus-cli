@@ -179,6 +179,15 @@ the `vms.yaml` cluster name (`redis`, `mongo`, `percona`, `postgres`, `clickhous
   ADR-0009) **self-verifies** them via `expectedExitCode` + `expectedOutputContains`. Use it to
   replay any cluster's demos (`docs/demos/<id>.json`).
 
+### `deploy <project> [--path DIR] [--execute --yes] [--json]` — ORCHESTRATOR (v0.9.0)
+- Plans (and, with `--execute --yes`, runs) an **application project's** end-to-end deploy — build the
+  container images, run the migrations, deploy the Api tier — from the project's own committed `deploy/`
+  recipes. **Dry-run by default** (prints the five-step plan table); nothing runs without `--execute --yes`.
+  Currently knows `dataflow-studio` (Phase 1). Layered like the SPI verbs: `IDeployPlanner`/`IDeployRunner`
+  (Core) → `DataflowStudioDeployPlanner`/`DeployRunner` (Adapters) → command (host); source-gen JSON,
+  AOT-clean. Demo: `demo run DEMO-DFS-01-dataflow-studio`. This is the first Phase-1 (application) verb —
+  the CLI moves from operating the lab to deploying what runs on it.
+
 ---
 
 ## §2 Verb × cluster status
