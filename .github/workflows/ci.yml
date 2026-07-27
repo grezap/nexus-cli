@@ -14,7 +14,7 @@ permissions:
 # Node 20 is deprecated on GitHub Actions runners as of 2026-06-02; this
 # env opts in now. Becomes a no-op once Node 24 is the runner default --
 # can be removed then. (Most actions here are already Node-24-native --
-# checkout@v6, upload-artifact@v7 -- but actions/cache@v5 still ships
+# checkout@v6, upload-artifact@v7 -- but actions/cache@v6 still ships
 # Node 20; this env covers the gap until the next version lands.)
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -45,7 +45,7 @@ jobs:
           global-json-file: global.json
 
       - name: Cache nuget
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
