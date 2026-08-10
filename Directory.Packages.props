@@ -11,7 +11,7 @@
   </ItemGroup>
 
   <ItemGroup Label="SSH (v0.3 failover-test) -- managed, AOT-compatible">
-    <PackageVersion Include="SSH.NET" Version="2025.1.0" />
+    <PackageVersion Include="SSH.NET" Version="2026.0.0" />
   </ItemGroup>
 
   <ItemGroup Label="Microsoft.Extensions hosting + DI + logging + config (net10)">
