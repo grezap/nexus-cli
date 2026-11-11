@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed — clean rebuild: SSH.NET advisories (post-seal)
+
+- **`Directory.Packages.props`** — bump `SSH.NET` **2025.1.0 → 2026.0.0**. 2025.1.0 carries two high-severity
+  advisories published after the v0.9.0 seal — GHSA-q939-rpr3-3284 (CVE-2026-48798) and GHSA-mggc-4xg6-vcxf
+  (CVE-2026-85756), both fixed only in the 2026.x line — which NuGet audit + `TreatWarningsAsErrors` turn into
+  a fatal `restore`, so a clean clone no longer built. We use `SshClient`/`SftpClient` only (no `ScpClient`), so
+  the 2026 `ScpClient`-constructor breaking change does not apply. Verified: clean `dotnet restore` + Release
+  build 0/0.
+
 ## [0.9.0] — 2026-07-25
 
 ### Added — `deploy` verb + the DataFlow Studio demo (Phase 1 application deploy)

@@ -7,7 +7,7 @@ using Renci.SshNet;
 namespace Nexus.Cli.Adapters.Ssh;
 
 /// <summary>
-/// SSH.NET (Renci.SshNet 2025.1.0) implementation of <see cref="Nexus.Cli.Core.Abstractions.ISshClient"/>.
+/// SSH.NET (Renci.SshNet 2026.0.0) implementation of <see cref="Nexus.Cli.Core.Abstractions.ISshClient"/>.
 /// Stateless: each <see cref="ExecuteAsync"/> opens a fresh connection, runs
 /// one command, and disconnects. Acceptable for failover-test's ~5-10 command
 /// budget; if a future verb needs many commands per session, add an
@@ -43,7 +43,7 @@ public sealed class SshNetClient : Nexus.Cli.Core.Abstractions.ISshClient
             cmd.CommandTimeout = timeout;
 
             var sw = Stopwatch.StartNew();
-            // SSH.NET 2025.x: ExecuteAsync(ct) is void-returning; stdout is read
+            // SSH.NET 2026.x: ExecuteAsync(ct) is void-returning; stdout is read
             // back via cmd.Result, ExitStatus is nullable until the command
             // completes.
             await cmd.ExecuteAsync(cancellationToken).ConfigureAwait(false);
